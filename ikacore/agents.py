@@ -1,9 +1,10 @@
-from typing import Optional
+from typing import Callable, Optional
 from tools import SquidTools
 from stages import SquidStage
 from squidrag import SquidRAGSource
 from memory import SquidMemorySystem
-
+from abc import ABC, abstractmethod
+from collections.abc import Callable, Generator
 
 # primary features: 
 # - managed agents 
@@ -46,6 +47,8 @@ class ParaBaseAgent:
         RAGSource: Optional[list[type[SquidRAGSource]]] = None,  # list of RAG source types to use
         memory: bool = False,
         memory_finder: Optional["SquidMemorySystem"] = None,
+        final_answer_check: list[Callable] | None = None,
+
         ):
         self.name = name
         self.description = description
@@ -67,6 +70,9 @@ class ParaBaseAgent:
         self.RAGSource = RAGSource
         self.memory = memory
         self.memory_finder = memory_finder
+
+
+        self.final_answer_check = final_answer_check
         
         # 1 type or use stages
         if len(self.Stages) > 0:
