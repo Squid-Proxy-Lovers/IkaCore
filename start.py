@@ -1,5 +1,13 @@
-import json
+import os 
+from openai import OpenAI
+from anthropic import Anthropic
 import requests
+import json
+
+
+
+## DeepSeek
+
 
 url = "https://api.deepseek.com/chat/completions"
 
@@ -118,5 +126,51 @@ print(response.text)
 #     "completion_tokens_details": {
 #       "reasoning_tokens": 0
 #     }
+#   }
+# }
+
+
+
+
+
+
+
+
+
+## OpenAI
+
+client = OpenAI()
+
+response = client.responses.create(
+    model="gpt-5-nano",
+    input="Write a one-sentence bedtime story about a unicorn."
+)
+
+print(response.output_text)
+
+## Anthropic
+client = Anthropic()  # Reads ANTHROPIC_API_KEY from environment
+message = client.messages.create(
+    model="claude-sonnet-4-5",
+    max_tokens=1024, # this is the max output tokens
+    messages=[{"role": "user", "content": "Hello, Claude"}]
+)
+
+# response format: 
+# {
+#   "id": "msg_01XFDUDYJgAACzvnptvVoYEL",
+#   "type": "message",
+#   "role": "assistant",
+#   "content": [
+#     {
+#       "type": "text",
+#       "text": "Hello! How can I assist you today?"
+#     }
+#   ],
+#   "model": "claude-sonnet-4-5",
+#   "stop_reason": "end_turn",
+#   "usage": {
+#     "input_tokens": 12,
+#     "output_tokens": 8
 #   }
 # }
