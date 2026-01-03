@@ -1,6 +1,6 @@
 from abc import abstractmethod
 
-
+# TODO I am not even going to bother with any of this for a while
 class SquidRAGSource:
     def __init__(self, name:str, description:str, type:str):
         self.name = name

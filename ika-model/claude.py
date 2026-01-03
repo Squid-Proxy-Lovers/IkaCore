@@ -1,39 +1,32 @@
 import json
-from typing import Any, Dict, List
-
-try:
-    from .base import MESSAGE_HISTORY
-except ImportError:
-    import sys
-    from pathlib import Path
-    base_path = Path(__file__).parent / "base.py"
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("base", base_path)
-    base = importlib.util.module_from_spec(spec)
-    sys.modules["base"] = base
-    spec.loader.exec_module(base)
-    MESSAGE_HISTORY = base.MESSAGE_HISTORY
+from typing import Any, Dict, List, Optional
 
 
-def anthropic_fill_payload(model, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_history: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Creates Anthropic Claude API payload from model and messages."""
+    message_history = message_history or {
+        "system": {"message": "", "tokens": 0},
+        "first_input": {"message": "", "tokens": 0},
+        "summary": {"message": "", "tokens": 0},
+        "messages": {}
+    }
     api_messages = []
-    system_prompt = MESSAGE_HISTORY["system"]["message"] or model.system_prompt
+    system_prompt = message_history["system"]["message"] or model.system_prompt
     
-    if MESSAGE_HISTORY["first_input"]["message"]:
+    if message_history["first_input"]["message"]:
         api_messages.append({
             "role": "user",
-            "content": MESSAGE_HISTORY["first_input"]["message"]
+            "content": message_history["first_input"]["message"]
         })
     
-    if MESSAGE_HISTORY["summary"]["message"]:
+    if message_history["summary"]["message"]:
         api_messages.append({
             "role": "assistant",
-            "content": MESSAGE_HISTORY["summary"]["message"]
+            "content": message_history["summary"]["message"]
         })
     
-    for msg_id in sorted(MESSAGE_HISTORY["messages"].keys()):
-        msg = MESSAGE_HISTORY["messages"][msg_id]
+    for msg_id in sorted(message_history["messages"].keys()):
+        msg = message_history["messages"][msg_id]
         api_messages.append({
             "role": "assistant",
             "content": msg["message"]
@@ -74,18 +67,24 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]]) -> Dict[str, A
     if model.agent_tools:
         tools = []
         for tool in model.agent_tools:
+            arg_name = tool.args.type
+            json_type = "string"
+            if arg_name in ["stage_index"]:
+                json_type = "integer"
+            elif arg_name == "input":
+                json_type = "string"
             tools.append({
                 "name": tool.name,
                 "description": tool.description,
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        tool.args.type: {
-                            "type": tool.args.type,
+                        arg_name: {
+                            "type": json_type,
                             "description": tool.args.description
                         }
                     },
-                    "required": [tool.args.type] if tool.required else []
+                    "required": [arg_name] if tool.required else []
                 }
             })
         payload["tools"] = tools
