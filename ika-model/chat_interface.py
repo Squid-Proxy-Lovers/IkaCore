@@ -1,7 +1,9 @@
 import json
 import logging
+import time
 import uuid
-from typing import Any, Dict, Optional, List
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from typing import Any, Dict, Optional, List, Callable
 
 import httpx
 
@@ -14,7 +16,7 @@ from .google import gemini_fill_payload
 _LOG = logging.getLogger(__name__)
 
 
-def _get_low_end_model(provider: str) -> tuple[str, str]:
+def get_summary_model(provider: str) -> tuple[str, str]:
     models = {
         "deepseek": ("deepseek-v3.2", "https://api.deepseek.com/chat/completions"),
         "openai": ("gpt-4.1-mini-2025-04-14", "https://api.openai.com/v1/chat/completions"),
@@ -24,7 +26,7 @@ def _get_low_end_model(provider: str) -> tuple[str, str]:
     return models.get(provider.lower(), (None, None))
 
 
-def _get_provider_from_model_id(model_id: str) -> str:
+def get_provider(model_id: str) -> str:
     model_id_lower = model_id.lower()
     if "deepseek" in model_id_lower:
         return "deepseek"
@@ -37,7 +39,7 @@ def _get_provider_from_model_id(model_id: str) -> str:
     return "openai"
 
 
-def _create_summary_payload(provider: str, model_name: str, api_key: str, conversation_text: str) -> tuple[dict, dict]:
+def create_summary_payload(provider: str, model_name: str, api_key: str, conversation_text: str) -> tuple[dict, dict]:
     headers = {
         "Content-Type": "application/json",
     }
@@ -96,7 +98,7 @@ def _create_summary_payload(provider: str, model_name: str, api_key: str, conver
     return payload, headers
 
 
-def _parse_summary_response(provider: str, response: httpx.Response) -> str:
+def parse_summary_response(provider: str, response: httpx.Response) -> str:
     data = response.json()
     
     if provider == "deepseek" or provider == "openai":
@@ -111,7 +113,7 @@ def _parse_summary_response(provider: str, response: httpx.Response) -> str:
         raise ValueError(f"Unsupported provider: {provider}")
 
 
-def _init_message_history() -> dict:
+def init_message_history() -> dict:
     return {
         "system": {"message": "", "tokens": 0},
         "first_input": {"message": "", "tokens": 0},
@@ -120,7 +122,7 @@ def _init_message_history() -> dict:
     }
 
 
-def _get_total_tokens(message_history: dict) -> int:
+def get_total_tokens(message_history: dict) -> int:
     total = 0
     total += message_history["system"]["tokens"]
     total += message_history["first_input"]["tokens"]
@@ -129,7 +131,7 @@ def _get_total_tokens(message_history: dict) -> int:
     return total
 
 
-def _get_conversation_text(message_history: dict) -> str:
+def get_conversation_text(message_history: dict) -> str:
     parts = []
     if message_history["first_input"]["message"]:
         parts.append(message_history["first_input"]["message"])
@@ -144,22 +146,22 @@ def summarise_message_history(barebone_model: BareBoneModel, message_history: di
     if not message_history["first_input"]["message"] and not message_history["messages"]:
         return ""
     
-    conversation_text = _get_conversation_text(message_history)
+    conversation_text = get_conversation_text(message_history)
     
-    provider = _get_provider_from_model_id(barebone_model.model_id)
-    model_name, api_url = _get_low_end_model(provider)
+    provider = get_provider(barebone_model.model_id)
+    model_name, api_url = get_summary_model(provider)
     
     if not model_name or not api_url:
         _LOG.warning(f"Could not determine low-end model for provider: {provider}")
         return ""
     
-    payload, headers = _create_summary_payload(provider, model_name, barebone_model.api_key, conversation_text)
+    payload, headers = create_summary_payload(provider, model_name, barebone_model.api_key, conversation_text)
     
     try:
-        response = httpx.post(api_url, headers=headers, json=payload, timeout=30.0)
+        response = api_request_retry(api_url, headers, payload, max_retries=3, wait_seconds=10)
         response.raise_for_status()
         data = response.json()
-        summary = _parse_summary_response(provider, response)
+        summary = parse_summary_response(provider, response)
         
         summary_tokens = 0
         if provider == "deepseek" or provider == "openai":
@@ -185,7 +187,7 @@ def summarise_message_history(barebone_model: BareBoneModel, message_history: di
         _LOG.error(f"Unexpected error during summarization: {e}")
         return ""
 
-def _get_model_max_tokens(model_id: str) -> int:
+def get_max_tokens(model_id: str) -> int:
     model_id_lower = model_id.lower()
     
     for key, max_tokens in TOKENMAX_MAPPING.items():
@@ -204,11 +206,239 @@ def _get_model_max_tokens(model_id: str) -> int:
     return 128000
 
 
-def chat(barebone_model: BareBoneModel, messages: list[dict], message_history: Optional[dict] = None) -> Dict[str, Any]:
-    message_history = message_history or _init_message_history()
+def api_request_retry(
+    api_url: str,
+    headers: dict,
+    payload: dict,
+    max_retries: int = 3,
+    wait_seconds: int = 10,
+    timeout: float = 900.0
+) -> httpx.Response:
+    last_exception = None
     
-    token_count = _get_total_tokens(message_history)
-    max_tokens = _get_model_max_tokens(barebone_model.model_id)
+    for attempt in range(max_retries):
+        try:
+            response = httpx.post(api_url, headers=headers, json=payload, timeout=timeout)
+            
+            if response.status_code == 200:
+                return response
+            
+            if attempt < max_retries - 1:
+                _LOG.warning(
+                    f"API request failed with status {response.status_code} (attempt {attempt + 1}/{max_retries}). "
+                    f"Retrying in {wait_seconds} seconds..."
+                )
+                time.sleep(wait_seconds)
+                last_exception = Exception(f"API error {response.status_code}: {response.text[:500]}")
+            else:
+                try:
+                    error_data = response.json()
+                    error_text = json.dumps(error_data, indent=2)[:1000]
+                except:
+                    error_text = response.text[:500] if hasattr(response, 'text') else str(response.status_code)
+                raise Exception(f"API error {response.status_code} after {max_retries} attempts: {error_text}")
+        
+        except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+            timeout_msg = f"API request timed out after {timeout}s (attempt {attempt + 1}/{max_retries})"
+            _LOG.warning(timeout_msg)
+            if attempt < max_retries - 1:
+                time.sleep(wait_seconds)
+                last_exception = Exception(timeout_msg)
+            else:
+                raise Exception(timeout_msg)
+        
+        except httpx.HTTPError as e:
+            if attempt < max_retries - 1:
+                _LOG.warning(
+                    f"HTTP error during API request (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {wait_seconds} seconds..."
+                )
+                time.sleep(wait_seconds)
+                last_exception = e
+            else:
+                raise Exception(f"HTTP error after {max_retries} attempts: {str(e)}")
+        
+        except Exception as e:
+            if attempt < max_retries - 1:
+                _LOG.warning(
+                    f"Unexpected error during API request (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {wait_seconds} seconds..."
+                )
+                time.sleep(wait_seconds)
+                last_exception = e
+            else:
+                raise
+    
+    if last_exception:
+        raise last_exception
+    
+    raise Exception(f"API request failed after {max_retries} attempts")
+
+
+def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
+    usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "input_cached_tokens": 0}
+    raw_usage = data.get("usage", {}) or {}
+
+    if provider in ["deepseek", "openai"]:
+        usage["input_tokens"] = raw_usage.get("prompt_tokens", raw_usage.get("input_tokens", 0))
+        usage["output_tokens"] = raw_usage.get("completion_tokens", raw_usage.get("output_tokens", 0))
+        usage["total_tokens"] = raw_usage.get("total_tokens", usage["input_tokens"] + usage["output_tokens"])
+    elif provider == "anthropic":
+        usage["input_tokens"] = raw_usage.get("input_tokens", 0)
+        usage["output_tokens"] = raw_usage.get("output_tokens", 0)
+        usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
+    elif provider == "gemini":
+        meta = data.get("usageMetadata", {}) or raw_usage
+        total = meta.get("totalTokenCount", 0)
+        usage["total_tokens"] = total
+        usage["output_tokens"] = total
+    else:
+        usage["total_tokens"] = raw_usage.get("total_tokens", 0)
+
+    return usage
+
+
+def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Callable], timeout: float = 900.0) -> str:
+    if tool_name not in tool_executors:
+        error_msg = f"Tool '{tool_name}' not found in tool executors"
+        _LOG.error(error_msg)
+        return json.dumps({"error": error_msg})
+    
+    executor = tool_executors[tool_name]
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor_pool:
+            future = executor_pool.submit(executor, tool_args)
+            result = future.result(timeout=timeout)
+        
+        if isinstance(result, str):
+            return result
+        return json.dumps(result)
+    except FutureTimeoutError:
+        timeout_msg = f"Tool '{tool_name}' execution timed out after {timeout}s"
+        _LOG.warning(timeout_msg)
+        return json.dumps({"error": timeout_msg})
+    except Exception as e:
+        error_msg = f"Error executing tool '{tool_name}': {str(e)}"
+        _LOG.error(error_msg, exc_info=True)
+        return json.dumps({"error": error_msg})
+
+
+def format_openai_results(tool_calls: List[dict], tool_results: List[str]) -> List[dict]:
+    tool_messages = []
+    for i, tool_call in enumerate(tool_calls):
+        tool_call_id = tool_call.get("id", f"call_{i}")
+        tool_messages.append({
+            "role": "tool",
+            "content": tool_results[i] if i < len(tool_results) else json.dumps({"error": "No result"}),
+            "tool_call_id": tool_call_id
+        })
+    return tool_messages
+
+
+def format_anthropic_results(tool_calls: List[dict], tool_results: List[str]) -> List[dict]:
+    tool_messages = []
+    for i, tool_call in enumerate(tool_calls):
+        tool_call_id = tool_call.get("id", f"call_{i}")
+        tool_name = tool_call.get("name") or tool_call.get("function", {}).get("name", "")
+        tool_messages.append({
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_call_id,
+                    "content": tool_results[i] if i < len(tool_results) else json.dumps({"error": "No result"})
+                }
+            ]
+        })
+    return tool_messages
+
+
+def format_gemini_results(tool_calls: List[dict], tool_results: List[str]) -> List[dict]:
+    function_responses = []
+    for i, tool_call in enumerate(tool_calls):
+        tool_name = tool_call.get("name") or tool_call.get("function", {}).get("name", "")
+        try:
+            result_data = json.loads(tool_results[i]) if i < len(tool_results) else {"error": "No result"}
+        except:
+            result_data = {"result": tool_results[i]} if i < len(tool_results) else {"error": "No result"}
+        
+        function_responses.append({
+            "functionResponse": {
+                "name": tool_name,
+                "response": result_data
+            }
+        })
+    return function_responses
+
+
+def execute_tool_calls(
+    tool_calls: List[dict],
+    tool_executors: Dict[str, Callable],
+    provider: str,
+    timeout: float = 900.0
+) -> tuple[List[dict], List[str]]:
+    if not tool_calls or not tool_executors:
+        return [], []
+    
+    tool_results = []
+    formatted_messages = []
+    
+    for tool_call in tool_calls:
+        fn = tool_call.get("function", {})
+        tool_name = fn.get("name") or tool_call.get("name", "")
+        args_raw = fn.get("arguments") or "{}"
+        
+        try:
+            args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+        except Exception as e:
+            _LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
+            args = {}
+        
+        result = execute_tool(tool_name, args, tool_executors, timeout)
+        tool_results.append(result)
+    
+    if provider == "deepseek" or provider == "openai":
+        formatted_messages = format_openai_results(tool_calls, tool_results)
+    elif provider == "anthropic":
+        formatted_messages = format_anthropic_results(tool_calls, tool_results)
+    elif provider == "gemini":
+        formatted_messages = format_gemini_results(tool_calls, tool_results)
+    
+    return formatted_messages, tool_results
+
+
+def chat(
+    barebone_model: BareBoneModel,
+    messages: list[dict],
+    message_history: Optional[dict] = None,
+    tool_executors: Optional[Dict[str, Callable]] = None,
+    logger: Optional[Any] = None,
+    timeout: float = 900.0
+) -> Dict[str, Any]:
+    if not barebone_model:
+        raise ValueError("barebone_model is required")
+    if not messages:
+        raise ValueError("messages is required and cannot be empty")
+    if not isinstance(messages, list):
+        raise ValueError("messages must be a list")
+    
+    if not hasattr(barebone_model, 'model_id') or not barebone_model.model_id:
+        raise ValueError("barebone_model.model_id is required")
+    if not hasattr(barebone_model, 'api_key') or not barebone_model.api_key:
+        raise ValueError("barebone_model.api_key is required")
+    if not hasattr(barebone_model, 'api_url') or not barebone_model.api_url:
+        raise ValueError("barebone_model.api_url is required")
+    
+    if tool_executors is not None and not isinstance(tool_executors, dict):
+        raise ValueError("tool_executors must be a dictionary if provided")
+    
+    message_history = message_history or init_message_history()
+    tool_executors = tool_executors or {}
+    if logger:
+        logger.log_input(messages)
+    
+    token_count = get_total_tokens(message_history)
+    max_tokens = get_max_tokens(barebone_model.model_id)
     
     if token_count > max_tokens * 0.8:
         _LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
@@ -218,18 +448,19 @@ def chat(barebone_model: BareBoneModel, messages: list[dict], message_history: O
         message_history["first_input"]["message"] = messages[0].get("content", str(messages[0]))
         message_history["first_input"]["tokens"] = 0
     
-    response = None
+    provider = get_provider(barebone_model.model_id)
     headers = {}
-
+    api_url = barebone_model.api_url
+    
     if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
         headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
         payload = deepseek_fill_payload(barebone_model, messages, message_history)
-        response = httpx.post(barebone_model.api_url, headers=headers, json=payload)
+        response = api_request_retry(api_url, headers, payload, timeout=timeout)
 
     elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
         headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
         payload = openai_fill_payload(barebone_model, messages, message_history)
-        response = httpx.post(barebone_model.api_url, headers=headers, json=payload)
+        response = api_request_retry(api_url, headers, payload, timeout=timeout)
 
     elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
         headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
@@ -237,37 +468,141 @@ def chat(barebone_model: BareBoneModel, messages: list[dict], message_history: O
         if "max_tokens" not in payload or not payload["max_tokens"]:
             payload["max_tokens"] = 4096
         _LOG.debug(f"Anthropic payload: {json.dumps(payload, indent=2)[:500]}")
-        response = httpx.post(barebone_model.api_url, headers=headers, json=payload)
+        response = api_request_retry(api_url, headers, payload, timeout=timeout)
         
     elif "gemini" in barebone_model.model_id.lower():
         payload = gemini_fill_payload(barebone_model, messages, message_history)
         api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
         headers = {"Content-Type": "application/json"}
-        response = httpx.post(api_url, headers=headers, json=payload)
+        response = api_request_retry(api_url, headers, payload, timeout=timeout)
     else:
         raise ValueError(f"Model {barebone_model.model_id} not supported")
     
-    if response is not None:
-        if response.status_code != 200:
-            try:
-                error_data = response.json()
-                error_text = json.dumps(error_data, indent=2)[:1000]
-            except:
-                error_text = response.text[:500] if hasattr(response, 'text') else str(response.status_code)
-            _LOG.error(f"API error {response.status_code}: {error_text}")
-            raise Exception(f"API error {response.status_code}: {error_text}")
+    response.raise_for_status()
+    data = response.json()
+    
+    content = ""
+    tokens = 0
+    tool_calls: List[dict] = []
+    usage_info: Dict[str, Any] = {}
+
+    if "deepseek" in barebone_model.model_id.lower() or "gpt" in barebone_model.model_id.lower() or "openai" in barebone_model.model_id.lower():
+        message_obj = data["choices"][0]["message"]
+        content = message_obj.get("content") or ""
+        tool_calls = message_obj.get("tool_calls", []) or []
+        tokens = data.get("usage", {}).get("total_tokens", 0)
+    elif "claude" in barebone_model.model_id.lower():
+        content_blocks = data.get("content", [])
+        content = "".join([block["text"] for block in content_blocks if block.get("type") == "text"])
+        for block in content_blocks:
+            if block.get("type") == "tool_use":
+                tool_calls.append({
+                    "id": block.get("id"),
+                    "name": block.get("name"),
+                    "function": {
+                        "name": block.get("name"),
+                        "arguments": json.dumps(block.get("input", {}))
+                    }
+                })
+    elif "gemini" in barebone_model.model_id.lower():
+        candidate = data["candidates"][0]["content"]
+        parts = candidate.get("parts", [])
+        for part in parts:
+            if "text" in part:
+                content += part["text"]
+            elif "functionCall" in part:
+                func_call = part["functionCall"]
+                tool_calls.append({
+                    "name": func_call.get("name"),
+                    "function": {
+                        "name": func_call.get("name"),
+                        "arguments": json.dumps(func_call.get("args", {}))
+                    }
+                })
+    else:
+        content = ""
+        tokens = 0
+
+    usage_info = extract_usage(provider, data)
+    if usage_info:
+        tokens = usage_info.get("total_tokens", tokens)
+    
+    cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
+
+    if tool_calls and tool_executors:
+        tool_messages, tool_results = execute_tool_calls(tool_calls, tool_executors, provider, timeout)
+        if logger:
+            logger.log_tool_results(tool_calls, tool_results)
+        
+        if provider == "gemini":
+            assistant_msg = {"role": "model", "parts": [{"text": content}]}
+            for tool_call in tool_calls:
+                assistant_msg["parts"].append({
+                    "functionCall": {
+                        "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
+                        "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                    }
+                })
+            messages.append(assistant_msg)
+            function_responses = format_gemini_results(tool_calls, tool_results)
+            messages.append({"role": "user", "parts": function_responses})
+        elif provider == "deepseek" or provider == "openai":
+            assistant_msg = {"role": "assistant", "content": content}
+            if tool_calls:
+                assistant_msg["tool_calls"] = tool_calls
+            messages.append(assistant_msg)
+            messages.extend(tool_messages)
+        elif provider == "anthropic":
+            assistant_msg = {"role": "assistant", "content": []}
+            if content:
+                assistant_msg["content"].append({"type": "text", "text": content})
+            for tool_call in tool_calls:
+                assistant_msg["content"].append({
+                    "type": "tool_use",
+                    "id": tool_call.get("id"),
+                    "name": tool_call.get("name"),
+                    "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                })
+            messages.append(assistant_msg)
+            messages.extend(tool_messages)
+        
+        if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
+            headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+            payload = deepseek_fill_payload(barebone_model, messages, message_history)
+            response = _make_api_request_with_retry(barebone_model.api_url, headers, payload)
+
+        elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
+            headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+            payload = openai_fill_payload(barebone_model, messages, message_history)
+            response = _make_api_request_with_retry(barebone_model.api_url, headers, payload)
+
+        elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
+            headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
+            payload = anthropic_fill_payload(barebone_model, messages, message_history)
+            if "max_tokens" not in payload or not payload["max_tokens"]:
+                payload["max_tokens"] = 4096
+            response = _make_api_request_with_retry(barebone_model.api_url, headers, payload)
+            
+        elif "gemini" in barebone_model.model_id.lower():
+            payload = gemini_fill_payload(barebone_model, messages, message_history)
+            api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
+            headers = {"Content-Type": "application/json"}
+            response = api_request_retry(api_url, headers, payload, timeout=timeout)
+        
         response.raise_for_status()
         data = response.json()
         
         content = ""
         tokens = 0
-        tool_calls: List[dict] = []
+        tool_calls = []
+        usage_info = extract_usage(provider, data)
+        if usage_info:
+            tokens = usage_info.get("total_tokens", 0)
 
         if "deepseek" in barebone_model.model_id.lower() or "gpt" in barebone_model.model_id.lower() or "openai" in barebone_model.model_id.lower():
             message_obj = data["choices"][0]["message"]
             content = message_obj.get("content") or ""
             tool_calls = message_obj.get("tool_calls", []) or []
-            tokens = data.get("usage", {}).get("total_tokens", 0)
         elif "claude" in barebone_model.model_id.lower():
             content_blocks = data.get("content", [])
             content = "".join([block["text"] for block in content_blocks if block.get("type") == "text"])
@@ -281,8 +616,6 @@ def chat(barebone_model: BareBoneModel, messages: list[dict], message_history: O
                             "arguments": json.dumps(block.get("input", {}))
                         }
                     })
-            usage = data.get("usage", {})
-            tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
         elif "gemini" in barebone_model.model_id.lower():
             candidate = data["candidates"][0]["content"]
             parts = candidate.get("parts", [])
@@ -298,14 +631,11 @@ def chat(barebone_model: BareBoneModel, messages: list[dict], message_history: O
                             "arguments": json.dumps(func_call.get("args", {}))
                         }
                     })
-            usage = data.get("usageMetadata", {})
-            tokens = usage.get("totalTokenCount", 0)
-        else:
-            content = ""
-            tokens = 0
-        
-        msg_id = str(uuid.uuid4())
-        message_history["messages"][msg_id] = {"message": content, "tokens": tokens}
-        return {"content": content, "tool_calls": tool_calls, "message_history": message_history}
     
-    return {"content": "", "tool_calls": [], "message_history": message_history}
+        cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
+    if logger:
+        logger.log_output(content, usage_info, cost_info, message_history)
+
+    msg_id = str(uuid.uuid4())
+    message_history["messages"][msg_id] = {"message": content, "tokens": tokens}
+    return {"content": content, "tool_calls": tool_calls, "message_history": message_history, "usage": usage_info, "cost": cost_info}

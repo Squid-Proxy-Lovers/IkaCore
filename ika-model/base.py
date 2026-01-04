@@ -18,7 +18,7 @@ _gemini_fill_payload_loaded = False
 gemini_fill_payload = None
 
 
-def _load_gemini_fill_payload():
+def load_gemini_payload():
     """Lazy-loads gemini_fill_payload without relying on global message history."""
     global gemini_fill_payload, _gemini_fill_payload_loaded
     if _gemini_fill_payload_loaded:
