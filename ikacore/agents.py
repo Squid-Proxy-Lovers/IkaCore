@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Callable
+from typing import Optional, List, Dict, Callable, get_type_hints
 import json
 import sys
 from pathlib import Path
@@ -66,7 +66,7 @@ class ParaBaseAgent:
         RAGSource: Optional[List[type[SquidRAGSource]]] = None,
         memory: bool = False,
         memory_finder: Optional["Memory"] = None,
-        final_answer_check: Optional[List] = None,
+        final_answer_check: Optional[List[Callable]] = None,
         logging_level: int = 0,
         logging_file: str = "logs.txt",
     ):
@@ -131,6 +131,41 @@ class ParaBaseAgent:
         self.short_term_memory: Optional[STMemory] = None
         self.long_term_memory: Optional[LTMemory] = get_global_long_term_memory()
 
+        if final_answer_check is None:
+            final_answer_check = []
+        
+        for check in final_answer_check:
+            if not callable(check):
+                raise ValueError("final_answer_check must be a list of callable functions")
+            
+            func_name = getattr(check, '__name__', 'unknown')
+            
+            if not check.__doc__ or not check.__doc__.strip():
+                raise ValueError(f"final_answer_check function '{func_name}' must have a docstring explaining what it does")
+            
+            try:
+                hints = get_type_hints(check)
+                return_type = hints.get('return', None)
+                if return_type is not None:
+                    import typing
+                    if hasattr(typing, 'get_origin'):
+                        origin = typing.get_origin(return_type)
+                        args = typing.get_args(return_type) if origin else ()
+                        is_bool = (return_type is bool or (origin is not None and bool in args))
+                    else:
+                        is_bool = (return_type is bool)
+                    
+                    if not is_bool:
+                        raise ValueError(f"final_answer_check function '{func_name}' must have return type annotation of bool, got {return_type}")
+            except (TypeError, AttributeError):
+                pass
+            
+            result = check(self.message_history)
+            if not isinstance(result, bool):
+                raise ValueError(f"final_answer_check function '{func_name}' must return a boolean, got {type(result).__name__}")
+        
+        self.final_answer_checks = final_answer_check
+
         if self.Stages:
             if self.subagents or self.next_agent or self.feedback_agent:
                 raise ValueError("Subagents/next/feedback agents are not allowed when stages are defined.")
@@ -139,12 +174,10 @@ class ParaBaseAgent:
                 raise ValueError("Only one of subagents or next_agent may be set when no stages are provided.")
 
     def init_short_term_memory(self, embedder_config: dict) -> None:
-        """initialize short-term memory with given config."""
         self.short_term_memory = STMemory(embedder_config=embedder_config)
         self.short_term_memory.agent = self.name
     
     def _save_to_short_term(self, data: str, metadata: Optional[Dict] = None) -> str:
-        """internal: save to short-term memory."""
         if not self.short_term_memory:
             return "error: short-term memory not initialized"
         
@@ -454,6 +487,60 @@ class ParaBaseAgent:
             }
             return self.next_agent.execution()
 
-        final_message, _ = self.run_simple()
-        barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [])
-        return self._build_final_output(final_message, barebone_model)
+        if not self.final_answer_checks:
+            final_message, _ = self.run_simple()
+            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [])
+            return self._build_final_output(final_message, barebone_model)
+
+        original_maxsteps = self.maxsteps
+        original_prompt = self.prompt
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count <= max_retries:
+            final_message, _ = self.run_simple()
+            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [])
+            final_output = self._build_final_output(final_message, barebone_model)
+
+            failed_checks = []
+            for check in self.final_answer_checks:
+                if not check(final_output):
+                    func_name = getattr(check, '__name__', 'unknown')
+                    failed_checks.append(func_name)
+
+            if not failed_checks:
+                self.maxsteps = original_maxsteps
+                self.prompt = original_prompt
+                return final_output
+
+            if retry_count < max_retries:
+                self.maxsteps = original_maxsteps + 10
+                failed_check_names = ", ".join(failed_checks)
+                check_descriptions = []
+                for check in self.final_answer_checks:
+                    func_name = getattr(check, '__name__', 'unknown')
+                    if func_name in failed_checks:
+                        doc = getattr(check, '__doc__', 'No description available').strip()
+                        check_descriptions.append(f"{func_name}: {doc}")
+                
+                feedback_msg = (
+                    f"Your previous answer failed validation checks: {failed_check_names}.\n"
+                    f"Failed check requirements:\n" + "\n".join(f"- {desc}" for desc in check_descriptions) + "\n"
+                    f"Please review the requirements and provide an improved answer. "
+                    f"You have {self.maxsteps} steps to complete this task."
+                )
+                self.prompt = f"{original_prompt}\n\n[FEEDBACK]: {feedback_msg}"
+                self.message_history["first_input"]["message"] = self.prompt
+                self.message_history["messages"] = {}
+                retry_count += 1
+                _LOG.warning(f"Final answer validation failed for checks: {failed_check_names}. Retrying (attempt {retry_count}/{max_retries})...")
+            else:
+                self.maxsteps = original_maxsteps
+                self.prompt = original_prompt
+                failed_check_names = ", ".join(failed_checks)
+                _LOG.warning(f"Final answer validation failed after {max_retries} retries. Returning last output despite failed checks: {failed_check_names}")
+                return final_output
+
+        self.maxsteps = original_maxsteps
+        self.prompt = original_prompt
+        return final_output
