@@ -298,16 +298,68 @@ def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
     return usage
 
 
+def validate_tool_args(tool_name: str, tool_args: dict, max_size: int = 10000, max_keys: int = 50) -> dict:
+    if tool_args is None:
+        raise ValueError(f"Tool '{tool_name}' requires arguments, but got None")
+
+    if not isinstance(tool_args, dict):
+        raise ValueError(f"Tool '{tool_name}' arguments must be a JSON object, got {type(tool_args).__name__}")
+
+    if len(tool_args) > max_keys:
+        raise ValueError(f"Tool '{tool_name}' received too many arguments ({len(tool_args)} > {max_keys})")
+
+    try:
+        serialized = json.dumps(tool_args)
+    except TypeError as e:
+        raise ValueError(f"Tool '{tool_name}' arguments must be JSON-serializable: {e}")
+
+    if len(serialized) > max_size:
+        raise ValueError(f"Tool '{tool_name}' arguments payload too large ({len(serialized)} bytes > {max_size})")
+
+    coerced_args: dict = {}
+    for key, value in tool_args.items():
+        if isinstance(value, str):
+            v = value.strip()
+            if v.lower() in ("true", "false"):
+                coerced_args[key] = v.lower() == "true"
+                continue
+            try:
+                coerced_args[key] = int(v)
+                continue
+            except ValueError:
+                pass
+            try:
+                coerced_args[key] = float(v)
+                continue
+            except ValueError:
+                pass
+            coerced_args[key] = value
+        else:
+            coerced_args[key] = value
+
+    if "input" in coerced_args and (coerced_args["input"] is None or coerced_args["input"] == ""):
+        raise ValueError(f"Tool '{tool_name}' requires a non-empty 'input' argument")
+
+    return coerced_args
+
+
 def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Callable], timeout: float = 900.0) -> str:
     if tool_name not in tool_executors:
         error_msg = f"Tool '{tool_name}' not found in tool executors"
         _LOG.error(error_msg)
         return json.dumps({"error": error_msg})
     
+    try:
+        validated_args = validate_tool_args(tool_name, tool_args)
+    except ValueError as e:
+        error_msg = f"Validation error for tool '{tool_name}': {str(e)}"
+        _LOG.warning(error_msg)
+        return json.dumps({"error": error_msg})
+    
     executor = tool_executors[tool_name]
     try:
         with ThreadPoolExecutor(max_workers=1) as executor_pool:
-            future = executor_pool.submit(executor, tool_args)
+            future = executor_pool.submit(executor, validated_args)
             result = future.result(timeout=timeout)
         
         if isinstance(result, str):

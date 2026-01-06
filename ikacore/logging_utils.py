@@ -5,9 +5,24 @@ from typing import Any, Dict, List, Optional
 
 
 class ParaLogger:
-    def __init__(self, level: int = 0, log_file: str = "logs.txt"):
+    def __init__(self, level: int = 0, log_file: str = "logs.txt", use_colors: bool = True, show_usage_level0: bool = True):
         self.level = level
         self.log_file = Path(log_file)
+        self.use_colors = use_colors
+        self.show_usage_level0 = show_usage_level0
+
+    def _color(self, text: str, color: str) -> str:
+        if not self.use_colors or self.level != 0:
+            return text
+        colors = {
+            "cyan": "\033[96m",
+            "green": "\033[92m",
+            "yellow": "\033[93m",
+            "red": "\033[91m",
+            "magenta": "\033[95m",
+            "reset": "\033[0m",
+        }
+        return f"{colors.get(color,'')}{text}{colors['reset']}"
 
     def write_line(self, line: str) -> None:
         if self.level == 0:
@@ -63,6 +78,54 @@ class ParaLogger:
         self.write_line(line)
         if self.level == 2:
             self.log_json({"event": "summary", "summary": summary})
+
+    def log_action(self, action: str) -> None:
+        line = f"[ACTION] {action}"
+        self.write_line(line)
+        if self.level == 2:
+            self.log_json({"event": "action", "action": action})
+
+    def log_stage_start(self, stage_name: str, hitl: bool, remaining_steps: int, step_limit: int) -> None:
+        line = self._color(f"[STAGE START] {stage_name} hitl={hitl} remaining={remaining_steps} limit={step_limit}", "cyan")
+        self.write_line(line)
+        if self.level == 2:
+            self.log_json({"event": "stage_start", "stage": stage_name, "hitl": hitl, "remaining": remaining_steps, "limit": step_limit})
+
+    def log_stage_end(self, stage_name: str, used_steps: int) -> None:
+        line = self._color(f"[STAGE END] {stage_name} used_steps={used_steps}", "magenta")
+        self.write_line(line)
+        if self.level == 2:
+            self.log_json({"event": "stage_end", "stage": stage_name, "used_steps": used_steps})
+
+    def log_step(self, stage_name: str, step_idx: int, output: str, tool_calls: list, usage: dict, cost: dict, elapsed: float) -> None:
+        tool_names = [t.get("name") or t.get("function", {}).get("name", "") for t in (tool_calls or [])]
+        preview = (output or "")[:200].replace("\n", " ")
+        usage_part = f" tokens={usage} cost={cost}" if (self.level != 0 or self.show_usage_level0) else ""
+        line = self._color(f"[STEP] stage={stage_name} step={step_idx} tools={tool_names} elapsed={elapsed:.2f}s{usage_part} out='{preview}'", "green")
+        self.write_line(line)
+        if self.level == 2:
+            self.log_json({
+                "event": "step",
+                "stage": stage_name,
+                "step": step_idx,
+                "tools": tool_names,
+                "elapsed_sec": elapsed,
+                "usage": usage,
+                "cost": cost,
+                "output_preview": preview,
+            })
+
+    def log_hitl_prompt(self, stage_name: str) -> None:
+        line = self._color(f"[HITL] Stage '{stage_name}' awaiting user input. Type your message or 'stage_end' to finish.", "yellow")
+        self.write_line(line)
+        if self.level == 2:
+            self.log_json({"event": "hitl_prompt", "stage": stage_name})
+
+    def log_hitl_input(self, stage_name: str, user_text: str) -> None:
+        line = self._color(f"[HITL INPUT] stage={stage_name} user='{user_text}'", "yellow")
+        self.write_line(line)
+        if self.level == 2:
+            self.log_json({"event": "hitl_input", "stage": stage_name, "user_text": user_text})
 
     @staticmethod
     def get_model_cost(model_id: str) -> Optional[tuple[float, float, float]]:
