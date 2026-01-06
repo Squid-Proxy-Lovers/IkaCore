@@ -5,10 +5,15 @@ import re
 import time
 import uuid
 from abc import ABC, abstractmethod
+import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, List, Optional, Union
+
+# Import IkaMem for short-term and long-term memory
+sys.path.insert(0, str(Path(__file__).parent.parent / "IkaMem"))
+from IkaMem import STMemory, LTMemory, STMemItem, LTMemItem
 
 import httpx
 
@@ -16,6 +21,9 @@ _LOG = logging.getLogger(__name__)
 
 _gemini_fill_payload_loaded = False
 gemini_fill_payload = None
+
+# global long-term memory shared across all agents
+_GLOBAL_LONG_TERM_MEMORY: Optional[LTMemory] = None
 
 
 def load_gemini_payload():
@@ -88,6 +96,20 @@ class AgentTool:
             raise ValueError("Name must be a-z, A-Z, 0-9, or contain underscores and dashes, with a maximum length of 64.")
 
 
+def init_global_long_term_memory(embedder_config: dict) -> LTMemory:
+    """initialize global long-term memory (called once)."""
+    global _GLOBAL_LONG_TERM_MEMORY
+    if _GLOBAL_LONG_TERM_MEMORY is None:
+        _GLOBAL_LONG_TERM_MEMORY = LTMemory(embedder_config=embedder_config)
+        _LOG.info("global long-term memory initialized")
+    return _GLOBAL_LONG_TERM_MEMORY
+
+
+def get_global_long_term_memory() -> Optional[LTMemory]:
+    """get the global long-term memory instance."""
+    return _GLOBAL_LONG_TERM_MEMORY
+
+
 @dataclass
 class BareBoneModel:
     def __init__(
@@ -108,10 +130,6 @@ class BareBoneModel:
             raise ValueError("model_id is required for BareBoneModel")
         if not api_url:
             raise ValueError("api_url is required for BareBoneModel")
-
-
-
-
 
         self.model_id = model_id
         self.api_key = api_key

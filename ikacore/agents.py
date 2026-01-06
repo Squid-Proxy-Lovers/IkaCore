@@ -6,8 +6,12 @@ from pathlib import Path
 from tools import SquidTools
 from stages import SquidStage
 from squidrag import SquidRAGSource
-from memory import SquidMemorySystem
+from memory import Memory
 from logging_utils import ParaLogger
+
+# Import IkaMem for short-term and long-term memory
+sys.path.insert(0, str(Path(__file__).parent.parent / "IkaMem"))
+from IkaMem import STMemory, LTMemory, STMemItem, LTMemItem
 
 # Dynamically load ika-model base and chat_interface to avoid package issues
 import importlib.util
@@ -21,6 +25,8 @@ base_spec.loader.exec_module(base)
 BareBoneModel = base.BareBoneModel
 AgentTool = base.AgentTool
 ToolArgs = base.ToolArgs
+init_global_long_term_memory = base.init_global_long_term_memory
+get_global_long_term_memory = base.get_global_long_term_memory
 
 chat_interface_path = Path(__file__).parent.parent / "ika-model" / "chat_interface.py"
 chat_spec = importlib.util.spec_from_file_location("chat_interface", chat_interface_path)
@@ -59,7 +65,7 @@ class ParaBaseAgent:
         step_timeout: int = 900,
         RAGSource: Optional[List[type[SquidRAGSource]]] = None,
         memory: bool = False,
-        memory_finder: Optional["SquidMemorySystem"] = None,
+        memory_finder: Optional["Memory"] = None,
         final_answer_check: Optional[List] = None,
         logging_level: int = 0,
         logging_file: str = "logs.txt",
@@ -121,6 +127,9 @@ class ParaBaseAgent:
         self.logging_level = logging_level
         self.logging_file = logging_file
         self.logger = ParaLogger(logging_level, logging_file)
+        
+        self.short_term_memory: Optional[STMemory] = None
+        self.long_term_memory: Optional[LTMemory] = get_global_long_term_memory()
 
         if self.Stages:
             if self.subagents or self.next_agent or self.feedback_agent:
@@ -128,6 +137,11 @@ class ParaBaseAgent:
         else:
             if self.subagents and self.next_agent:
                 raise ValueError("Only one of subagents or next_agent may be set when no stages are provided.")
+
+    def init_short_term_memory(self, embedder_config: dict) -> None:
+        """initialize short-term memory with given config."""
+        self.short_term_memory = STMemory(embedder_config=embedder_config)
+        self.short_term_memory.agent = self.name
 
     @staticmethod
     def geturl(model_id: str) -> str:

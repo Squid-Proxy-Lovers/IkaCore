@@ -57,8 +57,8 @@ class LTMemory(Memory):
                 item_metadata = value.metadata.copy()
                 item_metadata.update({
                     "agent": value.agent,
-                    "expected_output": value.expected_output,
-                    "quality": value.quality,
+                    "expected_output": value.expected_output, # puts the expected output in the metadata
+                    "quality": value.quality, # i'm not sure how we can dynamically define quality if we don't want to force the user to handle this everytime.
                     "datetime": value.datetime,
                 })
                 if metadata:
