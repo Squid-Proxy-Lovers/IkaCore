@@ -36,6 +36,8 @@ class LTMemory(Memory):
 
         super().__init__(storage=storage)
         self._memory_provider = memory_provider
+        self._search_limit = 10  # default, can be overridden
+        self._filter_func = lambda results: results[:5]  # default: top 5 by relevance - since mem0 already orders results by relevance
 
 
     def save(
@@ -81,34 +83,39 @@ class LTMemory(Memory):
     def search(
         self,
         query: str,
-        limit: int = 3,
+        limit: Optional[int] = None,
         score_threshold: float = 0.6,
     ) -> list[Any]:
         """
-        search long-term memory for relevant entries.
+        search long-term memory and apply custom filter.
         
-        note:  default limit is 3 to keep context manageable as long-term
-        memory grows over time.
-
         Args:
             query: the search query
-            limit: maximum number of results to return
+            limit: maximum number of results (uses _search_limit if None)
             score_threshold: minimum similarity score for results
 
         Returns:
-            list of matching memory entries
+            list of filtered memory entries 
         """
         start_time = time.time()
         
         try:
-            results = self.storage.search(
-                query=query, limit=limit, score_threshold=score_threshold
+            search_limit = limit if limit is not None else self._search_limit
+            raw_results = self.storage.search(
+                query=query, limit=search_limit, score_threshold=score_threshold
             )
             
             elapsed = (time.time() - start_time) * 1000
-            print(f"[LTMemory] search completed in {elapsed:.2f}ms, found {len(results)} results")
+            print(f"[LTMemory] search completed in {elapsed:.2f}ms, found {len(raw_results)} results")
             
-            return results or []
+            # apply custom filter (must return list)
+            filtered = self._filter_func(raw_results)
+            
+            # enforce list return type
+            if not isinstance(filtered, list):
+                raise TypeError(f"filter function must return list, got {type(filtered).__name__}")
+            
+            return filtered
             
         except Exception as e:
             print(f"[LTMemory] search failed: {str(e)}")

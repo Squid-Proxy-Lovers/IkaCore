@@ -142,6 +142,38 @@ class ParaBaseAgent:
         """initialize short-term memory with given config."""
         self.short_term_memory = STMemory(embedder_config=embedder_config)
         self.short_term_memory.agent = self.name
+    
+    def _save_to_short_term(self, data: str, metadata: Optional[Dict] = None) -> str:
+        """internal: save to short-term memory."""
+        if not self.short_term_memory:
+            return "error: short-term memory not initialized"
+        
+        try:
+            item = STMemItem(data=data, agent=self.name, metadata=metadata or {})
+            self.short_term_memory.storage.save(item.data, item.metadata)
+            return f"saved to short-term memory: {data[:50]}..."
+        except Exception as e:
+            return f"error saving to short-term memory: {str(e)}"
+    
+    def _save_to_long_term(self, task: str, output: str) -> str:
+        """internal: save to long-term memory."""
+        if not self.long_term_memory:
+            return "error: long-term memory not initialized"
+        
+        try:
+            from datetime import datetime
+            item = LTMemItem(
+                agent=self.name,
+                task=task,
+                expected_output=output,
+                datetime=datetime.now().isoformat(),
+                quality=1.0,  # default quality
+                metadata={}
+            )
+            self.long_term_memory.save(item)
+            return f"saved to long-term memory - task: {task[:30]}..."
+        except Exception as e:
+            return f"error saving to long-term memory: {str(e)}"
 
     @staticmethod
     def geturl(model_id: str) -> str:
@@ -212,6 +244,7 @@ class ParaBaseAgent:
     def build_stage(self, stage: SquidStage) -> List[AgentTool]:
         stage_tools = self._convert_tools_to_agent_tools(stage.tools)
         subagent_tools = self._convert_subagents_to_tools(getattr(stage, "subagents", None))
+        
         agent_end_tool = AgentTool(
             id="agent_end",
             name="agent_end",
@@ -219,7 +252,29 @@ class ParaBaseAgent:
             args=ToolArgs(type="input", description="Final response content."),
             required=False,
         )
-        return stage_tools + subagent_tools + [agent_end_tool]
+        
+        memory_tools = []
+        if self.short_term_memory:
+            short_save_tool = AgentTool(
+                id="short_term_save",
+                name="short_term_save",
+                description="Save data to short-term memory for this agent. Use for temporary context or insights.",
+                args=ToolArgs(type="input", description="Data or insight to save temporarily."),
+                required=False,
+            )
+            memory_tools.append(short_save_tool)
+        
+        if self.long_term_memory:
+            long_save_tool = AgentTool(
+                id="long_term_save",
+                name="long_term_save",
+                description="Save task and output to long-term memory. Format: task|output",
+                args=ToolArgs(type="input", description="Data or insight to save forever.", data="task|output"),
+                required=False,
+            )
+            memory_tools.append(long_save_tool)
+        
+        return stage_tools + subagent_tools + memory_tools + [agent_end_tool]
 
     def get_barebone(self, system_prompt: str, agent_tools: List[AgentTool]) -> BareBoneModel:
         model = BareBoneModel(
@@ -248,6 +303,23 @@ class ParaBaseAgent:
                 args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
             except Exception:
                 args = {}
+
+            # handle memory tools
+            if name == "short_term_save":
+                data = args.get("input") or args.get("data") or ""
+                result = self._save_to_short_term(data)
+                self.logger.log_action(f"short_term_save: {result}")
+                continue
+            
+            if name == "long_term_save":
+                data = args.get("data") or ""
+                if "|" in data:
+                    parts = data.split("|", 1)
+                    task = parts[0].strip()
+                    output = parts[1].strip()
+                    result = self._save_to_long_term(task, output)
+                    self.logger.log_action(f"long_term_save: {result}")
+                continue
 
             if name == "agent_end":
                 agent_end_called = True

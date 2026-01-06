@@ -75,8 +75,12 @@ TOKENMAX_MAPPING = {
 
 @dataclass
 class ToolArgs:
+    agent: Optional[str] = None
     type: str
     description: str
+    data: Optional[Any] = None
+    metadata: Optional[dict] = None
+    
     # we are going to assume that all args are required
 
 
@@ -96,11 +100,27 @@ class AgentTool:
             raise ValueError("Name must be a-z, A-Z, 0-9, or contain underscores and dashes, with a maximum length of 64.")
 
 
-def init_global_long_term_memory(embedder_config: dict) -> LTMemory:
-    """initialize global long-term memory (called once)."""
+def init_global_long_term_memory(
+    embedder_config: dict, 
+    search_limit: int = 10,
+    filter_func: Optional[Any] = None
+) -> LTMemory:
+    """
+    initialize global long-term memory (called once).
+    
+    Args:
+        embedder_config: mem0 config
+        search_limit: default number of results to return when searching
+        filter_func: optional custom filter function(results: list) -> list
+                     receives: list of search results sorted by relevance
+                     must return: filtered list of results
+                     default (no user filter): returns top 5 most relevant results
+    """
     global _GLOBAL_LONG_TERM_MEMORY
     if _GLOBAL_LONG_TERM_MEMORY is None:
         _GLOBAL_LONG_TERM_MEMORY = LTMemory(embedder_config=embedder_config)
+        _GLOBAL_LONG_TERM_MEMORY._search_limit = search_limit
+        _GLOBAL_LONG_TERM_MEMORY._filter_func = filter_func or (lambda results: results[:5])
         _LOG.info("global long-term memory initialized")
     return _GLOBAL_LONG_TERM_MEMORY
 
