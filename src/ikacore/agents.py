@@ -239,6 +239,28 @@ class ParaBaseAgent:
             return None
 
     # --------------------
+    # Workflow integration
+    # --------------------
+    def inject_workflow_context(self, context: str) -> None:
+        if not context:
+            return
+        current_first_input = self.message_history.get("first_input", {}).get("message", "")
+        if current_first_input:
+            combined = f"{context}\n\n{current_first_input}"
+        else:
+            combined = context
+        self.message_history["first_input"]["message"] = combined
+
+    def apply_workflow_stage_wiring(self, stage_wiring: Dict[int, Dict[str, List["ParaBaseAgent"]]]) -> None:
+        if not stage_wiring or not self.Stages:
+            return
+        for stage_idx, wiring in stage_wiring.items():
+            if 0 <= stage_idx < len(self.Stages):
+                stage = self.Stages[stage_idx]
+                if "subagents" in wiring:
+                    stage.subagents = wiring["subagents"]
+
+    # --------------------
     # Checkpoint helpers
     # --------------------
     def _save_stage_checkpoint(self, stage_index: int, remaining_steps: int, last_content: str) -> Optional[str]:
@@ -440,11 +462,47 @@ class ParaBaseAgent:
             )
         return converted
 
-    def build_tool_executors(self, tools: List[SquidTools], memory_access: Optional[Dict[str, bool]] = None, long_term_filter: Optional[Callable] = None) -> Dict[str, Callable]:
+    def _build_subagent_executor(self, subagent: "ParaBaseAgent") -> Callable:
+        def subagent_executor(args: dict) -> str:
+            task_input = args.get("input") or args.get("task") or ""
+            if not task_input:
+                return json.dumps({"error": "No input provided for subagent"})
+            
+            try:
+                if self.logger:
+                    self.logger.log_action(f"Calling subagent: {subagent.name}")
+                
+                subagent.message_history["first_input"]["message"] = task_input
+                subagent.prompt = task_input
+                
+                result = subagent.execution()
+                final_output = result.get("final_message", "")
+                summary = result.get("summary", final_output)
+                
+                if self.logger:
+                    self.logger.log_action(f"Subagent {subagent.name} completed")
+                
+                return summary or final_output
+            except Exception as e:
+                error_msg = f"Error executing subagent '{subagent.name}': {str(e)}"
+                if self.logger:
+                    self.logger.log_action(error_msg)
+                return json.dumps({"error": error_msg})
+        
+        return subagent_executor
+
+    def build_tool_executors(self, tools: List[SquidTools], memory_access: Optional[Dict[str, bool]] = None, long_term_filter: Optional[Callable] = None, subagents: Optional[List["ParaBaseAgent"]] = None) -> Dict[str, Callable]:
         tool_executors = {}
         for tool in tools:
             if hasattr(tool, 'execute_function') and tool.execute_function:
                 tool_executors[tool.name] = tool.execute_function
+        
+        # Add subagent executors
+        source_subagents = subagents if subagents is not None else self.subagents
+        if source_subagents:
+            for subagent in source_subagents:
+                subagent_name = getattr(subagent, "name", "subagent")
+                tool_executors[subagent_name] = self._build_subagent_executor(subagent)
         
         # Add memory tool executors based on access control
         effective_access = memory_access or self.memory_access
@@ -641,7 +699,13 @@ class ParaBaseAgent:
         if getattr(stage, "hitl", False):
             step_limit = max(1, remaining_steps)
 
-        tool_executors = self.build_tool_executors(stage.tools, memory_access=stage_memory_access, long_term_filter=getattr(stage, "long_term_filter", None))
+        stage_memory_access = getattr(stage, "memory_access", None) or self.memory_access
+        tool_executors = self.build_tool_executors(
+            stage.tools, 
+            memory_access=stage_memory_access, 
+            long_term_filter=getattr(stage, "long_term_filter", None),
+            subagents=getattr(stage, "subagents", None)
+        )
         
         if self.logger:
             self.logger.log_stage_start(stage.name, getattr(stage, "hitl", False), remaining_steps, step_limit)
@@ -787,7 +851,7 @@ class ParaBaseAgent:
         messages: List[dict] = [{"role": "user", "content": self.prompt}]
         last_content = ""
 
-        tool_executors = self.build_tool_executors(self.tools, memory_access=self.memory_access)
+        tool_executors = self.build_tool_executors(self.tools, memory_access=self.memory_access, subagents=self.subagents)
         
         for _ in range(self.maxsteps):
             self._enforce_rate_limit()
