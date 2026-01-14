@@ -127,7 +127,6 @@ class IkaBaseAgent:
             "long_term_search": False,
         }
 
-
         self.memory_access = {**default_memory_access, **(memory_access or {})}
         
         self.final_answer_check = final_answer_check
@@ -621,7 +620,7 @@ class IkaBaseAgent:
             )
             stage_tools.append(agent_end_tool)
             stage_tools.pop(stage_tools.index("stage_end")) # remove stage end tool since we are at the last stage and we should exit the agent loop with a final answer
-        
+            # TODO: does this work even though it's comparing a string to an obj? I think this will break
         # Get stage-specific memory access (inherits from agent if not overridden)
         stage_memory_access = getattr(stage, "memory_access", None) or self.memory_access
         
@@ -1069,7 +1068,9 @@ class IkaBaseAgent:
                 self.message_history["first_input"]["message"] = self.prompt
                 self.message_history["messages"] = {}
                 retry_count += 1
-                _LOG.warning(f"Final answer validation failed for checks: {failed_check_names}. Retrying (attempt {retry_count}/{max_retries})...")
+                # _LOG.warning(f"Final answer validation failed for checks: {failed_check_names}. Retrying (attempt {retry_count}/{max_retries})...")
+                # TODO: add logging
+                print(f"Final answer validation failed for checks: {failed_check_names}. Retrying (attempt {retry_count}/{max_retries})...")
             else:
                 self.maxsteps = original_maxsteps
                 self.prompt = original_prompt
