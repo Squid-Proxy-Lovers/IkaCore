@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -7,13 +8,25 @@ from typing import Any, Dict, Optional, List, Callable
 
 import httpx
 
-from .base import BareBoneModel, TOKENMAX_MAPPING, SUMMARY_PROMPT
+from .base import BareBoneModel, TOKENMAX_MAPPING
+
+# Import CLI output system
+from IkaCore.cli_output import get_cli_output, OutputType
+from pathlib import Path
+
+# Load SUMMARY_PROMPT directly
+_SUMMARY_PROMPT_PATH = Path(__file__).parent / "summary_prompt"
+try:
+    with open(_SUMMARY_PROMPT_PATH, "r", encoding="utf-8") as f:
+        SUMMARY_PROMPT = f.read()
+except FileNotFoundError:
+    SUMMARY_PROMPT = "Please summarize the following conversation history concisely, preserving key information and context."
 from .deepseek import deepseek_fill_payload
 from .openai import openai_fill_payload
 from .claude import anthropic_fill_payload
 from .google import gemini_fill_payload
 
-_LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 def get_summary_model(provider: str) -> tuple[str, str]:
@@ -152,7 +165,7 @@ def summarise_message_history(barebone_model: BareBoneModel, message_history: di
     model_name, api_url = get_summary_model(provider)
     
     if not model_name or not api_url:
-        _LOG.warning(f"Could not determine low-end model for provider: {provider}")
+        LOG.warning(f"Could not determine low-end model for provider: {provider}")
         return ""
     
     payload, headers = create_summary_payload(provider, model_name, barebone_model.api_key, conversation_text)
@@ -178,13 +191,13 @@ def summarise_message_history(barebone_model: BareBoneModel, message_history: di
         message_history["summary"]["tokens"] = summary_tokens
         message_history["messages"] = {}
         
-        _LOG.info("Message history summarized. Kept: system prompt, first input, and summary. Cleared all other messages.")
+        LOG.info("Message history summarized. Kept: system prompt, first input, and summary. Cleared all other messages.")
         return summary
     except httpx.HTTPError as e:
-        _LOG.error(f"Failed to summarize message history: {e}")
+        LOG.error(f"Failed to summarize message history: {e}")
         return ""
     except Exception as e:
-        _LOG.error(f"Unexpected error during summarization: {e}")
+        LOG.error(f"Unexpected error during summarization: {e}")
         return ""
 
 def get_max_tokens(model_id: str) -> int:
@@ -206,6 +219,25 @@ def get_max_tokens(model_id: str) -> int:
     return 128000
 
 
+def _is_rate_limit_error(response: httpx.Response) -> bool:
+    if response.status_code == 429: # anthropic & openai use 429 for rate limit errors
+        return True
+    
+    try:
+        error_data = response.json()
+        error_text = json.dumps(error_data)
+        if "rate limit" in error_text.lower() or "rate_limit" in error_text.lower():
+            return True
+    except:
+        pass
+    
+    response_text = response.text.lower() if hasattr(response, 'text') else ""
+    if "rate limit" in response_text or "rate_limit" in response_text:
+        return True
+    
+    return False
+
+
 def api_request_retry(
     api_url: str,
     headers: dict,
@@ -223,24 +255,80 @@ def api_request_retry(
             if response.status_code == 200:
                 return response
             
-            if attempt < max_retries - 1:
-                _LOG.warning(
-                    f"API request failed with status {response.status_code} (attempt {attempt + 1}/{max_retries}). "
-                    f"Retrying in {wait_seconds} seconds..."
-                )
-                time.sleep(wait_seconds)
-                last_exception = Exception(f"API error {response.status_code}: {response.text[:500]}")
+            is_rate_limit = _is_rate_limit_error(response)
+            
+            if is_rate_limit:
+                retry_after = None
+                if "retry-after" in response.headers:
+                    try:
+                        retry_after = int(response.headers["retry-after"])
+                    except (ValueError, TypeError):
+                        pass
+                
+                if retry_after:
+                    wait_time = retry_after
+                    LOG.warning(
+                        f"Rate limit detected (status {response.status_code}). "
+                        f"Server requested wait time: {wait_time} seconds. "
+                        f"Attempt {attempt + 1}/{max_retries}"
+                    )
+                else:
+                    wait_time = wait_seconds * (2 ** attempt)
+                    if wait_time < 30:
+                        wait_time = 30
+                    elif wait_time > 300:
+                        wait_time = 300
+                    LOG.warning(
+                        f"Rate limit detected (status {response.status_code}). "
+                        f"Using exponential backoff: {wait_time} seconds. "
+                        f"Attempt {attempt + 1}/{max_retries}"
+                    )
+                
+                if attempt < max_retries - 1:
+                    cli = get_cli_output()
+                    cli.emit(
+                        OutputType.AGENT_RESPONSE,
+                        f"Rate limit hit. Waiting {wait_time} seconds before retry (attempt {attempt + 1}/{max_retries})",
+                        ["API"],
+                        step=0
+                    )
+                    time.sleep(wait_time)
+                    last_exception = Exception(f"API error {response.status_code}: {response.text[:500]}")
+                else:
+                    try:
+                        error_data = response.json()
+                        error_text = json.dumps(error_data, indent=2)[:1000]
+                    except:
+                        error_text = response.text[:500] if hasattr(response, 'text') else str(response.status_code)
+                    raise Exception(f"API error {response.status_code} after {max_retries} attempts: {error_text}")
             else:
+                # Log the error for debugging
                 try:
                     error_data = response.json()
-                    error_text = json.dumps(error_data, indent=2)[:1000]
+                    error_text_preview = json.dumps(error_data, indent=2)[:500]
+                    LOG.warning(f"API error {response.status_code}: {error_text_preview}")
                 except:
-                    error_text = response.text[:500] if hasattr(response, 'text') else str(response.status_code)
-                raise Exception(f"API error {response.status_code} after {max_retries} attempts: {error_text}")
+                    error_text_preview = response.text[:500] if hasattr(response, 'text') else str(response.status_code)
+                    LOG.warning(f"API error {response.status_code}: {error_text_preview}")
+                
+                if attempt < max_retries - 1:
+                    LOG.warning(
+                        f"API request failed with status {response.status_code} (attempt {attempt + 1}/{max_retries}). "
+                        f"Retrying in {wait_seconds} seconds..."
+                    )
+                    time.sleep(wait_seconds)
+                    last_exception = Exception(f"API error {response.status_code}: {error_text_preview}")
+                else:
+                    try:
+                        error_data = response.json()
+                        error_text = json.dumps(error_data, indent=2)[:1000]
+                    except:
+                        error_text = response.text[:500] if hasattr(response, 'text') else str(response.status_code)
+                    raise Exception(f"API error {response.status_code} after {max_retries} attempts: {error_text}")
         
         except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
             timeout_msg = f"API request timed out after {timeout}s (attempt {attempt + 1}/{max_retries})"
-            _LOG.warning(timeout_msg)
+            LOG.warning(timeout_msg)
             if attempt < max_retries - 1:
                 time.sleep(wait_seconds)
                 last_exception = Exception(timeout_msg)
@@ -249,7 +337,7 @@ def api_request_retry(
         
         except httpx.HTTPError as e:
             if attempt < max_retries - 1:
-                _LOG.warning(
+                LOG.warning(
                     f"HTTP error during API request (attempt {attempt + 1}/{max_retries}): {e}. "
                     f"Retrying in {wait_seconds} seconds..."
                 )
@@ -260,7 +348,7 @@ def api_request_retry(
         
         except Exception as e:
             if attempt < max_retries - 1:
-                _LOG.warning(
+                LOG.warning(
                     f"Unexpected error during API request (attempt {attempt + 1}/{max_retries}): {e}. "
                     f"Retrying in {wait_seconds} seconds..."
                 )
@@ -343,35 +431,50 @@ def validate_tool_args(tool_name: str, tool_args: dict, max_size: int = 10000, m
     return coerced_args
 
 
-def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Callable], timeout: float = 900.0) -> str:
+def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Callable], timeout: float = 900.0, agent_hierarchy: Optional[List[str]] = None, step: int = 0) -> str:
+    cli = get_cli_output()
+    hierarchy = list(agent_hierarchy or []) + [tool_name]
+
     if tool_name not in tool_executors:
         error_msg = f"Tool '{tool_name}' not found in tool executors"
-        _LOG.error(error_msg)
+        LOG.error(error_msg)
+        cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
         return json.dumps({"error": error_msg})
-    
+
     try:
         validated_args = validate_tool_args(tool_name, tool_args)
     except ValueError as e:
         error_msg = f"Validation error for tool '{tool_name}': {str(e)}"
-        _LOG.warning(error_msg)
+        LOG.warning(error_msg)
+        cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
         return json.dumps({"error": error_msg})
-    
+
     executor = tool_executors[tool_name]
+
+    # Emit tool call output
+    cli.tool_call(tool_name, tool_args, hierarchy, step)
+
     try:
         with ThreadPoolExecutor(max_workers=1) as executor_pool:
             future = executor_pool.submit(executor, validated_args)
             result = future.result(timeout=timeout)
-        
+
+            # Emit tool result output
+            result_str = result if isinstance(result, str) else json.dumps(result)
+            cli.tool_result(tool_name, result_str, hierarchy, step)
+
         if isinstance(result, str):
             return result
         return json.dumps(result)
     except FutureTimeoutError:
         timeout_msg = f"Tool '{tool_name}' execution timed out after {timeout}s"
-        _LOG.warning(timeout_msg)
+        cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
+        LOG.warning(timeout_msg)
         return json.dumps({"error": timeout_msg})
     except Exception as e:
         error_msg = f"Error executing tool '{tool_name}': {str(e)}"
-        _LOG.error(error_msg, exc_info=True)
+        cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
+        LOG.error(error_msg, exc_info=True)
         return json.dumps({"error": error_msg})
 
 
@@ -427,14 +530,31 @@ def execute_tool_calls(
     tool_calls: List[dict],
     tool_executors: Dict[str, Callable],
     provider: str,
-    timeout: float = 900.0
+    timeout: float = 900.0,
+    tool_metadata: Optional[Dict[str, dict]] = None,
+    agent_hierarchy: Optional[List[str]] = None,
+    step: int = 0
 ) -> tuple[List[dict], List[str]]:
+    """Execute tool calls either in parallel or sequentially based on tool metadata.
+    
+    Args:
+        tool_calls: List of tool call dictionaries from the API
+        tool_executors: Dictionary mapping tool names to executor functions
+        provider: API provider (openai, anthropic, etc.)
+        timeout: Timeout for tool execution
+        tool_metadata: Optional dictionary mapping tool names to metadata (including 'parallel' flag)
+        agent_hierarchy: Optional list of agent names representing the call hierarchy
+    
+    Returns:
+        Tuple of (formatted_messages, tool_results)
+    """
     if not tool_calls or not tool_executors:
         return [], []
     
-    tool_results = []
-    formatted_messages = []
+    tool_metadata = tool_metadata or {}
     
+    # Parse tool calls into (tool_name, args) tuples
+    parsed_calls = []
     for tool_call in tool_calls:
         fn = tool_call.get("function", {})
         tool_name = fn.get("name") or tool_call.get("name", "")
@@ -443,18 +563,61 @@ def execute_tool_calls(
         try:
             args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
         except Exception as e:
-            _LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
+            LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
             args = {}
         
-        result = execute_tool(tool_name, args, tool_executors, timeout)
-        tool_results.append(result)
+        parsed_calls.append((tool_name, args, tool_call))
     
+    # Separate parallel and sequential tools
+    parallel_calls = []
+    sequential_calls = []
+    
+    for tool_name, args, tool_call in parsed_calls:
+        metadata = tool_metadata.get(tool_name, {})
+        is_parallel = metadata.get("parallel", True)  # Default to parallel
+        
+        if is_parallel:
+            parallel_calls.append((tool_name, args, tool_call))
+        else:
+            sequential_calls.append((tool_name, args, tool_call))
+    
+    tool_results = []
+    tool_call_order = []  # Track the order for results
+
+    # Execute parallel tools first (if any)
+    if parallel_calls:
+        with ThreadPoolExecutor(max_workers=len(parallel_calls)) as executor:
+            futures = {}
+            for tool_name, args, tool_call in parallel_calls:
+                future = executor.submit(execute_tool, tool_name, args, tool_executors, timeout, agent_hierarchy, step)
+                futures[future] = (tool_name, tool_call)
+                tool_call_order.append(tool_call)
+
+            # Wait for all parallel tools to complete
+            for future in futures:
+                try:
+                    result = future.result()
+                    tool_results.append(result)
+                except Exception as e:
+                    error_msg = f"Parallel tool execution error: {str(e)}"
+                    LOG.error(error_msg)
+                    tool_results.append(json.dumps({"error": error_msg}))
+
+    # Execute sequential tools (if any)
+    for tool_name, args, tool_call in sequential_calls:
+        result = execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
+        tool_results.append(result)
+        tool_call_order.append(tool_call)
+    
+    # Format results based on provider
     if provider == "deepseek" or provider == "openai":
-        formatted_messages = format_openai_results(tool_calls, tool_results)
+        formatted_messages = format_openai_results(tool_call_order, tool_results)
     elif provider == "anthropic":
-        formatted_messages = format_anthropic_results(tool_calls, tool_results)
+        formatted_messages = format_anthropic_results(tool_call_order, tool_results)
     elif provider == "gemini":
-        formatted_messages = format_gemini_results(tool_calls, tool_results)
+        formatted_messages = format_gemini_results(tool_call_order, tool_results)
+    else:
+        formatted_messages = []
     
     return formatted_messages, tool_results
 
@@ -493,7 +656,7 @@ def chat(
     max_tokens = get_max_tokens(barebone_model.model_id)
     
     if token_count > max_tokens * 0.8:
-        _LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
+        LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
         summarise_message_history(barebone_model, message_history)
     
     if not message_history["first_input"]["message"] and messages:
@@ -519,7 +682,13 @@ def chat(
         payload = anthropic_fill_payload(barebone_model, messages, message_history)
         if "max_tokens" not in payload or not payload["max_tokens"]:
             payload["max_tokens"] = 4096
-        _LOG.debug(f"Anthropic payload: {json.dumps(payload, indent=2)[:500]}")
+        # Cap max_tokens for models with lower limits
+        model_id_lower = barebone_model.model_id.lower()
+        if "haiku" in model_id_lower:
+            # Claude Haiku has a max of 4096 tokens
+            if payload["max_tokens"] > 4096:
+                payload["max_tokens"] = 4096
+        LOG.debug(f"Anthropic payload: {json.dumps(payload, indent=2)[:500]}")
         response = api_request_retry(api_url, headers, payload, timeout=timeout)
         
     elif "gemini" in barebone_model.model_id.lower():
@@ -582,7 +751,18 @@ def chat(
     cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
 
     if tool_calls and tool_executors:
-        tool_messages, tool_results = execute_tool_calls(tool_calls, tool_executors, provider, timeout)
+        # Extract tool metadata from BareBoneModel
+        tool_metadata = {}
+        if hasattr(barebone_model, 'agent_tools'):
+            for agent_tool in barebone_model.agent_tools:
+                tool_metadata[agent_tool.name] = {
+                    "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True
+                }
+        
+        # Get agent hierarchy from BareBoneModel
+        agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
+        
+        tool_messages, tool_results = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy)
         if logger:
             logger.log_tool_results(tool_calls, tool_results)
         

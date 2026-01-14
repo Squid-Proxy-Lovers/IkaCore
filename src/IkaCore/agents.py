@@ -12,6 +12,7 @@ from IkaCore.ikarag import IkaRAGSource
 from IkaCore.memory import Memory
 from IkaCore.logging_utils import IkaLogger
 from IkaCore.checkpoint import CheckpointStore
+from IkaCore.cli_output import get_cli_output, OutputType
 
 src_dir = Path(__file__).parent.parent
 if str(src_dir) not in sys.path:
@@ -27,6 +28,12 @@ from IkaModel.base import (
     get_global_long_term_memory,
 )
 from IkaModel.chat_interface import chat, summarise_message_history, execute_tool_calls, get_provider
+
+
+# Instruction appended to all agent prompts to ensure proper task completion
+AGENT_END_INSTRUCTION = """
+
+IMPORTANT: When you have completed your assigned task, you MUST call the agent_end tool with your final answer. Do not continue making tool calls after the task is complete. The agent_end tool signals that you have finished and provides your final output."""
 
 
 class IkaBaseAgent:
@@ -492,12 +499,13 @@ class IkaBaseAgent:
     # Subagent executor
     # --------------------
 
-    def _build_subagent_executor(self, subagent: "IkaBaseAgent") -> Callable:
+    def _build_subagent_executor(self, subagent: "IkaBaseAgent", parent_hierarchy: Optional[List[str]] = None) -> Callable:
         """
         Build a callable executor for a subagent, this is used to execute the subagent's execution function (since subagents behave like tools)
 
         Args:
             subagent: IkaBaseAgent to build an executor for
+            parent_hierarchy: Optional list of parent agent names for tracking hierarchy
 
         Returns:
             Callable executor for the subagent
@@ -510,6 +518,9 @@ class IkaBaseAgent:
             try:
                 if self.logger:
                     self.logger.log_action(f"Calling subagent: {subagent.name}")
+                
+                # Store parent hierarchy in subagent for use in get_barebone
+                subagent._parent_hierarchy = parent_hierarchy or []
                 
                 subagent.message_history["first_input"]["message"] = task_input
                 subagent.prompt = task_input
@@ -530,7 +541,7 @@ class IkaBaseAgent:
         
         return subagent_executor
 
-    def build_tool_executors(self, tools: List[IkaTools], memory_access: Optional[Dict[str, bool]] = None, long_term_filter: Optional[Callable] = None, subagents: Optional[List["IkaBaseAgent"]] = None) -> Dict[str, Callable]:
+    def build_tool_executors(self, tools: List[IkaTools], memory_access: Optional[Dict[str, bool]] = None, long_term_filter: Optional[Callable] = None, subagents: Optional[List["IkaBaseAgent"]] = None, parent_hierarchy: Optional[List[str]] = None) -> Dict[str, Callable]:
         tool_executors = {}
         for tool in tools:
             if hasattr(tool, 'execute_function') and tool.execute_function:
@@ -541,7 +552,7 @@ class IkaBaseAgent:
         if source_subagents:
             for subagent in source_subagents:
                 subagent_name = getattr(subagent, "name", "subagent")
-                tool_executors[subagent_name] = self._build_subagent_executor(subagent)
+                tool_executors[subagent_name] = self._build_subagent_executor(subagent, parent_hierarchy)
         
         # Add memory tool executors based on access control
         effective_access = memory_access or self.memory_access
@@ -559,7 +570,8 @@ class IkaBaseAgent:
                     query = args.get("query", "")
                     limit = args.get("limit", 5)
                     score_threshold = args.get("score_threshold", 0.6)
-                    return self._search_short_term(query, limit=limit, score_threshold=score_threshold)
+                    result = self._search_short_term(query, limit=limit, score_threshold=score_threshold)
+                    return json.dumps(result)  # Convert dict to JSON string
                 tool_executors["short_term_search"] = short_search_executor
         
         if self.long_term_memory:
@@ -581,7 +593,8 @@ class IkaBaseAgent:
                     query = args.get("query", "")
                     limit = args.get("limit", 5)
                     score_threshold = args.get("score_threshold", 0.6)
-                    return self._search_long_term(query, limit=limit, score_threshold=score_threshold, filter_func=long_term_filter)
+                    result = self._search_long_term(query, limit=limit, score_threshold=score_threshold, filter_func=long_term_filter)
+                    return json.dumps(result)  # Convert dict to JSON string
                 tool_executors["long_term_search"] = long_search_executor
         
         return tool_executors
@@ -594,7 +607,8 @@ class IkaBaseAgent:
         parts = [self.start_prompt, stage.prompt, self.end_prompt]
         if not any(parts):
             parts = [self.description, stage.prompt]
-        return "\n\n".join([p for p in parts if p])
+        base_prompt = "\n\n".join([p for p in parts if p])
+        return base_prompt + AGENT_END_INSTRUCTION
 
     def build_stage(self, stage: IkaStage) -> List[AgentTool]:
         """
@@ -609,18 +623,23 @@ class IkaBaseAgent:
 
         stage_tools = self._convert_tools_to_agent_tools(stage.tools)
         subagent_tools = self._convert_subagents_to_tools(getattr(stage, "subagents", None))
-        
-        if stage == self.Stages[-1]:
+
+        is_last_stage = (stage == self.Stages[-1])
+
+        if is_last_stage:
+            # For last stage: add agent_end_tool and remove stage_end
             agent_end_tool = AgentTool(
                 id="agent_end",
                 name="agent_end",
-                description="End the agent loop with a final answer. Provide the final output and any key reasoning.",
+                description="End the agent loop with a final answer. Use this tool when you have completed the task. Provide the final output and any key reasoning.",
                 args=ToolArgs(type="input", description="Final response content."),
                 required=False,
             )
             stage_tools.append(agent_end_tool)
-            stage_tools.pop(stage_tools.index("stage_end")) # remove stage end tool since we are at the last stage and we should exit the agent loop with a final answer
-            # TODO: does this work even though it's comparing a string to an obj? I think this will break
+            # Remove stage_end tool by finding it by name (not string comparison)
+            stage_end_idx = next((i for i, t in enumerate(stage_tools) if t.name == "stage_end"), None)
+            if stage_end_idx is not None:
+                stage_tools.pop(stage_end_idx)
         # Get stage-specific memory access (inherits from agent if not overridden)
         stage_memory_access = getattr(stage, "memory_access", None) or self.memory_access
         
@@ -687,14 +706,30 @@ class IkaBaseAgent:
                     required=False,
                 )
                 memory_tools.append(long_search_tool)
-        
-        return stage_tools + subagent_tools + memory_tools + [agent_end_tool]
 
-    def get_barebone(self, system_prompt: str, agent_tools: List[AgentTool]) -> BareBoneModel:
+        # stage_tools already has agent_end_tool appended for last stage
+        return stage_tools + subagent_tools + memory_tools
+
+    def get_barebone(self, system_prompt: str, agent_tools: List[AgentTool], parent_hierarchy: Optional[List[str]] = None) -> BareBoneModel:
         """
         conversion to barebone model, this is used to create the model instance for the agent
         barebone model is used for conversion to apis and handling of the model instance.
+        
+        Args:
+            system_prompt: System prompt for the agent
+            agent_tools: List of AgentTool instances
+            parent_hierarchy: Optional list of parent agent names for tracking hierarchy
         """
+        # Check if all tools support parallel execution
+        parallel_tool_calls = True
+        for tool in agent_tools:
+            if hasattr(tool, 'parallel') and not tool.parallel:
+                parallel_tool_calls = False
+                break
+        
+        # Build agent hierarchy - parent_hierarchy already includes self.name if called from parent
+        agent_hierarchy = parent_hierarchy if parent_hierarchy else [self.name]
+        
         model = BareBoneModel(
             model_id=self.model_id,
             api_key=self.api_key,
@@ -703,6 +738,9 @@ class IkaBaseAgent:
             content_prompt=self.prompt,
             max_tokens=self.max_tokens,
             temperature=self.temperature,
+            parallel_tool_calls=parallel_tool_calls,
+            agent_name=self.name,
+            agent_hierarchy=agent_hierarchy,
         )
         model.agent_tools = agent_tools
         return model
@@ -749,7 +787,8 @@ class IkaBaseAgent:
         self.message_history["system"]["message"] = system_prompt
 
         agent_tools = self.build_stage(stage)
-        barebone_model = self.get_barebone(system_prompt, agent_tools)
+        current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+        barebone_model = self.get_barebone(system_prompt, agent_tools, parent_hierarchy=current_hierarchy)
 
         messages: List[dict] = [{"role": "user", "content": stage.prompt or self.prompt}]
         last_content = ""
@@ -760,11 +799,13 @@ class IkaBaseAgent:
             step_limit = max(1, remaining_steps)
 
         stage_memory_access = getattr(stage, "memory_access", None) or self.memory_access
+        current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
         tool_executors = self.build_tool_executors(
             stage.tools, 
             memory_access=stage_memory_access, 
             long_term_filter=getattr(stage, "long_term_filter", None),
-            subagents=getattr(stage, "subagents", None)
+            subagents=getattr(stage, "subagents", None),
+            parent_hierarchy=current_hierarchy
         )
         
         if self.logger:
@@ -906,15 +947,27 @@ class IkaBaseAgent:
                 memory_tools.append(long_search_tool)
         
         agent_tools = self._convert_tools_to_agent_tools(self.tools) + self._convert_subagents_to_tools() + memory_tools + [agent_end_tool]
-        system_prompt = self.system_prompt or self.description or self.prompt
-        barebone_model = self.get_barebone(system_prompt, agent_tools)
+        base_prompt = self.system_prompt or self.description or self.prompt
+        system_prompt = base_prompt + AGENT_END_INSTRUCTION
+        current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+        barebone_model = self.get_barebone(system_prompt, agent_tools, parent_hierarchy=current_hierarchy)
 
         messages: List[dict] = [{"role": "user", "content": self.prompt}]
         last_content = ""
 
-        tool_executors = self.build_tool_executors(self.tools, memory_access=self.memory_access, subagents=self.subagents)
+        current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+        tool_executors = self.build_tool_executors(self.tools, memory_access=self.memory_access, subagents=self.subagents, parent_hierarchy=current_hierarchy)
         
-        for _ in range(self.maxsteps):
+        cli = get_cli_output()
+
+        for step_num in range(self.maxsteps):
+            cli.set_step(self.name, step_num + 1)
+            cli.agent_init(
+                self.name,
+                current_hierarchy,
+                step=step_num + 1,
+                description=f"Step {step_num + 1}/{self.maxsteps}"
+            )
             self._enforce_rate_limit_model()
             step_start = time.time()
             response = chat(
@@ -931,10 +984,17 @@ class IkaBaseAgent:
 
             _, agent_end_called, agent_end_text = self.parse_control_calls(tool_calls, None)
             if agent_end_called:
+                cli.agent_response(
+                    self.name,
+                    agent_end_text or last_content,
+                    current_hierarchy,
+                    step=step_num + 1,
+                    is_final=True
+                )
                 if self.logger:
                     self.logger.log_step(
                         stage_name="simple",
-                        step_idx=_,
+                        step_idx=step_num,
                         output=last_content,
                         tool_calls=tool_calls,
                         usage=response.get("usage", {}),
@@ -947,7 +1007,10 @@ class IkaBaseAgent:
             # Handle pending tool calls that weren't executed by chat (e.g. chained calls)
             if tool_calls:
                 provider = get_provider(barebone_model.model_id)
-                tool_msgs, tool_res = execute_tool_calls(tool_calls, tool_executors, provider, self.step_timeout)
+                tool_msgs, tool_res = execute_tool_calls(
+                    tool_calls, tool_executors, provider, self.step_timeout,
+                    agent_hierarchy=current_hierarchy, step=step_num + 1
+                )
                 if self.logger:
                     self.logger.log_tool_results(tool_calls, tool_res)
                 messages.extend(tool_msgs)
@@ -955,28 +1018,62 @@ class IkaBaseAgent:
             # Do NOT reset messages to preserve context
             # messages = [{"role": "assistant", "content": last_content}]
 
+            if not tool_calls and last_content:
+                cli.agent_response(
+                    self.name,
+                    last_content,
+                    current_hierarchy,
+                    step=step_num + 1,
+                    is_final=True
+                )
             if self.logger:
                 self.logger.log_step(
                     stage_name="simple",
-                    step_idx=_,
+                        step_idx=step_num,
+                        output=last_content,
+                        tool_calls=[],
+                        usage=response.get("usage", {}),
+                        cost=response.get("cost", {}),
+                        elapsed=time.time() - step_start,
+                    )
+                return last_content, last_content
+
+            if self.logger:
+                self.logger.log_step(
+                    stage_name="simple",
+                    step_idx=step_num,
                     output=last_content,
                     tool_calls=tool_calls,
                     usage=response.get("usage", {}),
                     cost=response.get("cost", {}),
                     elapsed=time.time() - step_start,
                 )
-            # Ensure maxsteps is an integer and _ is an integer
+            # Ensure maxsteps is an integer and step_num is an integer
             max_steps_val = int(self.maxsteps)
-            current_step_val = int(_) if _ is not None else 0
+            current_step_val = int(step_num) if step_num is not None else 0
             remaining_after = max(0, max_steps_val - (current_step_val + 1))
             self._save_agent_checkpoint(remaining_after, last_content)
 
+        cli.agent_response(
+            self.name,
+            f"Reached max steps ({self.maxsteps}). Returning last content.\n{last_content}",
+            current_hierarchy,
+            step=self.maxsteps,
+            is_final=True
+        )
         return last_content, last_content
 
     def _build_final_output(self, final_message: str, barebone_model: BareBoneModel) -> Dict[str, str]:
         summary = summarise_message_history(barebone_model, self.message_history) or self.message_history.get("summary", {}).get("message", "")
-        if self.logger and summary:
-            self.logger.log_summary(summary)
+        if summary:
+            if self.logger:
+                self.logger.log_summary(summary)
+            # Also emit via CLI output with dedicated summarization color and no truncation
+            cli = get_cli_output()
+            current_hierarchy = getattr(self, "_parent_hierarchy", []) + [self.name]
+            # Use final step number for summary box
+            step = cli.get_step(self.name) or 0
+            cli.summarization(self.name, summary, current_hierarchy, step=step)
         return {"final_message": final_message, "summary": summary}
 
     def execution(self, checkpoint_uid: Optional[str] = None) -> Dict[str, str]:
@@ -1003,12 +1100,14 @@ class IkaBaseAgent:
                     agent_end_text = end_text
                     break
             final_message = agent_end_text or last_content
-            barebone_model = self.get_barebone(self.message_history["system"]["message"], [])
+            current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+            barebone_model = self.get_barebone(self.message_history["system"]["message"], [], parent_hierarchy=current_hierarchy)
             return self._build_final_output(final_message, barebone_model)
 
         if self.next_agent:
             final_message, _ = self.run_simple()
-            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [])
+            current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy)
             summary = summarise_message_history(barebone_model, self.message_history) or final_message
             self.next_agent.message_history = {
                 "system": {"message": self.next_agent.system_prompt or "", "tokens": 0},
@@ -1024,7 +1123,8 @@ class IkaBaseAgent:
 
         if not self.final_answer_checks:
             final_message, _ = self.run_simple()
-            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [])
+            current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy)
             return self._build_final_output(final_message, barebone_model)
 
         original_maxsteps = self.maxsteps
@@ -1034,7 +1134,8 @@ class IkaBaseAgent:
         
         while retry_count <= max_retries:
             final_message, _ = self.run_simple()
-            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [])
+            current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy)
             final_output = self._build_final_output(final_message, barebone_model)
 
             failed_checks = []
@@ -1068,9 +1169,13 @@ class IkaBaseAgent:
                 self.message_history["first_input"]["message"] = self.prompt
                 self.message_history["messages"] = {}
                 retry_count += 1
-                # _LOG.warning(f"Final answer validation failed for checks: {failed_check_names}. Retrying (attempt {retry_count}/{max_retries})...")
-                # TODO: add logging
-                print(f"Final answer validation failed for checks: {failed_check_names}. Retrying (attempt {retry_count}/{max_retries})...")
+                cli = get_cli_output()
+                cli.agent_response(
+                    self.name,
+                    f"Validation failed for checks: {failed_check_names}. Retrying (attempt {retry_count}/{max_retries})...",
+                    [self.name],
+                    step=0
+                )
             else:
                 self.maxsteps = original_maxsteps
                 self.prompt = original_prompt

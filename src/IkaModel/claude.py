@@ -11,7 +11,7 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
         "messages": {}
     }
     api_messages = []
-    system_prompt = message_history["system"]["message"] or model.system_prompt
+    system_prompt = message_history["system"]["message"] or model.system_prompt or ""
     
     if message_history["first_input"]["message"]:
         api_messages.append({
@@ -54,12 +54,28 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
     
     max_tokens_value = model.max_tokens if model.max_tokens and model.max_tokens > 0 else 4096
     
+    # Cap max_tokens for models with lower limits
+    model_id_lower = model.model_id.lower()
+    if "haiku" in model_id_lower:
+        # Claude Haiku has a max of 4096 tokens
+        if max_tokens_value > 4096:
+            max_tokens_value = 4096
+    
     payload = {
         "model": model.model_id,
         "max_tokens": max_tokens_value,
         "temperature": model.temperature,
+        "system": system_prompt,
         "messages": api_messages
     }
+    
+    # Add parallel tool use prompt for Claude 4 models if enabled
+    if hasattr(model, 'parallel_tool_calls') and model.parallel_tool_calls:
+        if "opus-4" in model_id_lower or "sonnet-4" in model_id_lower or "claude-4" in model_id_lower:
+            parallel_prompt = "\n\n<use_parallel_tool_calls>\nFor maximum efficiency, whenever you perform multiple independent operations, invoke all relevant tools simultaneously rather than sequentially. Prioritize calling tools in parallel whenever possible. For example, when reading 3 files, run 3 tool calls in parallel to read all 3 files into context at the same time. When running multiple read-only commands like `ls` or `list_dir`, always run all of the commands in parallel. Err on the side of maximizing parallel tool calls rather than running too many tools sequentially.\n</use_parallel_tool_calls>"
+            current_system = payload.get("system", "")
+            if parallel_prompt not in current_system:
+                payload["system"] = current_system + parallel_prompt
     
     if system_prompt:
         payload["system"] = system_prompt
@@ -67,8 +83,12 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
     if model.agent_tools:
         tools = []
         for tool in model.agent_tools:
-            if tool.args.properties:
-                input_schema = tool.args.properties
+            if tool.args.properties and len(tool.args.properties) > 0:
+                input_schema = {
+                    "type": "object",
+                    "properties": tool.args.properties,
+                    "required": []
+                }
             else:
                 arg_name = tool.args.type
                 json_type = "string"
@@ -94,6 +114,19 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
                 "input_schema": input_schema
             })
         payload["tools"] = tools
-        payload["tool_choice"] = {"type": "auto"}
+
+        # Set tool_choice with optional parallel tool use control
+        # disable_parallel_tool_use must be inside tool_choice, not at top level
+        tool_choice = {"type": "auto"}
+
+        # Disable parallel tool use if the model doesn't support it
+        # Only available for Claude 4 models (opus-4, sonnet-4)
+        # By default Claude allows parallel, so we disable it if parallel_tool_calls is False
+        model_id_lower = model.model_id.lower()
+        if hasattr(model, 'parallel_tool_calls') and not model.parallel_tool_calls:
+            if "opus-4" in model_id_lower or "sonnet-4" in model_id_lower or "claude-4" in model_id_lower:
+                tool_choice["disable_parallel_tool_use"] = True
+
+        payload["tool_choice"] = tool_choice
     
     return payload

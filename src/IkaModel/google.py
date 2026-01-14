@@ -65,30 +65,47 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
         }
     
     if model.agent_tools:
-        tools = []
+        function_declarations = []
         for tool in model.agent_tools:
-            arg_name = tool.args.type
-            json_type = "string"
-            if arg_name in ["stage_index"]:
-                json_type = "integer"
-            elif arg_name == "input":
-                json_type = "string"
-            tools.append({
-                "functionDeclarations": [{
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                                arg_name: {
-                                    "type": json_type,
-                                    "description": tool.args.description
-                                }
-                        },
-                            "required": [arg_name] if tool.required else []
+            # Handle tools with explicit properties
+            if tool.args.properties and len(tool.args.properties) > 0:
+                properties = {}
+                for prop_name, prop_def in tool.args.properties.items():
+                    properties[prop_name] = {
+                        "type": prop_def.get("type", "string"),
+                        "description": prop_def.get("description", "")
                     }
-                }]
+                parameters = {
+                    "type": "object",
+                    "properties": properties,
+                    "required": getattr(tool.args, 'required', []) or []
+                }
+            else:
+                # Simple single-argument tool
+                arg_name = tool.args.type
+                json_type = "string"
+                if arg_name in ["stage_index"]:
+                    json_type = "integer"
+                elif arg_name == "input":
+                    json_type = "string"
+                parameters = {
+                    "type": "object",
+                    "properties": {
+                        arg_name: {
+                            "type": json_type,
+                            "description": tool.args.description
+                        }
+                    },
+                    "required": [arg_name] if tool.required else []
+                }
+
+            function_declarations.append({
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": parameters
             })
-        payload["tools"] = tools
+
+        # Gemini expects tools as array with single object containing functionDeclarations
+        payload["tools"] = [{"functionDeclarations": function_declarations}]
     
     return payload

@@ -4,8 +4,11 @@ from typing import Any, Optional
 
 try:
     from mem0 import Memory, MemoryClient
-except ImportError as e:
-    raise ImportError("mem0ai not installed: pip install mem0ai") from e
+    _MEM0_AVAILABLE = True
+except ImportError:
+    _MEM0_AVAILABLE = False
+    Memory = None
+    MemoryClient = None
 
 from IkaMem.storage.interface import Storage
 
@@ -185,11 +188,12 @@ class Mem0Store(Storage):
         params["filters"] = self._create_filter_for_search()
         params["threshold"] = score_threshold
 
-        # Remove parameters not supported by local Memory
+        # Remove parameters not supported by local Memory (use pop to avoid KeyError)
         if isinstance(self.memory, Memory):
-            del params["metadata"], params["version"], params["output_format"]
-            if params.get("run_id"):
-                del params["run_id"]
+            params.pop("metadata", None)
+            params.pop("version", None)
+            params.pop("output_format", None)
+            params.pop("run_id", None)
 
         # Execute search
         results = self.memory.search(**params)

@@ -1,54 +1,42 @@
 import json
 import logging
-import os
 import re
-import time
-import uuid
-from abc import ABC, abstractmethod
-import sys
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, List
+import sys
 
-# Import IkaMem for short-term and long-term memory
+# add parent to path since imports assume it
 sys.path.insert(0, str(Path(__file__).parent.parent / "IkaMem"))
-from IkaMem import STMemory, LTMemory, STMemItem, LTMemItem
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import httpx
+from IkaCore.cli_output import get_cli_output, OutputType
+
 
 _LOG = logging.getLogger(__name__)
 
-_gemini_fill_payload_loaded = False
-gemini_fill_payload = None
-
-# global long-term memory shared across all agents
-_GLOBAL_LONG_TERM_MEMORY: Optional[LTMemory] = None
+_GLOBAL_LONG_TERM_MEMORY: Optional["LTMemory"] = None 
 
 
 def load_gemini_payload():
-    """Lazy-loads gemini_fill_payload without relying on global message history."""
-    global gemini_fill_payload, _gemini_fill_payload_loaded
-    if _gemini_fill_payload_loaded:
-        return gemini_fill_payload
-
+    """
+    Dynamically load gemini payload function.
+    This is to avoid circular import issues.
+    """
     try:
-        from .google import gemini_fill_payload as _gemini_func
-        gemini_fill_payload = _gemini_func
-        _gemini_fill_payload_loaded = True
+        from IkaModel.google import gemini_fill_payload
         return gemini_fill_payload
-    except Exception as e:
-        _LOG.warning(f"Failed to load gemini_fill_payload: {e}")
-
-        def _fallback(model, messages, message_history=None):
-            return {"model": model.model_id, "messages": messages}
-
-        gemini_fill_payload = _fallback
-        _gemini_fill_payload_loaded = True
-        return gemini_fill_payload
+    except ImportError as e:
+        _LOG.error(f"Failed to import gemini_fill_payload: {e}")
+        raise
 
 
-DEFAULT_SYSTEM_PROMPT = "You are a memeber in a complex Agentic system, every behavior you take is to help the system achieve its goals."
+DEFAULT_SYSTEM_PROMPT = """You are a member in a complex Agentic system, every behavior you take is to help the system achieve its goals.
+
+IMPORTANT: When you have completed your assigned task, you MUST call the agent_end tool with your final answer. 
+Do not continue making tool calls after the task is complete. The agent_end tool signals that you have finished and provides your final output.
+CRITICAL: MAKE SURE YOUR FINAL ANSWER IS ANSWER THE ORGINAL TASK, MAKE SURE YOUR RESPONSE IS VERY DETAILED AND COMPLETE!
+"""
 
 TOKENMAX_MAPPING = {
     "gpt-4o": 128000,                    # 128K tokens context window :contentReference[oaicite:2]{index=2}
@@ -87,14 +75,16 @@ class ToolArgs:
 
 @dataclass
 class AgentTool:
-    def __init__(self, id:str, name: str, description: str, args: ToolArgs, required: bool = True): 
+    def __init__(self, id:str, name: str, description: str, args: ToolArgs, required: bool = True,parallel: bool = False): 
         self.validate(name)
         self.id = id
         self.name = name
         self.description = description
         self.args = args   
         self.required = required
-    
+        self.parallel = parallel # assume that all tools are not parallel by default
+
+
     @staticmethod
     def validate(name: str):
         if not re.match(r'^[a-zA-Z0-9_-]{1,64}$', name):
@@ -106,7 +96,7 @@ def init_global_long_term_memory(
     embedder_config: dict, 
     search_limit: int = 10,
     filter_func: Optional[Any] = None
-) -> LTMemory:
+) -> "LTMemory":
     """
     initialize global long-term memory (called once).
     
@@ -120,6 +110,7 @@ def init_global_long_term_memory(
     """
     global _GLOBAL_LONG_TERM_MEMORY
     if _GLOBAL_LONG_TERM_MEMORY is None:
+        from IkaMem import LTMemory
         _GLOBAL_LONG_TERM_MEMORY = LTMemory(embedder_config=embedder_config)
         _GLOBAL_LONG_TERM_MEMORY._search_limit = search_limit
         _GLOBAL_LONG_TERM_MEMORY._filter_func = filter_func or (lambda results: results[:5])
@@ -127,7 +118,7 @@ def init_global_long_term_memory(
     return _GLOBAL_LONG_TERM_MEMORY
 
 
-def get_global_long_term_memory() -> Optional[LTMemory]:
+def get_global_long_term_memory() -> Optional["LTMemory"]:
     """get the global long-term memory instance."""
     return _GLOBAL_LONG_TERM_MEMORY
 
@@ -142,7 +133,10 @@ class BareBoneModel:
         system_prompt=DEFAULT_SYSTEM_PROMPT, 
         content_prompt: str = "", 
         max_tokens: int = 20000, 
-        temperature: float = 0
+        temperature: float = 0,
+        parallel_tool_calls: bool = False,
+        agent_name: Optional[str] = None,
+        agent_hierarchy: Optional[List[str]] = None
         ):
 
         # User MUST provide the following:
@@ -164,9 +158,34 @@ class BareBoneModel:
         self.temperature = temperature
         self.agent_tools: list[AgentTool] = [] 
         self.deepthinking: bool = False
+        self.parallel_tool_calls = parallel_tool_calls
+        self.agent_name = agent_name
+        self.agent_hierarchy = agent_hierarchy or []
+        
+        # Display prompts using CLI output
+        cli = get_cli_output()
+        hierarchy = self.agent_hierarchy or [self.agent_name or "Agent"]
+
+        if self.system_prompt:
+            cli.emit(
+                OutputType.AGENT_INIT,
+                f"System Prompt:\n{self.system_prompt}",
+                hierarchy,
+                step=0
+            )
+
+        if self.content_prompt:
+            cli.emit(
+                OutputType.AGENT_INIT,
+                f"Content Prompt:\n{self.content_prompt}",
+                hierarchy,
+                step=0
+            )
 
 
 _SUMMARY_PROMPT_PATH = Path(__file__).parent / "summary_prompt"
-with open(_SUMMARY_PROMPT_PATH, "r", encoding="utf-8") as f:
-    SUMMARY_PROMPT = f.read()
-
+try:
+    with open(_SUMMARY_PROMPT_PATH, "r", encoding="utf-8") as f:
+        SUMMARY_PROMPT = f.read()
+except FileNotFoundError:
+    SUMMARY_PROMPT = "Please summarize the following conversation history concisely, preserving key information and context."
