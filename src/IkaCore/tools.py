@@ -1,3 +1,5 @@
+from typing import Callable
+
 class IkaTools:
     def __init__(self, id:str, name:str, description:str, parameters:dict, limit_calls:int = 1, required:bool = True, execute_function:Callable = None):
         self.id = id

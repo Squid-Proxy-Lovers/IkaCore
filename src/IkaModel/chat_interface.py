@@ -621,19 +621,19 @@ def chat(
         if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
             headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
             payload = deepseek_fill_payload(barebone_model, messages, message_history)
-            response = _make_api_request_with_retry(barebone_model.api_url, headers, payload)
+            response = api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout)
 
         elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
             headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
             payload = openai_fill_payload(barebone_model, messages, message_history)
-            response = _make_api_request_with_retry(barebone_model.api_url, headers, payload)
+            response = api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout)
 
         elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
             headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
             payload = anthropic_fill_payload(barebone_model, messages, message_history)
             if "max_tokens" not in payload or not payload["max_tokens"]:
                 payload["max_tokens"] = 4096
-            response = _make_api_request_with_retry(barebone_model.api_url, headers, payload)
+            response = api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout)
             
         elif "gemini" in barebone_model.model_id.lower():
             payload = gemini_fill_payload(barebone_model, messages, message_history)
@@ -684,6 +684,38 @@ def chat(
                         }
                     })
     
+        # Appending final response to messages list for state consistency
+        if provider == "gemini":
+            assistant_msg = {"role": "model", "parts": []}
+            if content:
+                assistant_msg["parts"].append({"text": content})
+            for tool_call in tool_calls:
+                assistant_msg["parts"].append({
+                    "functionCall": {
+                        "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
+                        "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                    }
+                })
+            if assistant_msg["parts"]:
+                 messages.append(assistant_msg)
+        elif provider == "deepseek" or provider == "openai":
+            assistant_msg = {"role": "assistant", "content": content}
+            if tool_calls:
+                assistant_msg["tool_calls"] = tool_calls
+            messages.append(assistant_msg)
+        elif provider == "anthropic":
+            assistant_msg = {"role": "assistant", "content": []}
+            if content:
+                assistant_msg["content"].append({"type": "text", "text": content})
+            for tool_call in tool_calls:
+                assistant_msg["content"].append({
+                    "type": "tool_use",
+                    "id": tool_call.get("id"),
+                    "name": tool_call.get("name"),
+                    "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                })
+            messages.append(assistant_msg)
+
         cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
     if logger:
         logger.log_output(content, usage_info, cost_info, message_history)

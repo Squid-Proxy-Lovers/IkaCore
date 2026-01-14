@@ -75,11 +75,12 @@ TOKENMAX_MAPPING = {
 
 @dataclass
 class ToolArgs:
-    agent: Optional[str] = None
     type: str
     description: str
+    agent: Optional[str] = None
     data: Optional[Any] = None
     metadata: Optional[dict] = None
+    properties: Optional[dict] = None
     
     # we are going to assume that all args are required
 
@@ -94,6 +95,7 @@ class AgentTool:
         self.args = args   
         self.required = required
     
+    @staticmethod
     def validate(name: str):
         if not re.match(r'^[a-zA-Z0-9_-]{1,64}$', name):
             # we need for deepseek

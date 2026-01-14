@@ -50,35 +50,52 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
     
     payload = {
         "model": model.model_id,
-        "messages": api_messages,
-        "temperature": model.temperature,
-        "max_tokens": model.max_tokens
+        "messages": api_messages
     }
+    
+    # Newer OpenAI models (like o1/o3/gpt-4o) prefer 'max_completion_tokens' over 'max_tokens'
+    # We'll use max_completion_tokens if the model ID suggests it's a newer model
+    is_reasoning_model = any(x in model.model_id.lower() for x in ["o1", "o3", "gpt-5"])
+    
+    if not is_reasoning_model:
+        # Only set temperature if it is NOT a reasoning model (or force it to 1.0 if needed, but safer to omit)
+        payload["temperature"] = model.temperature
+    
+    if is_reasoning_model:
+        payload["max_completion_tokens"] = model.max_tokens
+    else:
+        payload["max_tokens"] = model.max_tokens
     
     if model.agent_tools:
         tools = []
         for tool in model.agent_tools:
-            arg_name = tool.args.type
-            json_type = "string"
-            if arg_name in ["stage_index"]:
-                json_type = "integer"
-            elif arg_name == "input":
+            if tool.args.properties:
+                parameters = tool.args.properties
+            else:
+                arg_name = tool.args.type
                 json_type = "string"
+                if arg_name in ["stage_index"]:
+                    json_type = "integer"
+                elif arg_name == "input":
+                    json_type = "string"
+                
+                parameters = {
+                    "type": "object",
+                    "properties": {
+                        arg_name: {
+                            "type": json_type,
+                            "description": tool.args.description
+                        }
+                    },
+                    "required": [arg_name] if tool.required else []
+                }
+
             tools.append({
                 "type": "function",
                 "function": {
                     "name": tool.name,
                     "description": tool.description,
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            arg_name: {
-                                "type": json_type,
-                                "description": tool.args.description
-                            }
-                        },
-                        "required": [arg_name] if tool.required else []
-                    }
+                    "parameters": parameters
                 }
             })
         payload["tools"] = tools

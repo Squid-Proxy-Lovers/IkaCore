@@ -1,8 +1,8 @@
 from typing import Optional, List, Dict
 
-from tools import IkaTools
-from squidrag import IkaRAGSource
-from ika_model.base import AgentTool, ToolArgs
+from IkaCore.tools import IkaTools
+from IkaCore.ikarag import IkaRAGSource
+from IkaModel.base import AgentTool, ToolArgs
 
 
 class IkaStage:

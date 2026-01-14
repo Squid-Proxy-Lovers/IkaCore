@@ -64,27 +64,33 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
     if model.agent_tools:
         tools = []
         for tool in model.agent_tools:
-            arg_name = tool.args.type
-            json_type = "string"
-            if arg_name in ["stage_index"]:
-                json_type = "integer"
-            elif arg_name == "input":
+            if tool.args.properties:
+                parameters = tool.args.properties
+            else:
+                arg_name = tool.args.type
                 json_type = "string"
+                if arg_name in ["stage_index"]:
+                    json_type = "integer"
+                elif arg_name == "input":
+                    json_type = "string"
+                
+                parameters = {
+                    "type": "object",
+                    "properties": {
+                        arg_name: {
+                            "type": json_type,
+                            "description": tool.args.description
+                        }
+                    },
+                    "required": [arg_name] if tool.required else []
+                }
+
             tools.append({
                 "type": "function",
                 "function": {
                     "name": tool.name,
                     "description": tool.description,
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            arg_name: {
-                                "type": json_type,
-                                "description": tool.args.description
-                            }
-                        },
-                        "required": [arg_name] if tool.required else []
-                    }
+                    "parameters": parameters
                 }
             })
         payload["tools"] = tools

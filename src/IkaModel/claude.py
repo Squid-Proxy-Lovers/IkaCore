@@ -67,16 +67,17 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
     if model.agent_tools:
         tools = []
         for tool in model.agent_tools:
-            arg_name = tool.args.type
-            json_type = "string"
-            if arg_name in ["stage_index"]:
-                json_type = "integer"
-            elif arg_name == "input":
+            if tool.args.properties:
+                input_schema = tool.args.properties
+            else:
+                arg_name = tool.args.type
                 json_type = "string"
-            tools.append({
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": {
+                if arg_name in ["stage_index"]:
+                    json_type = "integer"
+                elif arg_name == "input":
+                    json_type = "string"
+                
+                input_schema = {
                     "type": "object",
                     "properties": {
                         arg_name: {
@@ -86,6 +87,11 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
                     },
                     "required": [arg_name] if tool.required else []
                 }
+
+            tools.append({
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": input_schema
             })
         payload["tools"] = tools
         payload["tool_choice"] = {"type": "auto"}

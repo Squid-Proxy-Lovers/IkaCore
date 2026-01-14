@@ -6,12 +6,12 @@ import time
 import builtins
 from copy import deepcopy
 
-from tools import IkaTools
-from stages import IkaStage
-from squidrag import IkaRAGSource
-from memory import Memory
-from logging_utils import IkaLogger
-from checkpoint import CheckpointStore
+from IkaCore.tools import IkaTools
+from IkaCore.stages import IkaStage
+from IkaCore.ikarag import IkaRAGSource
+from IkaCore.memory import Memory
+from IkaCore.logging_utils import IkaLogger
+from IkaCore.checkpoint import CheckpointStore
 
 src_dir = Path(__file__).parent.parent
 if str(src_dir) not in sys.path:
@@ -26,7 +26,7 @@ from IkaModel.base import (
     init_global_long_term_memory,
     get_global_long_term_memory,
 )
-from IkaModel.chat_interface import chat, summarise_message_history
+from IkaModel.chat_interface import chat, summarise_message_history, execute_tool_calls, get_provider
 
 
 class IkaBaseAgent:
@@ -77,8 +77,8 @@ class IkaBaseAgent:
             raise ValueError("prompt is required for the agent")
         if not role:
             raise ValueError("role is required for the agent")
-        if not tools and not Stages:
-            raise ValueError("tools is required for the agent when no stages are provided")
+        # if not tools and not Stages:
+        #     raise ValueError("tools is required for the agent when no stages are provided")
         if not model_id:
             raise ValueError("model_id is required for the agent")
         if not api_key:
@@ -474,8 +474,9 @@ class IkaBaseAgent:
                 converted.append(tool)
                 continue
             tool_args = ToolArgs(
-                type="input",
+                type="object" if tool.parameters else "input",
                 description=tool.description or "Tool input",
+                properties=tool.parameters
             )
             converted.append(
                 AgentTool(
@@ -915,7 +916,7 @@ class IkaBaseAgent:
         tool_executors = self.build_tool_executors(self.tools, memory_access=self.memory_access, subagents=self.subagents)
         
         for _ in range(self.maxsteps):
-            self._enforce_rate_limit()
+            self._enforce_rate_limit_model()
             step_start = time.time()
             response = chat(
                 barebone_model, 
@@ -944,7 +945,17 @@ class IkaBaseAgent:
                 final = agent_end_text or last_content
                 return final, final
 
-            messages = [{"role": "assistant", "content": last_content}]
+            # Handle pending tool calls that weren't executed by chat (e.g. chained calls)
+            if tool_calls:
+                provider = get_provider(barebone_model.model_id)
+                tool_msgs, tool_res = execute_tool_calls(tool_calls, tool_executors, provider, self.step_timeout)
+                if self.logger:
+                    self.logger.log_tool_results(tool_calls, tool_res)
+                messages.extend(tool_msgs)
+
+            # Do NOT reset messages to preserve context
+            # messages = [{"role": "assistant", "content": last_content}]
+
             if self.logger:
                 self.logger.log_step(
                     stage_name="simple",
@@ -955,7 +966,10 @@ class IkaBaseAgent:
                     cost=response.get("cost", {}),
                     elapsed=time.time() - step_start,
                 )
-            remaining_after = max(0, self.maxsteps - (_ + 1))
+            # Ensure maxsteps is an integer and _ is an integer
+            max_steps_val = int(self.maxsteps)
+            current_step_val = int(_) if _ is not None else 0
+            remaining_after = max(0, max_steps_val - (current_step_val + 1))
             self._save_agent_checkpoint(remaining_after, last_content)
 
         return last_content, last_content
