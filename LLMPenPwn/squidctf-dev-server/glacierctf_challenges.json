@@ -1,0 +1,24 @@
+{
+  "aes-zippy": {
+    "path": "challenges/aes-zippy",
+    "category": "crypto",
+    "year": "2025",
+    "challenge": "aes-zippy",
+    "event": "GlacierCTF2025"
+  },
+  "secret-sharing-platform": {
+    "path": "challenges/secret-sharing-platform",
+    "category": "crypto",
+    "year": "2025",
+    "challenge": "secret-sharing-platform",
+    "event": "GlacierCTF2025"
+  },
+  "hypercube": {
+    "path": "challenges/hypercube",
+    "category": "crypto",
+    "year": "2025",
+    "challenge": "hypercube",
+    "event": "GlacierCTF2025"
+  }
+}
+
