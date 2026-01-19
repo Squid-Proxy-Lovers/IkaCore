@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Optional
 
 
 def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_history: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Creates Anthropic Claude API payload from model and messages."""
     message_history = message_history or {
         "system": {"message": "", "tokens": 0},
         "first_input": {"message": "", "tokens": 0},
@@ -84,10 +83,11 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
         tools = []
         for tool in model.agent_tools:
             if tool.args.properties and len(tool.args.properties) > 0:
+                required_list = tool.args.properties.pop("__required__", [])
                 input_schema = {
                     "type": "object",
                     "properties": tool.args.properties,
-                    "required": []
+                    "required": required_list
                 }
             else:
                 arg_name = tool.args.type

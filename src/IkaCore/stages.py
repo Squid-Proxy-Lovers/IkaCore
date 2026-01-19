@@ -18,6 +18,7 @@ class IkaStage:
         hitl: bool = False,
         memory_access: Optional[Dict[str, bool]] = None,
         long_term_filter: Optional[callable] = None,
+        checkpoint: bool = False,
     ):
         self.name = name
         self.prompt = prompt
@@ -29,6 +30,7 @@ class IkaStage:
         self.hitl = hitl
         self.memory_access = memory_access  # If None, inherits from agent
         self.long_term_filter = long_term_filter  # Optional stage-specific filter applied after search results
+        self.checkpoint = checkpoint
 
         self.tools.append(
             AgentTool(

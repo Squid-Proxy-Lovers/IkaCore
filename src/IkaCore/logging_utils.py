@@ -138,15 +138,10 @@ class IkaLogger:
             "claude-3-sonnet": (3.00, 3.00, 15.00),
             "claude-3-haiku": (0.250, 0.250, 1.250),
             "claude-sonnet-4": (3.00, 3.00, 15.00),
-            "deepseek-v3.2": (0.140, 0.140, 0.280),
-            "deepseek-r1": (0.140, 0.140, 0.280),
+            "deepseek-chat": (0.140, 0.140, 0.280),
             "gemini-1.5-pro": (3.50, 3.50, 10.50),
         }
-        model_name = model_id.lower()
-        for key, val in cost_map.items():
-            if key in model_name:
-                return val
-        return None
+        return cost_map.get(model_id.lower(), None)
 
     def compute_cost(self, model_id: str, usage: Dict[str, Any]) -> Dict[str, float]:
         model_cost = self.get_model_cost(model_id)

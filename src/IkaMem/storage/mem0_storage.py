@@ -14,7 +14,6 @@ from IkaMem.storage.interface import Storage
 
 
 class Mem0Store(Storage):
-    """mem0 semantic memory storage."""
 
     def __init__(self, memory_type: str, config: Optional[dict[str, Any]] = None):
         super().__init__()
@@ -205,7 +204,6 @@ class Mem0Store(Storage):
         return [r for r in results["results"]]
 
     def reset(self) -> None:
-        """reset mem0."""
         if self.memory:
             self.memory.reset()
 

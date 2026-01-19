@@ -1,7 +1,26 @@
 from typing import Callable
+import uuid
 
+
+def validate_required_fields(fields: Dict[str, object]) -> None:
+    for field_name, value in fields.items():
+        if not value:
+            raise ValueError(f"{field_name} is required for the tool")
 class IkaTools:
-    def __init__(self, id:str, name:str, description:str, parameters:dict, limit_calls:int = 1, required:bool = True, execute_function:Callable = None, parallel:bool = True):
+    def __init__(
+        self, 
+        name:str, 
+        description:str, 
+        parameters:dict, 
+        limit_calls:int = 1, 
+        required:bool = True, 
+        execute_function:Callable = None, 
+        parallel:bool = True, 
+        id:str = None
+    ) -> None:
+    
+        if id is None:
+            id = uuid.uuid4().hex
         self.id = id
         self.name = name
         self.description = description
@@ -9,7 +28,16 @@ class IkaTools:
         self.limit_calls = limit_calls
         self.required = required
         self.execute_function = execute_function
-        self.parallel = parallel  # By default, tools can run in parallel
+        self.parallel = parallel
+
+        validate_required_fields(
+            {
+                "name": name,
+                "description": description,
+                "parameters": parameters,
+                "execute_function": execute_function,
+            }
+        )
 
     def execute(self, parameters:dict) -> str:
         if self.execute_function:

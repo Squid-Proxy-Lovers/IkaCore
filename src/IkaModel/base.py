@@ -119,7 +119,6 @@ def init_global_long_term_memory(
 
 
 def get_global_long_term_memory() -> Optional["LTMemory"]:
-    """get the global long-term memory instance."""
     return _GLOBAL_LONG_TERM_MEMORY
 
 
@@ -136,7 +135,8 @@ class BareBoneModel:
         temperature: float = 0,
         parallel_tool_calls: bool = False,
         agent_name: Optional[str] = None,
-        agent_hierarchy: Optional[List[str]] = None
+        agent_hierarchy: Optional[List[str]] = None,
+        suppress_init_output: bool = False
         ):
 
         # User MUST provide the following:
@@ -162,25 +162,26 @@ class BareBoneModel:
         self.agent_name = agent_name
         self.agent_hierarchy = agent_hierarchy or []
         
-        # Display prompts using CLI output
-        cli = get_cli_output()
-        hierarchy = self.agent_hierarchy or [self.agent_name or "Agent"]
+        # Display prompts using CLI output (unless suppressed)
+        if not suppress_init_output:
+            cli = get_cli_output()
+            hierarchy = self.agent_hierarchy or [self.agent_name or "Agent"]
 
-        if self.system_prompt:
-            cli.emit(
-                OutputType.AGENT_INIT,
-                f"System Prompt:\n{self.system_prompt}",
-                hierarchy,
-                step=0
-            )
+            if self.system_prompt:
+                cli.emit(
+                    OutputType.AGENT_INIT,
+                    f"System Prompt:\n{self.system_prompt}",
+                    hierarchy,
+                    step=0
+                )
 
-        if self.content_prompt:
-            cli.emit(
-                OutputType.AGENT_INIT,
-                f"Content Prompt:\n{self.content_prompt}",
-                hierarchy,
-                step=0
-            )
+            if self.content_prompt:
+                cli.emit(
+                    OutputType.AGENT_INIT,
+                    f"Content Prompt:\n{self.content_prompt}",
+                    hierarchy,
+                    step=0
+                )
 
 
 _SUMMARY_PROMPT_PATH = Path(__file__).parent / "summary_prompt"

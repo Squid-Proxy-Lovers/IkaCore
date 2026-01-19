@@ -1,11 +1,12 @@
-from typing import Optional, List, Dict, Callable, get_type_hints
+import builtins
 import json
 import re
 import sys
-from pathlib import Path
 import time
-import builtins
+import typing
 from copy import deepcopy
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, get_type_hints
 
 from IkaCore.tools import IkaTools
 from IkaCore.stages import IkaStage
@@ -19,7 +20,7 @@ src_dir = Path(__file__).parent.parent
 if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 sys.path.insert(0, str(src_dir / "IkaMem"))
-from IkaMem import STMemory, LTMemory, STMemItem, LTMemItem
+from IkaMem import STMemory, LTMemory  # type: ignore
 
 from IkaModel.base import (
     BareBoneModel,
@@ -30,14 +31,15 @@ from IkaModel.base import (
 )
 from IkaModel.chat_interface import chat, summarise_message_history, execute_tool_calls, get_provider
 
+from .agent_memory import AgentMemoryMixin
+from .agent_tools import AgentToolsMixin
+from .agent_execution import AgentExecutionMixin
+
 
 # Instruction appended to all agent prompts to ensure proper task completion
 AGENT_END_INSTRUCTION = """
 CRITICAL: When you call the agent_end tool, you MUST provide your final answer/output in the tool arguments.
-The agent_end tool REQUIRES a non-empty response. You must pass your final answer using one of these argument names:
-- "input": Your final answer/output
-- "final": Your final answer/output  
-- "message": Your final answer/output
+The agent_end tool REQUIRES a non-empty response. You must pass your final answer using the "input" parameter.
 
 DO NOT call agent_end with empty arguments {}. This will cause an error.
 Your final answer must be based on your initial prompt and any context you have gathered.
@@ -45,7 +47,83 @@ The output format is given by the rest of the prompt.
 """
 
 
-class IkaBaseAgent:
+class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
+    @staticmethod
+    def _validate_required_fields(fields: Dict[str, object]) -> None:
+        for field_name, value in fields.items():
+            if not value:
+                raise ValueError(f"{field_name} is required for the agent")
+
+    @staticmethod
+    def _build_memory_access_defaults(
+        memory_enabled: bool, overrides: Optional[Dict[str, bool]] = None
+    ) -> Dict[str, bool]:
+        defaults = {
+            "short_term_save": True,
+            "short_term_search": True,
+            "long_term_save": True,
+            "long_term_search": True,
+        }
+        if not memory_enabled:
+            defaults = {key: False for key in defaults}
+
+        if overrides:
+            defaults.update(overrides)
+        return defaults
+
+    @staticmethod
+    def _initial_message_history(system_prompt: Optional[str]) -> Dict[str, Dict[str, object]]:
+        return {
+            "system": {"message": system_prompt or "", "tokens": 0},
+            "first_input": {"message": "", "tokens": 0},
+            "summary": {"message": "", "tokens": 0},
+            "messages": {},
+        }
+
+    def _validate_final_answer_checks(
+        self,
+        final_answer_check: Optional[List[Callable]],
+    ) -> List[Callable]:
+        
+        if final_answer_check is None:
+            return []
+
+        for check in final_answer_check:
+            if not callable(check):
+                raise ValueError("final_answer_check must be a list of callable functions")
+
+            func_name = getattr(check, "__name__", "unknown")
+            docstring = (check.__doc__ or "").strip()
+            if not docstring:
+                raise ValueError(
+                    f"final_answer_check function '{func_name}' must have a docstring explaining what it does"
+                )
+
+            try:
+                hints = get_type_hints(check)
+                return_type = hints.get("return")
+            except (TypeError, AttributeError):
+                return_type = None
+
+            if return_type is not None:
+                get_origin = getattr(typing, "get_origin", None)
+                get_args = getattr(typing, "get_args", None)
+                origin = get_origin(return_type) if get_origin else None
+                args = get_args(return_type) if (origin and get_args) else ()
+                is_bool = return_type is bool or (origin is not None and bool in args)
+                if not is_bool:
+                    raise ValueError(
+                        f"final_answer_check function '{func_name}' must have return type annotation of bool, got {return_type}"
+                    )
+
+            result = check(self.message_history)
+            if not isinstance(result, bool):
+                raise ValueError(
+                    f"final_answer_check function '{func_name}' must return a boolean, got {type(result).__name__}"
+                )
+
+        return final_answer_check
+
     def __init__(
         self,
         name: str,
@@ -54,8 +132,7 @@ class IkaBaseAgent:
         system_prompt: Optional[str] = None,
         start_prompt: Optional[str] = None,
         end_prompt: Optional[str] = None,
-        role: str = "",
-        tools: List[IkaTools] = None,
+        tools: Optional[List[IkaTools]] = None,
         model_id: str = "",
         api_key: str = "",
         api_url: Optional[str] = None,
@@ -64,7 +141,7 @@ class IkaBaseAgent:
         checkpoint: bool = False,
         Batch: bool = False,
         BatchMax: int = 3,
-        Stages: List[IkaStage] = None,
+        Stages: Optional[List[IkaStage]] = None,
         subagents: Optional[List["IkaBaseAgent"]] = None,
         next_agent: Optional["IkaBaseAgent"] = None,
         feedback_agent: Optional["IkaBaseAgent"] = None,
@@ -81,25 +158,22 @@ class IkaBaseAgent:
         logging_file: str = "logs.txt",
         show_usage_level0: bool = True,
         checkpoint_db_path: str = "checkpoints.db",
-        enable_summarization: bool = True,
+        summarize_final: bool = False,
+        use_async: bool = False,
     ):
         tools = tools or []
         Stages = Stages or []
+        subagents = subagents or []
 
-        if not name:
-            raise ValueError("name is required for the agent")
-        if not description:
-            raise ValueError("description is required for the agent")
-        if not prompt:
-            raise ValueError("prompt is required for the agent")
-        if not role:
-            raise ValueError("role is required for the agent")
-        # if not tools and not Stages:
-        #     raise ValueError("tools is required for the agent when no stages are provided")
-        if not model_id:
-            raise ValueError("model_id is required for the agent")
-        if not api_key:
-            raise ValueError("api_key is required for the agent")
+        self._validate_required_fields(
+            {
+                "name": name,
+                "description": description,
+                "prompt": prompt,
+                "model_id": model_id,
+                "api_key": api_key,
+            }
+        )
 
         self.name = name
         self.description = description
@@ -107,10 +181,8 @@ class IkaBaseAgent:
         self.system_prompt = system_prompt
         self.start_prompt = start_prompt
         self.end_prompt = end_prompt
-        self.role = role
         self.tools = tools
         self.model_id = model_id
-
         self.api_key = api_key
         self.api_url = api_url if api_url else self.geturl(model_id)
         self.max_tokens = max_tokens
@@ -118,90 +190,36 @@ class IkaBaseAgent:
         self.checkpoint = checkpoint
         self.Batch = Batch
         self.BatchMax = BatchMax
-
         self.Stages = Stages
-        self.subagents = subagents or []
+        self.subagents = subagents
         self.next_agent = next_agent
         self.feedback_agent = feedback_agent
-
         self.maxsteps = maxsteps
         self.step_timeout = step_timeout
         self.RAGSource = RAGSource
         self.memory = memory
         self.memory_finder = memory_finder
-        
-        # Memory access control: defaults allow all if memory is enabled
-        # Keys: "short_term_save", "short_term_search", "long_term_save", "long_term_search"
-        default_memory_access = {
-            "short_term_save": True,
-            "short_term_search": True,
-            "long_term_save": True,
-            "long_term_search": True,
-        } if memory else {
-            "short_term_save": False,
-            "short_term_search": False,
-            "long_term_save": False,
-            "long_term_search": False,
-        }
-
-        self.memory_access = {**default_memory_access, **(memory_access or {})}
-        
-        self.final_answer_check = final_answer_check
-        self.message_history = {
-            "system": {"message": self.system_prompt or "", "tokens": 0},
-            "first_input": {"message": "", "tokens": 0},
-            "summary": {"message": "", "tokens": 0},
-            "messages": {},
-        }
-
+        self.memory_access = self._build_memory_access_defaults(memory, memory_access)
+        self.message_history = self._initial_message_history(self.system_prompt)
         self.logging_level = logging_level
         self.logging_file = logging_file
         self.logger = IkaLogger(logging_level, logging_file, show_usage_level0=show_usage_level0)
+        
+        if logging_level == 3:
+            import logging
+            logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            logging.getLogger("IkaModel.chat_interface").setLevel(logging.DEBUG)
         self.rate_limit_per_min = rate_limit_per_min
         self.per_tool_rate_limit = per_tool_rate_limit or {}
         self._last_api_call_ts: float = 0.0
         self.checkpoint_store = CheckpointStore(checkpoint_db_path) if checkpoint else None
         self._resume_checkpoint: Optional[dict] = None
-        
         self.short_term_memory: Optional[STMemory] = None
         self.long_term_memory: Optional[LTMemory] = get_global_long_term_memory()
-        self.enable_summarization = enable_summarization
-
-        if final_answer_check is None:
-            final_answer_check = []
+        self.summarize_final = summarize_final
+        self.use_async = use_async
+        self.final_answer_checks = self._validate_final_answer_checks(final_answer_check)
         
-        for check in final_answer_check:
-            if not callable(check):
-                raise ValueError("final_answer_check must be a list of callable functions")
-            
-            func_name = getattr(check, '__name__', 'unknown')
-            
-            if not check.__doc__ or not check.__doc__.strip():
-                raise ValueError(f"final_answer_check function '{func_name}' must have a docstring explaining what it does")
-            
-            try:
-                hints = get_type_hints(check)
-                return_type = hints.get('return', None)
-                if return_type is not None:
-                    import typing
-                    if hasattr(typing, 'get_origin'):
-                        origin = typing.get_origin(return_type)
-                        args = typing.get_args(return_type) if origin else ()
-                        is_bool = (return_type is bool or (origin is not None and bool in args))
-                    else:
-                        is_bool = (return_type is bool)
-                    
-                    if not is_bool:
-                        raise ValueError(f"final_answer_check function '{func_name}' must have return type annotation of bool, got {return_type}")
-            except (TypeError, AttributeError):
-                pass
-            
-            result = check(self.message_history)
-            if not isinstance(result, bool):
-                raise ValueError(f"final_answer_check function '{func_name}' must return a boolean, got {type(result).__name__}")
-        
-        self.final_answer_checks = final_answer_check
-
         if self.Stages:
             if self.subagents or self.next_agent or self.feedback_agent:
                 raise ValueError("Subagents/next/feedback agents are not allowed when stages are defined.")
@@ -209,13 +227,10 @@ class IkaBaseAgent:
             if self.subagents and self.next_agent:
                 raise ValueError("Only one of subagents or next_agent may be set when no stages are provided.")
 
-    # --------------------
-    # Rate limiting
-    # --------------------
-    def _enforce_rate_limit(self, per_min: Optional[float], last_ts_attr: str) -> None:
-        if not per_min or per_min <= 0:
+    def _enforce_rate_limit(self, per_minute: Optional[float], last_ts_attr: str) -> None:
+        if not per_minute or per_minute <= 0:
             return
-        interval = 60.0 / per_min
+        interval = 60.0 / per_minute
         now = time.time()
         last_ts = getattr(self, last_ts_attr, 0.0)
         elapsed = now - last_ts
@@ -235,10 +250,6 @@ class IkaBaseAgent:
         self._enforce_rate_limit(effective, last_attr)
 
 
-    # --------------------
-    # User input handling
-    # --------------------
-
     def _prompt_hitl_input(self, stage_name: str, last_response: str = "") -> Optional[str]:
         if self.logger:
             self.logger.log_hitl_prompt(stage_name)
@@ -252,9 +263,6 @@ class IkaBaseAgent:
         except EOFError:
             return None
 
-    # --------------------
-    # Workflow integration
-    # --------------------
     def inject_workflow_context(self, context: str) -> None:
         if not context:
             return
@@ -274,12 +282,16 @@ class IkaBaseAgent:
                 if "subagents" in wiring:
                     stage.subagents = wiring["subagents"]
 
-    # --------------------
-    # Checkpoint helpers
-    # --------------------
     def _save_stage_checkpoint(self, stage_index: int, remaining_steps: int, last_content: str) -> Optional[str]:
         if not self.checkpoint_store:
             return None
+        
+        if stage_index < len(self.Stages):
+            stage = self.Stages[stage_index]
+            stage_checkpoint_enabled = getattr(stage, "checkpoint", False)
+            if not stage_checkpoint_enabled:
+                return None
+        
         payload = {
             "scope": "stage",
             "agent_name": self.name,
@@ -291,7 +303,21 @@ class IkaBaseAgent:
             "memory_access": deepcopy(self.memory_access),
             "timestamp": time.time(),
         }
-        return self.checkpoint_store.save_checkpoint(scope="stage", payload=payload)
+        checkpoint_uid = self.checkpoint_store.save_checkpoint(scope="stage", payload=payload)
+        
+        if checkpoint_uid:
+            cli = get_cli_output()
+            stage_name = self.Stages[stage_index].name if stage_index < len(self.Stages) else "unknown"
+            current_hierarchy = getattr(self, "_parent_hierarchy", []) + [self.name, f"Stage {stage_index}: {stage_name}"]
+            checkpoint_msg = f"Checkpoint saved at Stage {stage_index}: {stage_name}\nCheckpoint UID: {checkpoint_uid}\nRemaining steps: {remaining_steps}"
+            cli.emit(
+                OutputType.AGENT_INIT,
+                checkpoint_msg,
+                current_hierarchy,
+                step=0,
+            )
+        
+        return checkpoint_uid
 
     def _save_agent_checkpoint(self, remaining_steps: int, last_content: str) -> Optional[str]:
         if not self.checkpoint_store:
@@ -311,122 +337,11 @@ class IkaBaseAgent:
     def load_checkpoint(self, uid: str) -> Optional[dict]:
         if not self.checkpoint_store:
             return None
-        cp = self.checkpoint_store.load_checkpoint(uid)
-        if cp:
-            self._resume_checkpoint = cp
-        return cp
+        checkpoint_data = self.checkpoint_store.load_checkpoint(uid)
+        if checkpoint_data:
+            self._resume_checkpoint = checkpoint_data
+        return checkpoint_data
 
-
-    # --------------------
-    # IkaMemory handling
-    # --------------------
-
-    def init_short_term_memory(self, embedder_config: dict) -> None:
-        self.short_term_memory = STMemory(embedder_config=embedder_config)
-        self.short_term_memory.agent = self.name
-    
-    def _save_to_short_term(self, data: str, metadata: Optional[Dict] = None) -> str:
-        if not self.short_term_memory:
-            return "error: short-term memory not initialized"
-        
-        try:
-            item = STMemItem(data=data, agent=self.name, metadata=metadata or {})
-            self.short_term_memory.storage.save(item.data, item.metadata)
-            return f"saved to short-term memory: {data[:50]}..."
-        except Exception as e:
-            return f"error saving to short-term memory: {str(e)}"
-    
-    def _save_to_long_term(self, task: str, output: str) -> str:
-        """internal: save to long-term memory."""
-        if not self.long_term_memory:
-            return "error: long-term memory not initialized"
-        
-        try:
-            from datetime import datetime
-            item = LTMemItem(
-                agent=self.name,
-                task=task,
-                expected_output=output,
-                datetime=datetime.now().isoformat(),
-                quality=1.0,  # default quality
-                metadata={}
-            )
-            self.long_term_memory.save(item)
-            return f"saved to long-term memory - task: {task[:30]}..."
-        except Exception as e:
-            return f"error saving to long-term memory: {str(e)}"
-
-    def _search_short_term(self, query: str, limit: int = 5, score_threshold: float = 0.6) -> dict:
-        """internal: search short-term memory; returns structured results."""
-        if not self.short_term_memory:
-            return {"error": "short-term memory not initialized"}
-        query = (query or "").strip()
-        if not query:
-            return {"error": "query is required"}
-        limit = max(1, min(int(limit or 5), 50))
-        score_threshold = max(0.0, min(float(score_threshold or 0.6), 1.0))
-        try:
-            results = self.short_term_memory.search(query=query, limit=limit, score_threshold=score_threshold)
-            structured = []
-            for result in results or []:
-                if isinstance(result, dict):
-                    structured.append({
-                        "data": result.get("data") or result.get("content") or str(result),
-                        "metadata": result.get("metadata", {}),
-                    })
-                else:
-                    structured.append({"data": str(result), "metadata": {}})
-            return {
-                "query": query,
-                "limit": limit,
-                "score_threshold": score_threshold,
-                "count": len(structured),
-                "results": structured,
-            }
-        except Exception as e:
-            return {"error": f"error searching short-term memory: {str(e)}"}
-
-    def _search_long_term(self, query: str, limit: int = 5, score_threshold: float = 0.6, filter_func: Optional[Callable] = None) -> dict:
-        """internal: search long-term memory; returns structured results."""
-        if not self.long_term_memory:
-            return {"error": "long-term memory not initialized"}
-        query = (query or "").strip()
-        if not query:
-            return {"error": "query is required"}
-        limit = max(1, min(int(limit or 5), 50))
-        score_threshold = max(0.0, min(float(score_threshold or 0.6), 1.0))
-        try:
-            results = self.long_term_memory.search(query=query, limit=limit, score_threshold=score_threshold)
-            if filter_func:
-                try:
-                    results = filter_func(results)
-                except Exception:
-                    pass
-            structured = []
-            for result in results or []:
-                if hasattr(result, "task") and hasattr(result, "expected_output"):
-                    structured.append({
-                        "task": getattr(result, "task", "") or "",
-                        "output": getattr(result, "expected_output", "") or "",
-                        "metadata": getattr(result, "metadata", {}) if hasattr(result, "metadata") else {},
-                    })
-                elif isinstance(result, dict):
-                    structured.append({
-                        "task": result.get("task", result.get("content", "")),
-                        "output": result.get("expected_output", result.get("output", "")),
-                        "metadata": result.get("metadata", {}),
-                    })
-                else:
-                    structured.append({"task": str(result), "output": "", "metadata": {}})
-            return {
-                "query": query,
-                "limit": limit,
-                "score_threshold": score_threshold,
-                "count": len(structured),
-                "results": structured,
-            }
-        except Exception as e:
-            return {"error": f"error searching long-term memory: {str(e)}"}
 
     @staticmethod
     def geturl(model_id: str) -> str:
@@ -442,272 +357,32 @@ class IkaBaseAgent:
         return "https://api.openai.com/v1/chat/completions"
 
 
-    # --------------------
-    # Agent to AgentTool conversion
-    # --------------------
-
-    def _convert_subagents_to_tools(self, subagents: Optional[List["IkaBaseAgent"]] = None) -> List[AgentTool]:
-        """
-        Convert subagents to AgentTools, we do this by creating a new AgentTool for each subagent and adding it to the list of agent tools.
-
-        Args:
-            subagents: Optional list of subagents to convert to AgentTools
-
-        Returns:
-            List of AgentTools
-        """
-
-
-        agent_tools: List[AgentTool] = []
-        source_subagents = subagents if subagents is not None else self.subagents
-        for subagent in source_subagents:
-            tool_args = ToolArgs(
-                type="input",
-                description=f"Task request to subagent {getattr(subagent, 'name', 'subagent')}",
-            )
-            agent_tool = AgentTool(
-                id=getattr(subagent, "name", "subagent"),
-                name=getattr(subagent, "name", "subagent"),
-                description=getattr(subagent, "description", "Subagent"),
-                args=tool_args,
-                required=True,
-            )
-            agent_tools.append(agent_tool)
-        return agent_tools
-
-    def _convert_tools_to_agent_tools(self, stage_tools: List[IkaTools]) -> List[AgentTool]:
-        """
-        We convert the high level ikaTools to AgentTools which strip away unessary details, leaving only required elements for the api 
-
-        Args:
-            stage_tools: List of ikaTools to convert to AgentTools
-
-        Returns:
-            List of AgentTools
-        """
-        converted: List[AgentTool] = []
-        for tool in stage_tools:
-            if isinstance(tool, AgentTool):
-                converted.append(tool)
-                continue
-            tool_args = ToolArgs(
-                type="object" if tool.parameters else "input",
-                description=tool.description or "Tool input",
-                properties=tool.parameters
-            )
-            converted.append(
-                AgentTool(
-                    id=tool.id,
-                    name=tool.name,
-                    description=tool.description,
-                    args=tool_args,
-                    required=tool.required,
-                )
-            )
-        return converted
-
-    # --------------------
-    # Subagent executor
-    # --------------------
-
-    def _build_subagent_executor(self, subagent: "IkaBaseAgent", parent_hierarchy: Optional[List[str]] = None) -> Callable:
-        """
-        Build a callable executor for a subagent, this is used to execute the subagent's execution function (since subagents behave like tools)
-
-        Args:
-            subagent: IkaBaseAgent to build an executor for
-            parent_hierarchy: Optional list of parent agent names for tracking hierarchy
-
-        Returns:
-            Callable executor for the subagent
-        """
-        def subagent_executor(args: dict) -> str:
-            task_input = args.get("input") or args.get("task") or ""
-            if not task_input:
-                return json.dumps({"error": "No input provided for subagent"})
-            
-            try:
-                if self.logger:
-                    self.logger.log_action(f"Calling subagent: {subagent.name}")
-                
-                # Store parent hierarchy in subagent for use in get_barebone
-                subagent._parent_hierarchy = parent_hierarchy or []
-                
-                subagent.message_history["first_input"]["message"] = task_input
-                subagent.prompt = task_input
-                
-                result = subagent.execution()
-                final_output = result.get("final_message", "")
-                summary = result.get("summary", final_output)
-                
-                if self.logger:
-                    self.logger.log_action(f"Subagent {subagent.name} completed")
-                
-                return summary or final_output
-            except Exception as e:
-                error_msg = f"Error executing subagent '{subagent.name}': {str(e)}"
-                if self.logger:
-                    self.logger.log_action(error_msg)
-                return json.dumps({"error": error_msg})
-        
-        return subagent_executor
-
-    def build_tool_executors(self, tools: List[IkaTools], memory_access: Optional[Dict[str, bool]] = None, long_term_filter: Optional[Callable] = None, subagents: Optional[List["IkaBaseAgent"]] = None, parent_hierarchy: Optional[List[str]] = None) -> Dict[str, Callable]:
-        tool_executors = {}
-        for tool in tools:
-            if hasattr(tool, 'execute_function') and tool.execute_function:
-                tool_executors[tool.name] = tool.execute_function
-        
-        # Add subagent executors
-        source_subagents = subagents if subagents is not None else self.subagents
-        if source_subagents:
-            for subagent in source_subagents:
-                subagent_name = getattr(subagent, "name", "subagent")
-                tool_executors[subagent_name] = self._build_subagent_executor(subagent, parent_hierarchy)
-        
-        # Add memory tool executors based on access control
-        effective_access = memory_access or self.memory_access
-        if self.short_term_memory:
-            if effective_access.get("short_term_save", False):
-                def short_save_executor(args: dict) -> str:
-                    self._enforce_rate_limit_tool("short_term_save")
-                    data = args.get("input") or args.get("data") or ""
-                    return self._save_to_short_term(data)
-                tool_executors["short_term_save"] = short_save_executor
-            
-            if effective_access.get("short_term_search", False):
-                def short_search_executor(args: dict) -> str:
-                    self._enforce_rate_limit_tool("short_term_search")
-                    query = args.get("query", "")
-                    limit = args.get("limit", 5)
-                    score_threshold = args.get("score_threshold", 0.6)
-                    result = self._search_short_term(query, limit=limit, score_threshold=score_threshold)
-                    return json.dumps(result)  # Convert dict to JSON string
-                tool_executors["short_term_search"] = short_search_executor
-        
-        if self.long_term_memory:
-            if effective_access.get("long_term_save", False):
-                def long_save_executor(args: dict) -> str:
-                    self._enforce_rate_limit_tool("long_term_save")
-                    data = args.get("data") or args.get("input") or ""
-                    if "|" in data:
-                        parts = data.split("|", 1)
-                        task = parts[0].strip()
-                        output = parts[1].strip()
-                        return self._save_to_long_term(task, output)
-                    return "error: long_term_save requires format 'task|output'"
-                tool_executors["long_term_save"] = long_save_executor
-            
-            if effective_access.get("long_term_search", False):
-                def long_search_executor(args: dict) -> str:
-                    self._enforce_rate_limit_tool("long_term_search")
-                    query = args.get("query", "")
-                    limit = args.get("limit", 5)
-                    score_threshold = args.get("score_threshold", 0.6)
-                    result = self._search_long_term(query, limit=limit, score_threshold=score_threshold, filter_func=long_term_filter)
-                    return json.dumps(result)  # Convert dict to JSON string
-                tool_executors["long_term_search"] = long_search_executor
-        
-        def agent_end_executor(args: dict) -> str:
-            content = args.get("input") or args.get("final") or args.get("message") or ""
-            if not content:
-                for key, value in args.items():
-                    if isinstance(value, str):
-                        stripped = value.strip()
-                        if stripped.startswith("{") or stripped.startswith("["):
-                            content = value
-                            break
-                        elif len(stripped) > 10:
-                            content = value
-                            break
-                    elif value and not isinstance(value, (dict, list)):
-                        content = str(value)
-                        break
-            
-            if not content or content.strip() == "":
-                raise ValueError("agent_end was called with empty arguments. You MUST provide your final answer/output in the agent_end tool arguments using 'input', 'final', or 'message' parameter.")
-            
-            stripped_content = content.strip()
-            if stripped_content in ["{}", "[]", "null", '""', "''"]:
-                raise ValueError(f"agent_end was called with invalid/empty content: '{stripped_content}'. You MUST provide a meaningful final answer, not empty JSON objects, arrays, or null values.")
-            
-            try:
-                parsed = json.loads(stripped_content)
-                if isinstance(parsed, dict):
-                    if len(parsed) == 0:
-                        raise ValueError(f"agent_end was called with empty JSON object: '{stripped_content}'. You MUST provide a meaningful final answer.")
-                    if len(parsed) == 1 and "functions" in parsed and isinstance(parsed["functions"], list) and len(parsed["functions"]) == 0:
-                        pass
-                elif isinstance(parsed, list) and len(parsed) == 0:
-                    raise ValueError(f"agent_end was called with empty JSON array: '{stripped_content}'. You MUST provide a meaningful final answer.")
-            except json.JSONDecodeError:
-                pass
-            
-            return "Agent execution ended successfully."
-        tool_executors["agent_end"] = agent_end_executor
-        
-        return tool_executors
-
-    # --------------------
-    # Stage building
-    # --------------------
-
     def final_prompt(self, stage: IkaStage) -> str:
         parts = [self.start_prompt, stage.prompt, self.end_prompt]
         if not any(parts):
             parts = [self.description, stage.prompt]
         base_prompt = "\n\n".join([p for p in parts if p])
-        return base_prompt + AGENT_END_INSTRUCTION
+        return base_prompt
 
-    def build_stage(self, stage: IkaStage) -> List[AgentTool]:
-        """
-        Build a list of AgentTools for a stage, we create a stage 
-        stage end tool allowing agent to exit the stage and move on to the next stage in linear order 
-        and agent end tool allowing agent to exit the agent loop with a final answer.
+    def _build_short_term_memory_tools(self, memory_access: Dict[str, bool]) -> List[AgentTool]:
+        tools: List[AgentTool] = []
+        if not self.short_term_memory:
+            return tools
 
-        we also create memory tools for the stage, these are used to save and search memory for the stage
-        allowing for fine grained control over memory access.
-        """
-
-
-        stage_tools = self._convert_tools_to_agent_tools(stage.tools)
-        subagent_tools = self._convert_subagents_to_tools(getattr(stage, "subagents", None))
-
-        is_last_stage = (stage == self.Stages[-1])
-
-        if is_last_stage:
-            # For last stage: add agent_end_tool and remove stage_end
-            agent_end_tool = AgentTool(
-                id="agent_end",
-                name="agent_end",
-                description="End the agent loop with a final answer. Use this tool when you have completed the task. Provide the final output as detailed as possible, this should be based on your initial prompt and any context you have gathered. CRITICAL: You MUST provide your final answer in the 'input' parameter. Do NOT call this tool with empty arguments.",
-                args=ToolArgs(type="input", description="Final response content. This is REQUIRED - provide your complete final answer here."),
-                required=True,
-            )
-            stage_tools.append(agent_end_tool)
-            # Remove stage_end tool by finding it by name (not string comparison)
-            stage_end_idx = next((i for i, t in enumerate(stage_tools) if t.name == "stage_end"), None)
-            if stage_end_idx is not None:
-                stage_tools.pop(stage_end_idx)
-        # Get stage-specific memory access (inherits from agent if not overridden)
-        stage_memory_access = getattr(stage, "memory_access", None) or self.memory_access
-        
-        memory_tools = []
-        
-        # Short-term memory tools
-        if self.short_term_memory:
-            if stage_memory_access.get("short_term_save", False):
-                short_save_tool = AgentTool(
+        if memory_access.get("short_term_save", False):
+            tools.append(
+                AgentTool(
                     id="short_term_save",
                     name="short_term_save",
                     description="Save data to short-term memory for this agent. Use for temporary context or insights.",
                     args=ToolArgs(type="input", description="Data or insight to save temporarily."),
                     required=False,
                 )
-                memory_tools.append(short_save_tool)
+            )
             
-            if stage_memory_access.get("short_term_search", False):
-                short_search_tool = AgentTool(
+        if memory_access.get("short_term_search", False):
+            tools.append(
+                AgentTool(
                     id="short_term_search",
                     name="short_term_search",
                     description="Search short-term memory for relevant information. Returns matching entries sorted by relevance.",
@@ -717,28 +392,34 @@ class IkaBaseAgent:
                         properties={
                             "query": {"type": "string", "description": "Search query to find relevant memory entries"},
                             "limit": {"type": "integer", "description": "Maximum number of results (default: 5)", "default": 5},
-                            "score_threshold": {"type": "number", "description": "Minimum similarity score 0-1 (default: 0.6)", "default": 0.6}
+                            "score_threshold": {"type": "number", "description": "Minimum similarity score 0-1 (default: 0.6)", "default": 0.6},
                         },
-                        required=["query"]
+                        required=["query"],
                     ),
                     required=False,
                 )
-                memory_tools.append(short_search_tool)
-        
-        # Long-term memory tools
-        if self.long_term_memory:
-            if stage_memory_access.get("long_term_save", False):
-                long_save_tool = AgentTool(
+            )
+        return tools
+
+    def _build_long_term_memory_tools(self, memory_access: Dict[str, bool]) -> List[AgentTool]:
+        tools: List[AgentTool] = []
+        if not self.long_term_memory:
+            return tools
+
+        if memory_access.get("long_term_save", False):
+            tools.append(
+                AgentTool(
                     id="long_term_save",
                     name="long_term_save",
                     description="Save task and output to long-term memory. Format: task|output",
                     args=ToolArgs(type="input", description="Data or insight to save forever.", data="task|output"),
                     required=False,
                 )
-                memory_tools.append(long_save_tool)
+            )
             
-            if stage_memory_access.get("long_term_search", False):
-                long_search_tool = AgentTool(
+        if memory_access.get("long_term_search", False):
+            tools.append(
+                AgentTool(
                     id="long_term_search",
                     name="long_term_search",
                     description="Search long-term memory for relevant past tasks and outputs. Returns matching entries sorted by relevance.",
@@ -748,18 +429,47 @@ class IkaBaseAgent:
                         properties={
                             "query": {"type": "string", "description": "Search query to find relevant memory entries"},
                             "limit": {"type": "integer", "description": "Maximum number of results (default: 5)", "default": 5},
-                            "score_threshold": {"type": "number", "description": "Minimum similarity score 0-1 (default: 0.6)", "default": 0.6}
+                            "score_threshold": {"type": "number", "description": "Minimum similarity score 0-1 (default: 0.6)", "default": 0.6},
                         },
-                        required=["query"]
+                        required=["query"],
                     ),
                     required=False,
                 )
-                memory_tools.append(long_search_tool)
+            )
+        return tools
 
-        # stage_tools already has agent_end_tool appended for last stage
+    def _build_stage_memory_tools(self, stage_memory_access: Dict[str, bool]) -> List[AgentTool]:
+        tools: List[AgentTool] = []
+        tools.extend(self._build_short_term_memory_tools(stage_memory_access))
+        tools.extend(self._build_long_term_memory_tools(stage_memory_access))
+        return tools
+
+    def build_stage(self, stage: IkaStage) -> List[AgentTool]:
+        stage_tools = self._convert_tools_to_agent_tools(stage.tools)
+        subagent_tools = self._convert_subagents_to_tools(getattr(stage, "subagents", None))
+
+        is_last_stage = stage == self.Stages[-1]
+
+        if is_last_stage:
+            agent_end_tool = AgentTool(
+                id="agent_end",
+                name="agent_end",
+                description="End the agent loop with a final answer. Use this tool when you have completed the task. Provide the final output as detailed as possible, this should be based on your initial prompt and any context you have gathered. CRITICAL: You MUST provide your final answer in the 'input' parameter. Do NOT call this tool with empty arguments.",
+                args=ToolArgs(type="input", description="Final response content. This is REQUIRED - provide your complete final answer here."),
+                required=True,
+            )
+            stage_tools.append(agent_end_tool)
+
+            stage_end_index = next((i for i, t in enumerate(stage_tools) if t.name == "stage_end"), None)
+            if stage_end_index is not None:
+                stage_tools.pop(stage_end_index)
+
+        stage_memory_access = getattr(stage, "memory_access", None) or self.memory_access
+        memory_tools = self._build_stage_memory_tools(stage_memory_access)
+
         return stage_tools + subagent_tools + memory_tools
 
-    def get_barebone(self, system_prompt: str, agent_tools: List[AgentTool], parent_hierarchy: Optional[List[str]] = None) -> BareBoneModel:
+    def get_barebone(self, system_prompt: str, agent_tools: List[AgentTool], parent_hierarchy: Optional[List[str]] = None, suppress_init_output: bool = False) -> BareBoneModel:
         """
         conversion to barebone model, this is used to create the model instance for the agent
         barebone model is used for conversion to apis and handling of the model instance.
@@ -768,6 +478,7 @@ class IkaBaseAgent:
             system_prompt: System prompt for the agent
             agent_tools: List of AgentTool instances
             parent_hierarchy: Optional list of parent agent names for tracking hierarchy
+            suppress_init_output: If True, suppress the initialization CLI output
         """
         # Check if all tools support parallel execution
         parallel_tool_calls = True
@@ -790,28 +501,26 @@ class IkaBaseAgent:
             parallel_tool_calls=parallel_tool_calls,
             agent_name=self.name,
             agent_hierarchy=agent_hierarchy,
+            suppress_init_output=suppress_init_output,
         )
         model.agent_tools = agent_tools
         return model
 
     def _extract_json_from_text(self, text: str) -> Optional[str]:
-        """Extract JSON from text, handling embedded JSON in markdown or other formats."""
         if not text or not text.strip():
             return None
         
         stripped = text.strip()
         
-        # Try direct JSON parse
         try:
             json.loads(stripped)
             return stripped
-        except:
+        except Exception:
             pass
         
-        # Try to find JSON in code blocks or after markers
         patterns = [
-            r'```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```',  # Markdown code blocks
-            r'(\{.*?\}|\[.*?\])',  # Any JSON-like structure
+            r'```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```',
+            r'(\{.*?\}|\[.*?\])',
         ]
         
         for pattern in patterns:
@@ -820,10 +529,75 @@ class IkaBaseAgent:
                 try:
                     json.loads(match)
                     return match
-                except:
+                except Exception:
                     continue
         
         return None
+
+    def _get_agent_end_text_from_args(self, args: Dict) -> str:
+        agent_end_text = args.get("input", "")
+        if agent_end_text and agent_end_text.strip() not in [".", ""]:
+            return agent_end_text
+
+        for value in args.values():
+            if isinstance(value, str):
+                stripped = value.strip()
+                if stripped.startswith("{") or stripped.startswith("["):
+                    return value
+                if len(stripped) > 10 and stripped != ".":
+                    return value
+            elif value and not isinstance(value, (dict, list)) and str(value).strip() not in [".", ""]:
+                return str(value)
+
+        return ""
+
+    def _ensure_valid_agent_end_content(self, agent_end_text: str) -> None:
+        if not agent_end_text or agent_end_text.strip() in [".", ""]:
+            raise ValueError(
+                "agent_end was called with empty or invalid arguments. "
+                "The agent MUST provide a final answer/output when calling agent_end. "
+                "Use the 'input' parameter to pass your response."
+            )
+
+        stripped_text = agent_end_text.strip()
+        if stripped_text in ["{}", "[]", "null", '""', "''"]:
+            raise ValueError(
+                f"agent_end was called with invalid/empty content: '{stripped_text}'. "
+                "You MUST provide a meaningful final answer."
+            )
+
+        if len(stripped_text) < 3:
+            raise ValueError(
+                f"agent_end was called with content that is too short: '{stripped_text}'. "
+                "You MUST provide a meaningful final answer."
+            )
+
+    def _fallback_final_content(
+        self,
+        agent_end_text: Optional[str],
+        content_before_tools: str,
+        last_content: str,
+    ) -> str:
+        """
+        Build final content when agent_end was called but tool arguments were empty.
+
+        Fallback order:
+        1. agent_end_text from tool arguments
+        2. content_before_tools
+        3. last_content
+        """
+        if agent_end_text and agent_end_text.strip() not in [".", ""]:
+            return agent_end_text
+
+        if content_before_tools and content_before_tools.strip() not in ["", "{}"]:
+            return content_before_tools
+        if last_content and last_content.strip() not in ["", "{}"]:
+            return last_content
+
+        raise ValueError(
+            "agent_end was called but no output was provided. "
+            "The agent MUST provide a final answer when calling agent_end."
+        )
 
     def parse_control_calls(self, tool_calls: List[dict], stage: Optional[IkaStage], current_stage_idx: int = 0, response_content: Optional[str] = None) -> tuple[Optional[int], bool, Optional[str]]:
         target_stage = None
@@ -847,46 +621,13 @@ class IkaBaseAgent:
 
             if name == "agent_end":
                 agent_end_called = True
-                agent_end_text = args.get("input") or args.get("final") or args.get("message") or ""
+                agent_end_text = self._get_agent_end_text_from_args(args)
+
                 if not agent_end_text or agent_end_text.strip() in [".", ""]:
-                    for key, value in args.items():
-                        if isinstance(value, str):
-                            stripped = value.strip()
-                            if stripped.startswith("{") or stripped.startswith("["):
-                                agent_end_text = value
-                                break
-                            elif len(stripped) > 10 and stripped != ".":
-                                agent_end_text = value
-                                break
-                        elif value and not isinstance(value, (dict, list)) and str(value).strip() not in [".", ""]:
-                            agent_end_text = str(value)
-                            break
+                    if response_content and len(response_content.strip()) > 10:
+                        agent_end_text = response_content.strip()
                 
-                # If still empty, try to extract from response content
-                if not agent_end_text or agent_end_text.strip() in [".", ""]:
-                    if response_content:
-                        extracted_json = self._extract_json_from_text(response_content)
-                        if extracted_json:
-                            agent_end_text = extracted_json
-                
-                if not agent_end_text or agent_end_text.strip() in [".", ""]:
-                    raise ValueError("agent_end was called with empty or invalid arguments. The agent MUST provide a final answer/output when calling agent_end. Use 'input', 'final', or 'message' parameter to pass your response.")
-                
-                stripped_text = agent_end_text.strip()
-                if stripped_text in ["{}", "[]", "null", '""', "''"]:
-                    raise ValueError(f"agent_end was called with invalid/empty content: '{stripped_text}'. You MUST provide a meaningful final answer, not empty JSON objects, arrays, or null values.")
-                
-                try:
-                    parsed = json.loads(stripped_text)
-                    if isinstance(parsed, dict):
-                        if len(parsed) == 0:
-                            raise ValueError(f"agent_end was called with empty JSON object: '{stripped_text}'. You MUST provide a meaningful final answer.")
-                        if len(parsed) == 1 and "functions" in parsed and isinstance(parsed["functions"], list) and len(parsed["functions"]) == 0:
-                            pass
-                    elif isinstance(parsed, list) and len(parsed) == 0:
-                        raise ValueError(f"agent_end was called with empty JSON array: '{stripped_text}'. You MUST provide a meaningful final answer.")
-                except json.JSONDecodeError:
-                    pass
+                self._ensure_valid_agent_end_content(agent_end_text)
                 
                 break
             if name == "stage_end" and stage is not None:
@@ -901,16 +642,21 @@ class IkaBaseAgent:
                     target_stage = stage_idx
         return target_stage, agent_end_called, agent_end_text
 
-    def excute_stage(self, stage_index: int, remaining_steps: int) -> tuple[int, str, bool, Optional[str], int]:
+    def execute_stage(self, stage_index: int, remaining_steps: int) -> tuple[int, str, bool, Optional[str], int]:
+        from IkaModel.chat_interface import chat, async_chat
+        import asyncio
+
         stage = self.Stages[stage_index]
         system_prompt = self.final_prompt(stage)
         self.message_history["system"]["message"] = system_prompt
 
         agent_tools = self.build_stage(stage)
-        current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+        # Include stage in the hierarchy so CLI logging clearly shows which IkaStage is active
+        current_hierarchy = getattr(self, "_parent_hierarchy", []) + [self.name, f"Stage {stage_index}: {stage.name}"]
         barebone_model = self.get_barebone(system_prompt, agent_tools, parent_hierarchy=current_hierarchy)
 
-        messages: List[dict] = [{"role": "user", "content": stage.prompt or self.prompt}]
+        content_prompt = (stage.prompt or self.prompt) + "\n\n" + AGENT_END_INSTRUCTION
+        messages: List[dict] = [{"role": "user", "content": content_prompt}]
         last_content = ""
 
         used_steps = 0
@@ -919,31 +665,43 @@ class IkaBaseAgent:
             step_limit = max(1, remaining_steps)
 
         stage_memory_access = getattr(stage, "memory_access", None) or self.memory_access
-        current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
         tool_executors = self.build_tool_executors(
-            stage.tools, 
-            memory_access=stage_memory_access, 
+            stage.tools,
+            memory_access=stage_memory_access,
             long_term_filter=getattr(stage, "long_term_filter", None),
             subagents=getattr(stage, "subagents", None),
-            parent_hierarchy=current_hierarchy
+            parent_hierarchy=current_hierarchy,
         )
-        
+
         if self.logger:
             self.logger.log_stage_start(stage.name, getattr(stage, "hitl", False), remaining_steps, step_limit)
 
-        for _ in range(step_limit): # run till we reach the step limit or we call agent_end
+        for _ in range(step_limit):
             if self.logger:
                 self.logger.log_action(f"stage_start:{stage.name}")
             self._enforce_rate_limit_model()
             step_start = time.time()
-            response = chat(
-                barebone_model, 
-                messages, 
-                self.message_history, 
-                tool_executors=tool_executors,
-                logger=self.logger,
-                timeout=self.step_timeout
-            )
+
+            if self.use_async:
+                response = asyncio.run(
+                    async_chat(
+                        barebone_model,
+                        messages,
+                        self.message_history,
+                        tool_executors=tool_executors,
+                        logger=self.logger,
+                        timeout=self.step_timeout,
+                    )
+                )
+            else:
+                response = chat(
+                    barebone_model,
+                    messages,
+                    self.message_history,
+                    tool_executors=tool_executors,
+                    logger=self.logger,
+                    timeout=self.step_timeout,
+                )
             self.message_history = response.get("message_history", self.message_history)
             last_content = response.get("content", "")
             content_before_tools = response.get("content_before_tools", "")
@@ -952,7 +710,12 @@ class IkaBaseAgent:
             used_steps += 1
 
             try:
-                target_stage, agent_end_called, agent_end_text = self.parse_control_calls(executed_tool_calls if executed_tool_calls else tool_calls, stage, stage_index, response_content=content_before_tools)
+                target_stage, agent_end_called, agent_end_text = self.parse_control_calls(
+                    executed_tool_calls if executed_tool_calls else tool_calls,
+                    stage,
+                    stage_index,
+                    response_content=content_before_tools,
+                )
             except ValueError as e:
                 error_msg = str(e)
                 if self.logger:
@@ -960,26 +723,16 @@ class IkaBaseAgent:
                 raise
             
             if agent_end_called:
-                if not agent_end_text or agent_end_text.strip() in [".", ""]:
-                    # Try to extract JSON from content_before_tools
-                    extracted_json = None
-                    if content_before_tools and content_before_tools.strip() not in ["", "{}"]:
-                        extracted_json = self._extract_json_from_text(content_before_tools)
-                    
-                    # Fallback chain: extracted JSON -> content_before_tools -> last_content
-                    if extracted_json:
-                        final_content = extracted_json
-                    elif content_before_tools and content_before_tools.strip() not in ["", "{}"]:
-                        final_content = content_before_tools
-                    elif last_content and last_content.strip() not in ["", "{}"]:
-                        final_content = last_content
-                    else:
-                        error_msg = "agent_end was called but no output was provided. The agent MUST provide a final answer when calling agent_end."
-                        if self.logger:
-                            self.logger.log_action(f"ERROR: {error_msg}")
-                        raise ValueError(error_msg)
-                else:
-                    final_content = agent_end_text
+                try:
+                    final_content = self._fallback_final_content(
+                        agent_end_text,
+                        content_before_tools,
+                        last_content,
+                    )
+                except ValueError as e:
+                    if self.logger:
+                        self.logger.log_action(f"ERROR: {str(e)}")
+                    raise
                 return stage_index, final_content, True, final_content, used_steps
             if target_stage == "next":
                 return stage_index + 1, last_content, False, None, used_steps
@@ -1012,7 +765,8 @@ class IkaBaseAgent:
                     elapsed=time.time() - step_start,
                 )
             remaining_after = max(0, remaining_steps - used_steps)
-            self._save_stage_checkpoint(stage_index, remaining_after, last_content)
+            if self.checkpoint:
+                self._save_stage_checkpoint(stage_index, remaining_after, last_content)
 
         if getattr(stage, "hitl", False):
             if self.logger:
@@ -1023,7 +777,6 @@ class IkaBaseAgent:
         return stage_index + 1, last_content, False, None, used_steps
 
     def run_simple(self) -> tuple[str, str]:
-        # build and run agent without stages 
         agent_end_tool = AgentTool(
             id="agent_end",
             name="agent_end",
@@ -1032,82 +785,25 @@ class IkaBaseAgent:
             required=True,
         )
         
-        # Build memory tools based on agent-level access control
-        memory_tools = []
-        
-        if self.short_term_memory:
-            if self.memory_access.get("short_term_save", False):
-                short_save_tool = AgentTool(
-                    id="short_term_save",
-                    name="short_term_save",
-                    description="Save data to short-term memory for this agent. Use for temporary context or insights.",
-                    args=ToolArgs(type="input", description="Data or insight to save temporarily."),
-                    required=False,
-                )
-                memory_tools.append(short_save_tool)
-            
-            if self.memory_access.get("short_term_search", False):
-                short_search_tool = AgentTool(
-                    id="short_term_search",
-                    name="short_term_search",
-                    description="Search short-term memory for relevant information. Returns matching entries sorted by relevance.",
-                    args=ToolArgs(
-                        type="object",
-                        description="Search parameters",
-                        properties={
-                            "query": {"type": "string", "description": "Search query to find relevant memory entries"},
-                            "limit": {"type": "integer", "description": "Maximum number of results (default: 5)", "default": 5},
-                            "score_threshold": {"type": "number", "description": "Minimum similarity score 0-1 (default: 0.6)", "default": 0.6}
-                        },
-                        required=["query"]
-                    ),
-                    required=False,
-                )
-                memory_tools.append(short_search_tool)
-        
-        if self.long_term_memory:
-            if self.memory_access.get("long_term_save", False):
-                long_save_tool = AgentTool(
-                    id="long_term_save",
-                    name="long_term_save",
-                    description="Save task and output to long-term memory. Format: task|output",
-                    args=ToolArgs(type="input", description="Data or insight to save forever.", data="task|output"),
-                    required=False,
-                )
-                memory_tools.append(long_save_tool)
-            
-            if self.memory_access.get("long_term_search", False):
-                long_search_tool = AgentTool(
-                    id="long_term_search",
-                    name="long_term_search",
-                    description="Search long-term memory for relevant past tasks and outputs. Returns matching entries sorted by relevance.",
-                    args=ToolArgs(
-                        type="object",
-                        description="Search parameters",
-                        properties={
-                            "query": {"type": "string", "description": "Search query to find relevant memory entries"},
-                            "limit": {"type": "integer", "description": "Maximum number of results (default: 5)", "default": 5},
-                            "score_threshold": {"type": "number", "description": "Minimum similarity score 0-1 (default: 0.6)", "default": 0.6}
-                        },
-                        required=["query"]
-                    ),
-                    required=False,
-                )
-                memory_tools.append(long_search_tool)
+        memory_tools = self._build_stage_memory_tools(self.memory_access)
         
         agent_tools = self._convert_tools_to_agent_tools(self.tools) + self._convert_subagents_to_tools() + memory_tools + [agent_end_tool]
         base_prompt = self.system_prompt or self.description or self.prompt
-        system_prompt = base_prompt + AGENT_END_INSTRUCTION
+        system_prompt = base_prompt
         current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
         barebone_model = self.get_barebone(system_prompt, agent_tools, parent_hierarchy=current_hierarchy)
 
-        messages: List[dict] = [{"role": "user", "content": self.prompt}]
+        content_prompt = self.prompt + "\n\n" + AGENT_END_INSTRUCTION
+        messages: List[dict] = [{"role": "user", "content": content_prompt}]
         last_content = ""
 
         current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
         tool_executors = self.build_tool_executors(self.tools, memory_access=self.memory_access, subagents=self.subagents, parent_hierarchy=current_hierarchy)
         
         cli = get_cli_output()
+
+        from IkaModel.chat_interface import chat, async_chat
+        import asyncio
 
         for step_num in range(self.maxsteps):
             cli.set_step(self.name, step_num + 1)
@@ -1119,14 +815,26 @@ class IkaBaseAgent:
             )
             self._enforce_rate_limit_model()
             step_start = time.time()
-            response = chat(
-                barebone_model, 
-                messages, 
-                self.message_history,
-                tool_executors=tool_executors,
-                logger=self.logger,
-                timeout=self.step_timeout
-            )
+            if self.use_async:
+                response = asyncio.run(
+                    async_chat(
+                        barebone_model,
+                        messages,
+                        self.message_history,
+                        tool_executors=tool_executors,
+                        logger=self.logger,
+                        timeout=self.step_timeout,
+                    )
+                )
+            else:
+                response = chat(
+                    barebone_model,
+                    messages,
+                    self.message_history,
+                    tool_executors=tool_executors,
+                    logger=self.logger,
+                    timeout=self.step_timeout,
+                )
             self.message_history = response.get("message_history", self.message_history)
             last_content = response.get("content", "")
             content_before_tools = response.get("content_before_tools", "")
@@ -1134,7 +842,11 @@ class IkaBaseAgent:
             executed_tool_calls = response.get("executed_tool_calls", []) or []
 
             try:
-                _, agent_end_called, agent_end_text = self.parse_control_calls(executed_tool_calls if executed_tool_calls else tool_calls, None, response_content=content_before_tools)
+                _, agent_end_called, agent_end_text = self.parse_control_calls(
+                    executed_tool_calls if executed_tool_calls else tool_calls,
+                    None,
+                    response_content=content_before_tools,
+                )
             except ValueError as e:
                 error_msg = str(e)
                 cli.agent_response(
@@ -1142,36 +854,27 @@ class IkaBaseAgent:
                     f"ERROR: {error_msg}",
                     current_hierarchy,
                     step=step_num + 1,
-                    is_final=False
+                    is_final=False,
                 )
                 raise
             
             if agent_end_called:
-                if not agent_end_text or agent_end_text.strip() in [".", ""]:
-                    # Try to extract JSON from content_before_tools
-                    extracted_json = None
-                    if content_before_tools and content_before_tools.strip() not in ["", "{}"]:
-                        extracted_json = self._extract_json_from_text(content_before_tools)
-                    
-                    # Fallback chain: extracted JSON -> content_before_tools -> last_content
-                    if extracted_json:
-                        final_content = extracted_json
-                    elif content_before_tools and content_before_tools.strip() not in ["", "{}"]:
-                        final_content = content_before_tools
-                    elif last_content and last_content.strip() not in ["", "{}"]:
-                        final_content = last_content
-                    else:
-                        error_msg = "agent_end was called but no output was provided. The agent MUST provide a final answer when calling agent_end."
-                        cli.agent_response(
-                            self.name,
-                            f"ERROR: {error_msg}",
-                            current_hierarchy,
-                            step=step_num + 1,
-                            is_final=False
-                        )
-                        raise ValueError(error_msg)
-                else:
-                    final_content = agent_end_text
+                try:
+                    final_content = self._fallback_final_content(
+                        agent_end_text,
+                        content_before_tools,
+                        last_content,
+                    )
+                except ValueError as e:
+                    error_msg = str(e)
+                    cli.agent_response(
+                        self.name,
+                        f"ERROR: {error_msg}",
+                        current_hierarchy,
+                        step=step_num + 1,
+                        is_final=False,
+                    )
+                    raise
                 
                 cli.agent_response(
                     self.name,
@@ -1206,23 +909,19 @@ class IkaBaseAgent:
                     messages.extend(tool_msgs)
                     
                     # Check again after tool execution if agent_end was called
-                    _, agent_end_called_after, agent_end_text_after = self.parse_control_calls(tool_calls, None, response_content=content_before_tools)
+                    _, agent_end_called_after, agent_end_text_after = self.parse_control_calls(
+                        tool_calls,
+                        None,
+                        response_content=content_before_tools,
+                    )
                     if agent_end_called_after:
-                        if agent_end_text_after and agent_end_text_after.strip() not in [".", ""]:
-                            final_content = agent_end_text_after
-                        else:
-                            # Try to extract JSON from content_before_tools
-                            extracted_json = None
-                            if content_before_tools and content_before_tools.strip() not in ["", "{}"]:
-                                extracted_json = self._extract_json_from_text(content_before_tools)
-                            
-                            if extracted_json:
-                                final_content = extracted_json
-                            elif content_before_tools and content_before_tools.strip() not in ["", "{}"]:
-                                final_content = content_before_tools
-                            elif last_content and last_content.strip() not in ["", "{}"]:
-                                final_content = last_content
-                            else:
+                        try:
+                            final_content = self._fallback_final_content(
+                                agent_end_text_after,
+                                content_before_tools,
+                                last_content,
+                            )
+                        except ValueError:
                                 final_content = agent_end_text_after or "Agent completed."
                         
                         cli.agent_response(
@@ -1293,7 +992,7 @@ class IkaBaseAgent:
 
     def _build_final_output(self, final_message: str, barebone_model: BareBoneModel) -> Dict[str, str]:
         summary = ""
-        if self.enable_summarization:
+        if self.summarize_final:
             summary = summarise_message_history(barebone_model, self.message_history) or self.message_history.get("summary", {}).get("message", "")
             if summary:
                 if self.logger:
@@ -1328,21 +1027,21 @@ class IkaBaseAgent:
                 self.message_history = resume_cp.get("message_history", self.message_history)
                 last_content = resume_cp.get("last_content", "")
             while 0 <= stage_idx < len(self.Stages) and remaining_steps > 0:
-                stage_idx, last_content, agent_end_called, end_text, used = self.excute_stage(stage_idx, remaining_steps)
+                stage_idx, last_content, agent_end_called, end_text, used = self.execute_stage(stage_idx, remaining_steps)
                 remaining_steps -= used
                 if agent_end_called:
                     agent_end_text = end_text
                     break
             final_message = agent_end_text if agent_end_text and agent_end_text.strip() not in [".", ""] else last_content
             current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
-            barebone_model = self.get_barebone(self.message_history["system"]["message"], [], parent_hierarchy=current_hierarchy)
+            barebone_model = self.get_barebone(self.message_history["system"]["message"], [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
             return self._build_final_output(final_message, barebone_model)
 
         if self.next_agent:
             final_message, _ = self.run_simple()
-            current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
-            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy)
-            if self.enable_summarization:
+            if self.summarize_final:
+                current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+                barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
                 summary = summarise_message_history(barebone_model, self.message_history) or final_message
             else:
                 summary = final_message
@@ -1361,7 +1060,7 @@ class IkaBaseAgent:
         if not self.final_answer_checks:
             final_message, _ = self.run_simple()
             current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
-            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy)
+            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
             return self._build_final_output(final_message, barebone_model)
 
         original_maxsteps = self.maxsteps
@@ -1372,7 +1071,7 @@ class IkaBaseAgent:
         while retry_count <= max_retries:
             final_message, _ = self.run_simple()
             current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
-            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy)
+            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
             final_output = self._build_final_output(final_message, barebone_model)
 
             failed_checks = []

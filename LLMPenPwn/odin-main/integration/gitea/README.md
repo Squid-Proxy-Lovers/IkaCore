@@ -1,2 +1,0 @@
-# Gitea Integration with Odin
-

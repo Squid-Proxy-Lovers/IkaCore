@@ -1,10 +1,11 @@
+import asyncio
 import json
 import logging
 import sys
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
-from typing import Any, Dict, Optional, List, Callable
+from typing import Any, Dict, Optional, List, Callable, Union
 
 import httpx
 
@@ -31,7 +32,7 @@ LOG = logging.getLogger(__name__)
 
 def get_summary_model(provider: str) -> tuple[str, str]:
     models = {
-        "deepseek": ("deepseek-v3.2", "https://api.deepseek.com/chat/completions"),
+        "deepseek": ("deepseek-chat", "https://api.deepseek.com/chat/completions"),
         "openai": ("gpt-4.1-mini-2025-04-14", "https://api.openai.com/v1/chat/completions"),
         "anthropic": ("claude-sonnet-4-20250514", "https://api.anthropic.com/v1/messages"),
         "gemini": ("gemini-1.5-pro", "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent"),
@@ -214,7 +215,7 @@ def get_max_tokens(model_id: str) -> int:
     elif "gemini" in model_id_lower:
         return TOKENMAX_MAPPING.get("gemini-1.5-pro", 1000000)
     elif "deepseek" in model_id_lower:
-        return TOKENMAX_MAPPING.get("deepseek-v3.2", 131072)
+        return TOKENMAX_MAPPING.get("deepseek-chat", 131072)
     
     return 128000
 
@@ -247,10 +248,26 @@ def api_request_retry(
     timeout: float = 900.0
 ) -> httpx.Response:
     last_exception = None
+    debug_enabled = LOG.isEnabledFor(logging.DEBUG)
     
     for attempt in range(max_retries):
         try:
+            if debug_enabled:
+                safe_headers = {k: v if k.lower() != "authorization" else "Bearer ***" for k, v in headers.items()}
+                LOG.debug(f"[HTTPX REQUEST] Attempt {attempt + 1}/{max_retries}")
+                LOG.debug(f"[HTTPX REQUEST] URL: {api_url}")
+                LOG.debug(f"[HTTPX REQUEST] Headers: {json.dumps(safe_headers, indent=2)}")
+                LOG.debug(f"[HTTPX REQUEST] Payload: {json.dumps(payload, indent=2)}")
+            
             response = httpx.post(api_url, headers=headers, json=payload, timeout=timeout)
+            
+            if debug_enabled:
+                LOG.debug(f"[HTTPX RESPONSE] Status: {response.status_code}")
+                try:
+                    response_preview = json.dumps(response.json(), indent=2)[:1000]
+                    LOG.debug(f"[HTTPX RESPONSE] Body: {response_preview}")
+                except:
+                    LOG.debug(f"[HTTPX RESPONSE] Body (text): {response.text[:1000]}")
             
             if response.status_code == 200:
                 return response
@@ -359,8 +376,157 @@ def api_request_retry(
     
     if last_exception:
         raise last_exception
-    
+
     raise Exception(f"API request failed after {max_retries} attempts")
+
+
+async def async_api_request_retry(
+    api_url: str,
+    headers: dict,
+    payload: dict,
+    max_retries: int = 3,
+    wait_seconds: int = 10,
+    timeout: float = 900.0,
+    client: Optional[httpx.AsyncClient] = None
+) -> httpx.Response:
+    last_exception = None
+    should_close_client = client is None
+    debug_enabled = LOG.isEnabledFor(logging.DEBUG)
+
+    if client is None:
+        client = httpx.AsyncClient(timeout=timeout)
+    
+    try:
+        for attempt in range(max_retries):
+            try:
+                if debug_enabled:
+                    safe_headers = {k: v if k.lower() != "authorization" else "Bearer ***" for k, v in headers.items()}
+                    LOG.debug(f"[HTTPX ASYNC REQUEST] Attempt {attempt + 1}/{max_retries}")
+                    LOG.debug(f"[HTTPX ASYNC REQUEST] URL: {api_url}")
+                    LOG.debug(f"[HTTPX ASYNC REQUEST] Headers: {json.dumps(safe_headers, indent=2)}")
+                    LOG.debug(f"[HTTPX ASYNC REQUEST] Payload: {json.dumps(payload, indent=2)}")
+                
+                response = await client.post(api_url, headers=headers, json=payload)
+                
+                if debug_enabled:
+                    LOG.debug(f"[HTTPX ASYNC RESPONSE] Status: {response.status_code}")
+                    try:
+                        response_preview = json.dumps(response.json(), indent=2)[:1000]
+                        LOG.debug(f"[HTTPX ASYNC RESPONSE] Body: {response_preview}")
+                    except:
+                        LOG.debug(f"[HTTPX ASYNC RESPONSE] Body (text): {response.text[:1000]}")
+
+                if response.status_code == 200:
+                    return response
+
+                is_rate_limit = _is_rate_limit_error(response)
+
+                if is_rate_limit:
+                    retry_after = None
+                    if "retry-after" in response.headers:
+                        try:
+                            retry_after = int(response.headers["retry-after"])
+                        except (ValueError, TypeError):
+                            pass
+
+                    if retry_after:
+                        wait_time = retry_after
+                        LOG.warning(
+                            f"Rate limit detected (status {response.status_code}). "
+                            f"Server requested wait time: {wait_time} seconds. "
+                            f"Attempt {attempt + 1}/{max_retries}"
+                        )
+                    else:
+                        wait_time = wait_seconds * (2 ** attempt)
+                        if wait_time < 30:
+                            wait_time = 30
+                        elif wait_time > 300:
+                            wait_time = 300
+                        LOG.warning(
+                            f"Rate limit detected (status {response.status_code}). "
+                            f"Using exponential backoff: {wait_time} seconds. "
+                            f"Attempt {attempt + 1}/{max_retries}"
+                        )
+
+                    if attempt < max_retries - 1:
+                        cli = get_cli_output()
+                        cli.emit(
+                            OutputType.AGENT_RESPONSE,
+                            f"Rate limit hit. Waiting {wait_time} seconds before retry (attempt {attempt + 1}/{max_retries})",
+                            ["API"],
+                            step=0
+                        )
+                        await asyncio.sleep(wait_time)
+                        last_exception = Exception(f"API error {response.status_code}: {response.text[:500]}")
+                    else:
+                        try:
+                            error_data = response.json()
+                            error_text = json.dumps(error_data, indent=2)[:1000]
+                        except:
+                            error_text = response.text[:500] if hasattr(response, 'text') else str(response.status_code)
+                        raise Exception(f"API error {response.status_code} after {max_retries} attempts: {error_text}")
+                else:
+                    try:
+                        error_data = response.json()
+                        error_text_preview = json.dumps(error_data, indent=2)[:500]
+                        LOG.warning(f"API error {response.status_code}: {error_text_preview}")
+                    except:
+                        error_text_preview = response.text[:500] if hasattr(response, 'text') else str(response.status_code)
+                        LOG.warning(f"API error {response.status_code}: {error_text_preview}")
+
+                    if attempt < max_retries - 1:
+                        LOG.warning(
+                            f"API request failed with status {response.status_code} (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {wait_seconds} seconds..."
+                        )
+                        await asyncio.sleep(wait_seconds)
+                        last_exception = Exception(f"API error {response.status_code}: {error_text_preview}")
+                    else:
+                        try:
+                            error_data = response.json()
+                            error_text = json.dumps(error_data, indent=2)[:1000]
+                        except:
+                            error_text = response.text[:500] if hasattr(response, 'text') else str(response.status_code)
+                        raise Exception(f"API error {response.status_code} after {max_retries} attempts: {error_text}")
+
+            except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+                timeout_msg = f"API request timed out after {timeout}s (attempt {attempt + 1}/{max_retries})"
+                LOG.warning(timeout_msg)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(wait_seconds)
+                    last_exception = Exception(timeout_msg)
+                else:
+                    raise Exception(timeout_msg)
+
+            except httpx.HTTPError as e:
+                if attempt < max_retries - 1:
+                    LOG.warning(
+                        f"HTTP error during API request (attempt {attempt + 1}/{max_retries}): {e}. "
+                        f"Retrying in {wait_seconds} seconds..."
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    last_exception = e
+                else:
+                    raise Exception(f"HTTP error after {max_retries} attempts: {str(e)}")
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    LOG.warning(
+                        f"Unexpected error during API request (attempt {attempt + 1}/{max_retries}): {e}. "
+                        f"Retrying in {wait_seconds} seconds..."
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    last_exception = e
+                else:
+                    raise
+
+        if last_exception:
+            raise last_exception
+
+        raise Exception(f"API request failed after {max_retries} attempts")
+    finally:
+        if should_close_client:
+            await client.aclose()
 
 
 def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
@@ -622,6 +788,145 @@ def execute_tool_calls(
     return formatted_messages, tool_results
 
 
+async def async_execute_tool(
+    tool_name: str,
+    tool_args: dict,
+    tool_executors: Dict[str, Callable],
+    timeout: float = 900.0,
+    agent_hierarchy: Optional[List[str]] = None,
+    step: int = 0
+) -> str:
+    cli = get_cli_output()
+    hierarchy = list(agent_hierarchy or []) + [tool_name]
+
+    if tool_name not in tool_executors:
+        error_msg = f"Tool '{tool_name}' not found in tool executors"
+        LOG.error(error_msg)
+        cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
+        return json.dumps({"error": error_msg})
+
+    try:
+        validated_args = validate_tool_args(tool_name, tool_args)
+    except ValueError as e:
+        error_msg = f"Validation error for tool '{tool_name}': {str(e)}"
+        LOG.warning(error_msg)
+        cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
+        return json.dumps({"error": error_msg})
+
+    executor = tool_executors[tool_name]
+    cli.tool_call(tool_name, tool_args, hierarchy, step)
+
+    try:
+        loop = asyncio.get_event_loop()
+        # Check if executor is a coroutine function
+        if asyncio.iscoroutinefunction(executor):
+            result = await asyncio.wait_for(executor(validated_args), timeout=timeout)
+        else:
+            # Run sync function in thread pool
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, executor, validated_args),
+                timeout=timeout
+            )
+
+        result_str = result if isinstance(result, str) else json.dumps(result)
+        cli.tool_result(tool_name, result_str, hierarchy, step)
+
+        if isinstance(result, str):
+            return result
+        return json.dumps(result)
+    except asyncio.TimeoutError:
+        timeout_msg = f"Tool '{tool_name}' execution timed out after {timeout}s"
+        cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
+        LOG.warning(timeout_msg)
+        return json.dumps({"error": timeout_msg})
+    except Exception as e:
+        error_msg = f"Error executing tool '{tool_name}': {str(e)}"
+        cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
+        LOG.error(error_msg, exc_info=True)
+        return json.dumps({"error": error_msg})
+
+
+async def async_execute_tool_calls(
+    tool_calls: List[dict],
+    tool_executors: Dict[str, Callable],
+    provider: str,
+    timeout: float = 900.0,
+    tool_metadata: Optional[Dict[str, dict]] = None,
+    agent_hierarchy: Optional[List[str]] = None,
+    step: int = 0
+) -> tuple[List[dict], List[str]]:
+    if not tool_calls or not tool_executors:
+        return [], []
+
+    tool_metadata = tool_metadata or {}
+
+    # Parse tool calls into (tool_name, args) tuples
+    parsed_calls = []
+    for tool_call in tool_calls:
+        fn = tool_call.get("function", {})
+        tool_name = fn.get("name") or tool_call.get("name", "")
+        args_raw = fn.get("arguments") or "{}"
+
+        try:
+            args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+        except Exception as e:
+            LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
+            args = {}
+
+        parsed_calls.append((tool_name, args, tool_call))
+
+    # Separate parallel and sequential tools
+    parallel_calls = []
+    sequential_calls = []
+
+    for tool_name, args, tool_call in parsed_calls:
+        metadata = tool_metadata.get(tool_name, {})
+        is_parallel = metadata.get("parallel", True)
+
+        if is_parallel:
+            parallel_calls.append((tool_name, args, tool_call))
+        else:
+            sequential_calls.append((tool_name, args, tool_call))
+
+    tool_results = []
+    tool_call_order = []
+
+    # Execute parallel tools concurrently using asyncio.gather
+    if parallel_calls:
+        tasks = []
+        for tool_name, args, tool_call in parallel_calls:
+            task = async_execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
+            tasks.append(task)
+            tool_call_order.append(tool_call)
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                error_msg = f"Parallel tool execution error: {str(result)}"
+                LOG.error(error_msg)
+                tool_results.append(json.dumps({"error": error_msg}))
+            else:
+                tool_results.append(result)
+
+    # Execute sequential tools one by one
+    for tool_name, args, tool_call in sequential_calls:
+        result = await async_execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
+        tool_results.append(result)
+        tool_call_order.append(tool_call)
+
+    # Format results based on provider
+    if provider == "deepseek" or provider == "openai":
+        formatted_messages = format_openai_results(tool_call_order, tool_results)
+    elif provider == "anthropic":
+        formatted_messages = format_anthropic_results(tool_call_order, tool_results)
+    elif provider == "gemini":
+        formatted_messages = format_gemini_results(tool_call_order, tool_results)
+    else:
+        formatted_messages = []
+
+    return formatted_messages, tool_results
+
+
 def chat(
     barebone_model: BareBoneModel,
     messages: list[dict],
@@ -656,7 +961,7 @@ def chat(
     max_tokens = get_max_tokens(barebone_model.model_id)
     
     if token_count > max_tokens * 0.8:
-        LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
+        #LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
         summarise_message_history(barebone_model, message_history)
     
     if not message_history["first_input"]["message"] and messages:
@@ -906,3 +1211,348 @@ def chat(
     msg_id = str(uuid.uuid4())
     message_history["messages"][msg_id] = {"message": content, "tokens": tokens}
     return {"content": content, "tool_calls": tool_calls, "executed_tool_calls": executed_tool_calls, "content_before_tools": content_before_tools, "message_history": message_history, "usage": usage_info, "cost": cost_info}
+
+
+async def async_summarise_message_history(
+    barebone_model: BareBoneModel,
+    message_history: dict,
+    client: Optional[httpx.AsyncClient] = None
+) -> str:
+    if not message_history["first_input"]["message"] and not message_history["messages"]:
+        return ""
+
+    conversation_text = get_conversation_text(message_history)
+
+    provider = get_provider(barebone_model.model_id)
+    model_name, api_url = get_summary_model(provider)
+
+    if not model_name or not api_url:
+        LOG.warning(f"Could not determine low-end model for provider: {provider}")
+        return ""
+
+    payload, headers = create_summary_payload(provider, model_name, barebone_model.api_key, conversation_text)
+
+    try:
+        response = await async_api_request_retry(api_url, headers, payload, max_retries=3, wait_seconds=10, client=client)
+        response.raise_for_status()
+        data = response.json()
+        summary = parse_summary_response(provider, response)
+
+        summary_tokens = 0
+        if provider == "deepseek" or provider == "openai":
+            usage = data.get("usage", {})
+            summary_tokens = usage.get("total_tokens", 0)
+        elif provider == "anthropic":
+            usage = data.get("usage", {})
+            summary_tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+        elif provider == "gemini":
+            usage = data.get("usageMetadata", {})
+            summary_tokens = usage.get("totalTokenCount", 0)
+
+        message_history["summary"]["message"] = f"[SUMMARY]\n{summary}"
+        message_history["summary"]["tokens"] = summary_tokens
+        message_history["messages"] = {}
+
+        LOG.info("Message history summarized. Kept: system prompt, first input, and summary. Cleared all other messages.")
+        return summary
+    except httpx.HTTPError as e:
+        LOG.error(f"Failed to summarize message history: {e}")
+        return ""
+    except Exception as e:
+        LOG.error(f"Unexpected error during summarization: {e}")
+        return ""
+
+
+async def async_chat(
+    barebone_model: BareBoneModel,
+    messages: list[dict],
+    message_history: Optional[dict] = None,
+    tool_executors: Optional[Dict[str, Callable]] = None,
+    logger: Optional[Any] = None,
+    timeout: float = 900.0,
+    client: Optional[httpx.AsyncClient] = None
+) -> Dict[str, Any]:
+    if not barebone_model:
+        raise ValueError("barebone_model is required")
+    if not messages:
+        raise ValueError("messages is required and cannot be empty")
+    if not isinstance(messages, list):
+        raise ValueError("messages must be a list")
+
+    if not hasattr(barebone_model, 'model_id') or not barebone_model.model_id:
+        raise ValueError("barebone_model.model_id is required")
+    if not hasattr(barebone_model, 'api_key') or not barebone_model.api_key:
+        raise ValueError("barebone_model.api_key is required")
+    if not hasattr(barebone_model, 'api_url') or not barebone_model.api_url:
+        raise ValueError("barebone_model.api_url is required")
+
+    if tool_executors is not None and not isinstance(tool_executors, dict):
+        raise ValueError("tool_executors must be a dictionary if provided")
+
+    message_history = message_history or init_message_history()
+    tool_executors = tool_executors or {}
+    if logger:
+        logger.log_input(messages)
+
+    token_count = get_total_tokens(message_history)
+    max_tokens = get_max_tokens(barebone_model.model_id)
+
+    if token_count > max_tokens * 0.8:
+        LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
+        await async_summarise_message_history(barebone_model, message_history, client)
+
+    if not message_history["first_input"]["message"] and messages:
+        message_history["first_input"]["message"] = messages[0].get("content", str(messages[0]))
+        message_history["first_input"]["tokens"] = 0
+
+    provider = get_provider(barebone_model.model_id)
+    headers = {}
+    api_url = barebone_model.api_url
+
+    # Create shared client if not provided
+    should_close_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(timeout=timeout)
+
+    try:
+        if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
+            headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+            payload = deepseek_fill_payload(barebone_model, messages, message_history)
+            response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+
+        elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
+            headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+            payload = openai_fill_payload(barebone_model, messages, message_history)
+            response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+
+        elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
+            headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
+            payload = anthropic_fill_payload(barebone_model, messages, message_history)
+            if "max_tokens" not in payload or not payload["max_tokens"]:
+                payload["max_tokens"] = 4096
+            model_id_lower = barebone_model.model_id.lower()
+            if "haiku" in model_id_lower:
+                if payload["max_tokens"] > 4096:
+                    payload["max_tokens"] = 4096
+            LOG.debug(f"Anthropic payload: {json.dumps(payload, indent=2)[:500]}")
+            response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+
+        elif "gemini" in barebone_model.model_id.lower():
+            payload = gemini_fill_payload(barebone_model, messages, message_history)
+            api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
+            headers = {"Content-Type": "application/json"}
+            response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+        else:
+            raise ValueError(f"Model {barebone_model.model_id} not supported")
+
+        response.raise_for_status()
+        data = response.json()
+
+        content = ""
+        tokens = 0
+        tool_calls: List[dict] = []
+        usage_info: Dict[str, Any] = {}
+
+        if "deepseek" in barebone_model.model_id.lower() or "gpt" in barebone_model.model_id.lower() or "openai" in barebone_model.model_id.lower():
+            message_obj = data["choices"][0]["message"]
+            content = message_obj.get("content") or ""
+            tool_calls = message_obj.get("tool_calls", []) or []
+            tokens = data.get("usage", {}).get("total_tokens", 0)
+        elif "claude" in barebone_model.model_id.lower():
+            content_blocks = data.get("content", [])
+            content = "".join([block["text"] for block in content_blocks if block.get("type") == "text"])
+            for block in content_blocks:
+                if block.get("type") == "tool_use":
+                    tool_calls.append({
+                        "id": block.get("id"),
+                        "name": block.get("name"),
+                        "function": {
+                            "name": block.get("name"),
+                            "arguments": json.dumps(block.get("input", {}))
+                        }
+                    })
+        elif "gemini" in barebone_model.model_id.lower():
+            candidate = data["candidates"][0]["content"]
+            parts = candidate.get("parts", [])
+            for part in parts:
+                if "text" in part:
+                    content += part["text"]
+                elif "functionCall" in part:
+                    func_call = part["functionCall"]
+                    tool_calls.append({
+                        "name": func_call.get("name"),
+                        "function": {
+                            "name": func_call.get("name"),
+                            "arguments": json.dumps(func_call.get("args", {}))
+                        }
+                    })
+        else:
+            content = ""
+            tokens = 0
+
+        usage_info = extract_usage(provider, data)
+        if usage_info:
+            tokens = usage_info.get("total_tokens", tokens)
+
+        cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
+
+        executed_tool_calls = []
+        content_before_tools = content
+        if tool_calls and tool_executors:
+            tool_metadata = {}
+            if hasattr(barebone_model, 'agent_tools'):
+                for agent_tool in barebone_model.agent_tools:
+                    tool_metadata[agent_tool.name] = {
+                        "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True
+                    }
+
+            agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
+
+            executed_tool_calls = tool_calls.copy()
+            tool_messages, tool_results = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy)
+            if logger:
+                logger.log_tool_results(tool_calls, tool_results)
+
+            if provider == "gemini":
+                assistant_msg = {"role": "model", "parts": [{"text": content}]}
+                for tool_call in tool_calls:
+                    assistant_msg["parts"].append({
+                        "functionCall": {
+                            "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
+                            "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                        }
+                    })
+                messages.append(assistant_msg)
+                function_responses = format_gemini_results(tool_calls, tool_results)
+                messages.append({"role": "user", "parts": function_responses})
+            elif provider == "deepseek" or provider == "openai":
+                assistant_msg = {"role": "assistant", "content": content}
+                if tool_calls:
+                    assistant_msg["tool_calls"] = tool_calls
+                messages.append(assistant_msg)
+                messages.extend(tool_messages)
+            elif provider == "anthropic":
+                assistant_msg = {"role": "assistant", "content": []}
+                if content:
+                    assistant_msg["content"].append({"type": "text", "text": content})
+                for tool_call in tool_calls:
+                    assistant_msg["content"].append({
+                        "type": "tool_use",
+                        "id": tool_call.get("id"),
+                        "name": tool_call.get("name"),
+                        "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                    })
+                messages.append(assistant_msg)
+                messages.extend(tool_messages)
+
+            # Make follow-up API call after tool execution
+            if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
+                headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+                payload = deepseek_fill_payload(barebone_model, messages, message_history)
+                response = await async_api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout, client=client)
+
+            elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
+                headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+                payload = openai_fill_payload(barebone_model, messages, message_history)
+                response = await async_api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout, client=client)
+
+            elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
+                headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
+                payload = anthropic_fill_payload(barebone_model, messages, message_history)
+                if "max_tokens" not in payload or not payload["max_tokens"]:
+                    payload["max_tokens"] = 4096
+                response = await async_api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout, client=client)
+
+            elif "gemini" in barebone_model.model_id.lower():
+                payload = gemini_fill_payload(barebone_model, messages, message_history)
+                api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
+                headers = {"Content-Type": "application/json"}
+                response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+
+            response.raise_for_status()
+            data = response.json()
+
+            content = ""
+            tokens = 0
+            tool_calls = []
+            usage_info = extract_usage(provider, data)
+            if usage_info:
+                tokens = usage_info.get("total_tokens", 0)
+
+            if "deepseek" in barebone_model.model_id.lower() or "gpt" in barebone_model.model_id.lower() or "openai" in barebone_model.model_id.lower():
+                message_obj = data["choices"][0]["message"]
+                content = message_obj.get("content") or ""
+                tool_calls = message_obj.get("tool_calls", []) or []
+            elif "claude" in barebone_model.model_id.lower():
+                content_blocks = data.get("content", [])
+                content = "".join([block["text"] for block in content_blocks if block.get("type") == "text"])
+                for block in content_blocks:
+                    if block.get("type") == "tool_use":
+                        tool_calls.append({
+                            "id": block.get("id"),
+                            "name": block.get("name"),
+                            "function": {
+                                "name": block.get("name"),
+                                "arguments": json.dumps(block.get("input", {}))
+                            }
+                        })
+            elif "gemini" in barebone_model.model_id.lower():
+                candidate = data["candidates"][0]["content"]
+                parts = candidate.get("parts", [])
+                for part in parts:
+                    if "text" in part:
+                        content += part["text"]
+                    elif "functionCall" in part:
+                        func_call = part["functionCall"]
+                        tool_calls.append({
+                            "name": func_call.get("name"),
+                            "function": {
+                                "name": func_call.get("name"),
+                                "arguments": json.dumps(func_call.get("args", {}))
+                            }
+                        })
+
+            # Append final response to messages
+            if provider == "gemini":
+                assistant_msg = {"role": "model", "parts": []}
+                if content:
+                    assistant_msg["parts"].append({"text": content})
+                for tool_call in tool_calls:
+                    assistant_msg["parts"].append({
+                        "functionCall": {
+                            "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
+                            "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                        }
+                    })
+                if assistant_msg["parts"]:
+                    messages.append(assistant_msg)
+            elif provider == "deepseek" or provider == "openai":
+                assistant_msg = {"role": "assistant", "content": content}
+                if tool_calls:
+                    assistant_msg["tool_calls"] = tool_calls
+                messages.append(assistant_msg)
+            elif provider == "anthropic":
+                assistant_msg = {"role": "assistant", "content": []}
+                if content:
+                    assistant_msg["content"].append({"type": "text", "text": content})
+                for tool_call in tool_calls:
+                    assistant_msg["content"].append({
+                        "type": "tool_use",
+                        "id": tool_call.get("id"),
+                        "name": tool_call.get("name"),
+                        "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                    })
+                messages.append(assistant_msg)
+
+            cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
+
+        if logger:
+            logger.log_output(content, usage_info, cost_info, message_history)
+
+        msg_id = str(uuid.uuid4())
+        message_history["messages"][msg_id] = {"message": content, "tokens": tokens}
+        return {"content": content, "tool_calls": tool_calls, "executed_tool_calls": executed_tool_calls, "content_before_tools": content_before_tools, "message_history": message_history, "usage": usage_info, "cost": cost_info}
+
+    finally:
+        if should_close_client:
+            await client.aclose()

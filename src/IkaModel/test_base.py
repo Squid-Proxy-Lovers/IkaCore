@@ -33,7 +33,6 @@ from base import (
 
 
 def load_api_keys():
-    """Load API keys from apikeys file."""
     apikeys_path = Path(__file__).parent.parent / "apikeys"
     keys = {}
     if apikeys_path.exists():
@@ -98,7 +97,6 @@ class TestRealAPICalls(unittest.TestCase):
 
     @unittest.skipIf("deepseek" not in API_KEYS, "DeepSeek API key not found")
     def test_deepseek_real_api_call(self):
-        """Test real API call to DeepSeek."""
         model = BareBoneModel(
             model_id="deepseek-chat",
             api_key=API_KEYS["deepseek"],
@@ -125,7 +123,6 @@ class TestRealAPICalls(unittest.TestCase):
 
     @unittest.skipIf("openai" not in API_KEYS, "OpenAI API key not found")
     def test_openai_real_api_call(self):
-        """Test real API call to OpenAI."""
         model = BareBoneModel(
             model_id="gpt-4o-mini",
             api_key=API_KEYS["openai"],
@@ -152,7 +149,6 @@ class TestRealAPICalls(unittest.TestCase):
 
     @unittest.skipIf("claude" not in API_KEYS, "Claude API key not found")
     def test_anthropic_real_api_call(self):
-        """Test real API call to Anthropic Claude."""
         model = BareBoneModel(
             model_id="claude-3-haiku-20240307",
             api_key=API_KEYS["claude"],
@@ -179,7 +175,6 @@ class TestRealAPICalls(unittest.TestCase):
 
     @unittest.skipIf("gemini" not in API_KEYS, "Gemini API key not found")
     def test_gemini_real_api_call(self):
-        """Test real API call to Google Gemini."""
         model = BareBoneModel(
             model_id="gemini-2.0-flash",
             api_key=API_KEYS["gemini"],
@@ -412,7 +407,6 @@ class TestSummarizationRealAPI(unittest.TestCase):
 
     @unittest.skipIf("deepseek" not in API_KEYS, "DeepSeek API key not found")
     def test_summarise_message_history_deepseek_real(self):
-        """Test real summarization with DeepSeek."""
         MESSAGE_HISTORY["first_input"]["message"] = "First user message about testing"
         MESSAGE_HISTORY["first_input"]["tokens"] = 10
         MESSAGE_HISTORY["summary"]["message"] = ""
@@ -448,7 +442,6 @@ class TestSummarizationRealAPI(unittest.TestCase):
 
     @unittest.skipIf("openai" not in API_KEYS, "OpenAI API key not found")
     def test_summarise_message_history_openai_real(self):
-        """Test real summarization with OpenAI."""
         MESSAGE_HISTORY["first_input"]["message"] = "First user message about testing"
         MESSAGE_HISTORY["messages"] = {
             "msg1": {"message": "Assistant response", "tokens": 20}
@@ -481,7 +474,6 @@ class TestFullConversationFlow(unittest.TestCase):
 
     @unittest.skipIf("deepseek" not in API_KEYS, "DeepSeek API key not found")
     def test_multiple_turn_conversation(self):
-        """Test a multi-turn conversation with DeepSeek."""
         model = BareBoneModel(
             model_id="deepseek-chat",
             api_key=API_KEYS["deepseek"],

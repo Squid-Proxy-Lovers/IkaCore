@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 
 
 class CheckpointStore:
-    """Simple SQLite-based checkpoint store for agents and stages."""
 
     def __init__(self, db_path: str = "checkpoints.db") -> None:
         self.db_path = str(db_path)

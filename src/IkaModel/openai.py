@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Optional
 
 
 def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Creates OpenAI API payload from model and messages."""
     message_history = message_history or {
         "system": {"message": "", "tokens": 0},
         "first_input": {"message": "", "tokens": 0},
@@ -105,10 +104,11 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                         }
                     elif "type" not in tool.args.properties:
                         # Properties dict without type, wrap it properly
+                        required_list = tool.args.properties.pop("__required__", [])
                         parameters = {
                             "type": "object",
                             "properties": tool.args.properties,
-                            "required": []
+                            "required": required_list
                         }
                     else:
                         # Has type but might not be object, use as-is

@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Optional
 
 
 def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Creates DeepSeek API payload from model and messages."""
     message_history = message_history or {
         "system": {"message": "", "tokens": 0},
         "first_input": {"message": "", "tokens": 0},
@@ -71,22 +70,36 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
         for tool in model.agent_tools:
             # Ensure we always have a valid JSON schema
             # tool.args.properties can be None, empty dict {}, or a dict with properties
-            if tool.args.properties is not None and isinstance(tool.args.properties, dict):
+            # For agent_end, always use type-based conversion to ensure correct parameters
+            if tool.name == "agent_end" and tool.args.type == "input":
+                parameters = {
+                    "type": "object",
+                    "properties": {
+                        "input": {
+                            "type": "string",
+                            "description": tool.args.description or "Final response content. This is REQUIRED - provide your complete final answer here."
+                        }
+                    },
+                    "required": ["input"]
+                }
+            elif tool.args.properties is not None and isinstance(tool.args.properties, dict):
                 if len(tool.args.properties) > 0:
                     # Non-empty properties dict - use it but ensure proper structure
                     if "type" in tool.args.properties and tool.args.properties["type"] == "object":
                         # Already has type: object, use as-is but ensure properties key exists
+                        required_list = tool.args.properties.get("required", [])
                         parameters = {
                             "type": "object",
                             "properties": tool.args.properties.get("properties", {}),
-                            "required": tool.args.properties.get("required", [])
+                            "required": required_list
                         }
                     elif "type" not in tool.args.properties:
                         # Properties dict without type, wrap it properly
+                        required_list = tool.args.properties.pop("__required__", [])
                         parameters = {
                             "type": "object",
                             "properties": tool.args.properties,
-                            "required": []
+                            "required": required_list
                         }
                     else:
                         # Has type but might not be object, use as-is
@@ -114,6 +127,7 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
                         "required": []
                     }
                 else:
+                    required_list = [arg_name] if tool.required else []
                     parameters = {
                         "type": "object",
                         "properties": {
@@ -122,7 +136,7 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
                                 "description": tool.args.description or f"Parameter for {tool.name}"
                             }
                         },
-                        "required": [arg_name] if tool.required else []
+                        "required": required_list
                     }
 
             # Ensure parameters is never None and always has type: object

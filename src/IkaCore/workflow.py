@@ -90,7 +90,10 @@ class AsyncWorkflowExecutor:
                 if context:
                     agent.inject_workflow_context(context)
 
-                result = agent.execution()
+                if getattr(agent, "use_async", False) and hasattr(agent, "async_execution"):
+                    result = asyncio.run(agent.async_execution())
+                else:
+                    result = agent.execution()
                 return {
                     "node_name": node_name,
                     "instance_id": instance_id,
@@ -142,7 +145,6 @@ class AsyncWorkflowExecutor:
         return results
 
     def drain(self) -> None:
-        """Wait for all pending tasks to complete."""
         with self.lock:
             pending = list(self.pending_tasks.values())
         
@@ -150,7 +152,6 @@ class AsyncWorkflowExecutor:
             self.wait_for_completion(pending)
 
     def shutdown(self, wait: bool = True) -> None:
-        """Shutdown the executor."""
         self.executor.shutdown(wait=wait)
 
 
@@ -297,7 +298,6 @@ class IkaWorkflow:
     # Compression / summarisation
     # ------------------------------------------------------------------
     def _default_compress_hook(self, contexts: List[str], agent: IkaBaseAgent) -> str:
-        """Default compression that reuses summarise_message_history when possible."""
         merged = "\n\n".join([c for c in contexts if c]) if contexts else ""
         if not merged:
             return ""

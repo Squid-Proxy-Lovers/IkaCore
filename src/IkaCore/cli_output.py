@@ -1,10 +1,3 @@
-"""
-CLI Output System for Para-Core
-
-Provides professional, color-coded box output for agent execution with
-thread-safe buffering for parallel execution.
-"""
-
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Dict, Any
@@ -17,7 +10,6 @@ import threading
 
 
 class OutputType(Enum):
-    """Five execution types with their associated colors."""
     AGENT_INIT = "agent_init"          # YELLOW
     TOOL_CALL = "tool_call"            # GREEN
     TOOL_RESULT = "tool_result"        # RED
@@ -27,7 +19,6 @@ class OutputType(Enum):
 
 @dataclass
 class OutputContext:
-    """Context for a single output event."""
     output_type: OutputType
     step_number: int
     hierarchy_chain: List[str]  # e.g., ["recon_agent", "safe_ping_sweep", "nmap_scan"]
@@ -38,12 +29,10 @@ class OutputContext:
 
     @property
     def hierarchy_string(self) -> str:
-        """Format hierarchy as 'agent1 -> agent2 -> tool_name'."""
         return " -> ".join(self.hierarchy_chain) if self.hierarchy_chain else "root"
 
 
 class BoxRenderer:
-    """Renders Unicode box-drawing output with colors."""
 
     # Unicode box characters
     TOP_LEFT = "\u250c"
@@ -86,13 +75,11 @@ class BoxRenderer:
         self.width = width
 
     def _colorize(self, text: str, output_type: OutputType) -> str:
-        """Apply color to text based on output type."""
         if not self.use_colors:
             return text
         return f"{self.COLORS[output_type]}{text}{self.RESET}"
 
-    def _truncate(self, content: str, output_type: OutputType = None) -> str:
-        """Truncate content to max length. AGENT_INIT is never truncated."""
+    def _truncate(self, content: str, output_type: Optional[OutputType] = None) -> str:
         if output_type in self.NO_TRUNCATE_TYPES:
             return content
         if len(content) <= self.MAX_CONTENT_LENGTH:
@@ -100,7 +87,6 @@ class BoxRenderer:
         return content[:self.MAX_CONTENT_LENGTH - 3] + "..."
 
     def _wrap_line(self, text: str, inner_width: int) -> List[str]:
-        """Word-wrap text to fit inside box."""
         if not text:
             return [""]
 
@@ -134,7 +120,6 @@ class BoxRenderer:
         return lines if lines else [""]
 
     def render(self, ctx: OutputContext) -> str:
-        """Render a complete box for an output context."""
         inner_width = self.width - 4  # Account for "| " and " |"
 
         # Build header line
@@ -189,7 +174,6 @@ class BoxRenderer:
 
 
 class OutputBuffer:
-    """Thread-safe output buffer for parallel execution."""
 
     def __init__(self, renderer: Optional[BoxRenderer] = None):
         self._lock = Lock()
@@ -198,28 +182,23 @@ class OutputBuffer:
         self._renderer = renderer or BoxRenderer()
 
     def set_renderer(self, renderer: BoxRenderer):
-        """Update the renderer."""
         with self._lock:
             self._renderer = renderer
 
     def enable_buffering(self):
-        """Enable buffering mode for parallel execution."""
         with self._lock:
             self._buffering_enabled = True
             self._buffers.clear()
 
     def disable_buffering(self):
-        """Disable buffering mode."""
         with self._lock:
             self._buffering_enabled = False
 
     def is_buffering(self) -> bool:
-        """Check if buffering is enabled."""
         with self._lock:
             return self._buffering_enabled
 
     def add(self, ctx: OutputContext):
-        """Add output to buffer or print immediately."""
         with self._lock:
             if self._buffering_enabled:
                 self._buffers[ctx.instance_id].append(ctx)
@@ -227,12 +206,10 @@ class OutputBuffer:
                 self._print_output(ctx)
 
     def _print_output(self, ctx: OutputContext):
-        """Print a single output context."""
         print(self._renderer.render(ctx))
         sys.stdout.flush()
 
     def flush(self):
-        """Flush all buffered output in logical order by instance ID."""
         with self._lock:
             if not self._buffers:
                 self._buffering_enabled = False
@@ -254,10 +231,6 @@ class OutputBuffer:
 
 
 class CLIOutput:
-    """
-    Main interface for CLI output system.
-    Thread-safe singleton for use across the framework.
-    """
 
     _instance = None
     _instance_lock = Lock()
@@ -281,53 +254,42 @@ class CLIOutput:
         self._initialized = True
 
     def configure(self, use_colors: bool = True, width: int = 80):
-        """Configure output settings."""
         self._renderer = BoxRenderer(use_colors=use_colors, width=width)
         self._buffer.set_renderer(self._renderer)
 
     def start_parallel(self):
-        """Start buffering for parallel execution."""
         self._buffer.enable_buffering()
 
     def end_parallel(self):
-        """End parallel execution and flush buffered output."""
         self._buffer.flush()
 
     def is_buffering(self) -> bool:
-        """Check if currently buffering."""
         return self._buffer.is_buffering()
 
     def _get_thread_id(self) -> int:
-        """Get current thread ID."""
         return threading.current_thread().ident or 0
 
     def _get_instance_id(self) -> int:
-        """Get instance ID from thread-local storage."""
         return getattr(self._thread_local, 'instance_id', 0)
 
     def set_instance_id(self, instance_id: int):
-        """Set instance ID for current thread."""
         self._thread_local.instance_id = instance_id
 
     def get_step(self, agent_name: str) -> int:
-        """Get current step for an agent."""
         with self._lock:
             return self._step_counters.get(agent_name, 0)
 
     def set_step(self, agent_name: str, step: int):
-        """Set current step for an agent."""
         with self._lock:
             self._step_counters[agent_name] = step
 
     def increment_step(self, agent_name: str) -> int:
-        """Increment and return step for an agent."""
         with self._lock:
             current = self._step_counters.get(agent_name, 0)
             self._step_counters[agent_name] = current + 1
             return current + 1
 
     def reset_steps(self):
-        """Reset all step counters."""
         with self._lock:
             self._step_counters.clear()
 
@@ -339,7 +301,6 @@ class CLIOutput:
         step: Optional[int] = None,
         instance_id: Optional[int] = None
     ):
-        """Emit an output event."""
         agent_name = hierarchy[0] if hierarchy else "unknown"
 
         ctx = OutputContext(
@@ -362,7 +323,6 @@ class CLIOutput:
         description: str = "",
         **kwargs
     ):
-        """Emit agent initialization output."""
         content_parts = [f"Initializing agent: {agent_name}"]
         if description:
             content_parts.append(f"Description: {description}")
@@ -379,7 +339,6 @@ class CLIOutput:
         hierarchy: List[str],
         step: int
     ):
-        """Emit tool call output."""
         try:
             args_str = json.dumps(args, indent=2, default=str)
         except (TypeError, ValueError):
@@ -396,7 +355,6 @@ class CLIOutput:
         is_error: bool = False,
         is_timeout: bool = False
     ):
-        """Emit tool result output."""
         if is_timeout:
             prefix = "TIMEOUT"
         elif is_error:
@@ -414,7 +372,6 @@ class CLIOutput:
         step: int,
         is_final: bool = False
     ):
-        """Emit agent response output."""
         status = " (Final)" if is_final else ""
         content = f"Agent: {agent_name}{status}\nResponse:\n{response}"
         self.emit(OutputType.AGENT_RESPONSE, content, hierarchy, step)
@@ -426,7 +383,6 @@ class CLIOutput:
         hierarchy: Optional[List[str]] = None,
         step: int = 0
     ):
-        """Emit summarization output (never truncated, magenta)."""
         if hierarchy is None:
             hierarchy = [agent_name]
         content = f"Summary for {agent_name}:\n{summary}"
@@ -438,7 +394,6 @@ class CLIOutput:
         message: str,
         step: int = 0
     ):
-        """Emit workflow status output."""
         content = f"Workflow: {workflow_name}\n{message}"
         self.emit(OutputType.AGENT_INIT, content, [workflow_name], step)
 
@@ -449,7 +404,6 @@ _cli_output_lock = Lock()
 
 
 def get_cli_output() -> CLIOutput:
-    """Get the global CLIOutput instance."""
     global _cli_output_instance
     with _cli_output_lock:
         if _cli_output_instance is None:

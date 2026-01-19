@@ -2,7 +2,6 @@ from typing import Any, Optional
 
 
 class Memory:
-    """base memory class."""    
     def __init__(self, storage: Any):
         """
         init memory.
@@ -16,22 +15,18 @@ class Memory:
 
     @property
     def task(self) -> Optional[str]:
-        """get the current task associated with this memory."""
         return self._task
 
     @task.setter
     def task(self, task: Optional[str]) -> None:
-        """set the current task associated with this memory."""
         self._task = task
 
     @property
     def agent(self) -> Optional[str]:
-        """get the current agent associated with this memory."""
         return self._agent
 
     @agent.setter
     def agent(self, agent: Optional[str]) -> None:
-        """set the current agent associated with this memory."""
         self._agent = agent
 
 
@@ -69,5 +64,4 @@ class Memory:
         )
 
     def reset(self) -> None:
-        """reset memory storage."""
         self.storage.reset()

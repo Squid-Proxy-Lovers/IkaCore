@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Optional
 
 
 def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Creates Google Gemini API payload from model and messages."""
     message_history = message_history or {
         "system": {"message": "", "tokens": 0},
         "first_input": {"message": "", "tokens": 0},
@@ -69,6 +68,7 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
         for tool in model.agent_tools:
             # Handle tools with explicit properties
             if tool.args.properties and len(tool.args.properties) > 0:
+                required_list = tool.args.properties.pop("__required__", [])
                 properties = {}
                 for prop_name, prop_def in tool.args.properties.items():
                     properties[prop_name] = {
@@ -78,7 +78,7 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                 parameters = {
                     "type": "object",
                     "properties": properties,
-                    "required": getattr(tool.args, 'required', []) or []
+                    "required": required_list
                 }
             else:
                 # Simple single-argument tool

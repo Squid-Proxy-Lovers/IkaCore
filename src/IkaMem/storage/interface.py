@@ -2,7 +2,6 @@ from typing import Any
 
 
 class Storage:
-    """abstract storage interface."""
     def save(self, value: Any, metadata: dict[str, Any]) -> None:
         """Save a value to storage with associated metadata.
         
@@ -29,6 +28,5 @@ class Storage:
         return []
 
     def reset(self) -> None:
-        """Reset/clear the storage."""
         pass
 
