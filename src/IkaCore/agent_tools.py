@@ -86,7 +86,7 @@ class AgentToolsMixin(AgentParseMixin):
                     description=tool.description,
                     args=tool_args,
                     required=tool.required,
-                    limit_calls=getattr(tool, 'limit_calls', 1),
+                    limit_calls=getattr(tool, 'limit_calls', 0),
                 )
             )
         return converted
@@ -263,4 +263,3 @@ class AgentToolsMixin(AgentParseMixin):
         tool_executors["agent_end"] = agent_end_executor
         
         return tool_executors
-

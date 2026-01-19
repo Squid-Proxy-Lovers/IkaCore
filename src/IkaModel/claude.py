@@ -24,12 +24,16 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
             "content": message_history["summary"]["message"]
         })
     
-    for msg_id in sorted(message_history["messages"].keys()):
+    for msg_id in message_history["messages"]:
         msg = message_history["messages"][msg_id]
-        api_messages.append({
-            "role": "assistant",
-            "content": msg["message"]
-        })
+        msg_type = msg.get("type", "assistant")
+        if msg_type == "assistant_with_tools" or msg_type == "tool":
+            continue
+        else:
+            api_messages.append({
+                "role": "assistant",
+                "content": msg["message"]
+            })
     
     for msg in messages:
         if isinstance(msg, dict):
@@ -82,7 +86,29 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
     if model.agent_tools:
         tools = []
         for tool in model.agent_tools:
-            if tool.args.properties and len(tool.args.properties) > 0:
+            if tool.name == "agent_end" and tool.args.type == "input":
+                input_schema = {
+                    "type": "object",
+                    "properties": {
+                        "input": {
+                            "type": "string",
+                            "description": tool.args.description or "Final response content. This is REQUIRED - provide your complete final answer here."
+                        }
+                    },
+                    "required": ["input"]
+                }
+            elif tool.args.type == "input":
+                input_schema = {
+                    "type": "object",
+                    "properties": {
+                        "input": {
+                            "type": "string",
+                            "description": tool.args.description or f"Input for {tool.name}"
+                        }
+                    },
+                    "required": ["input"]
+                }
+            elif tool.args.properties and len(tool.args.properties) > 0:
                 required_list = tool.args.properties.pop("__required__", [])
                 input_schema = {
                     "type": "object",

@@ -75,7 +75,7 @@ class ToolArgs:
 
 @dataclass
 class AgentTool:
-    def __init__(self, id:str, name: str, description: str, args: ToolArgs, required: bool = True, parallel: bool = False, limit_calls: int = 1): 
+    def __init__(self, id:str, name: str, description: str, args: ToolArgs, required: bool = True, parallel: bool = False, limit_calls: int = 0): 
         self.validate(name)
         self.id = id
         self.name = name

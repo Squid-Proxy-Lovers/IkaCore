@@ -17,20 +17,29 @@ if not API_KEY:
 if not MODEL_ID:
     raise ValueError("MODEL_ID is not set")
 
+AsynPrompt = """
+For maximum efficiency, whenever you need to perform multiple independent operations, invoke all relevant tools simultaneously rather than sequentially.
+"""
+# Manager Agent
+SYSTEM_PROMPT = """ You are a general purpose agent. You can use the tools provided to you to achieve your goal.""" + AsynPrompt    
 
-SYSTEM_PROMPT = """ You are a general purpose agent. You can use the tools provided to you to achieve your goal."""
+PROMPT = """
+Explain to me how Ika Core works in detail I only care about python code, Find files and pass them into your subagent to explain them.
+Make sure to pass the files to the subagent in a list, provide the full path to the file, do not pass the file content, only the path.
 
+Please provide 5-10 files to the subagent, and please try to batch your tool call request so they run in parallel (this is CRITICAL for performance).
+This is especially important for the list_files tool and subagent tool calls.
+"""
 
-PROMPT = """You are a simple example system. You can read and list files, 
-your goal is to return a summary of the files in the current working directory,
-you will need to use the list_files and read_file tools to achieve your goal."""
+# Subagent
+SUBAGENT_SYSTEM_PROMPT = """You are a subagent. You can use the tools provided to you to achieve your goal.""" + AsynPrompt
+
+SUBAGENT_PROMPT = """Explain what this file(s) do in detail, do not waste time trying ot figure out the directory structure, just explain the file(s) you are given to you."""
 
 def main():
 
     def read_file_execute(file_path: str) -> str:
         return open(file_path, "r").read()
-
-
 
     get_pwd = IkaTools(
         name="get_pwd",
@@ -64,17 +73,29 @@ def main():
         execute_function=lambda x: read_file_execute(x["file_path"]),
     )
 
-    agent = IkaBaseAgent(
+    Subagent = IkaBaseAgent(
+        name="subagent",
+        description="File reader subagent",
+        system_prompt=SUBAGENT_SYSTEM_PROMPT,
+        prompt=SUBAGENT_PROMPT,
+        tools=[read_file],
+        model_id=MODEL_ID,
+        api_key=API_KEY,
+    )
+
+    ManagerAgent = IkaBaseAgent(
         name="example_system",
         description="A simple example system",
         system_prompt=SYSTEM_PROMPT,
         prompt=PROMPT,
-        tools=[get_pwd, read_file, list_files],
+        tools=[get_pwd, list_files],
         model_id=MODEL_ID,
         api_key=API_KEY,
-        #logging_level=3,
+        subagents=[Subagent],
+        maxsteps=30,
+        logging_level=2,
     )
-    agent.execution()
+    ManagerAgent.execution()
 
 if __name__ == "__main__":
     main()

@@ -29,12 +29,16 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
             "content": message_history["summary"]["message"]
         })
     
-    for msg_id in sorted(message_history["messages"].keys()):
+    for msg_id in message_history["messages"]:
         msg = message_history["messages"][msg_id]
-        api_messages.append({
-            "role": "assistant",
-            "content": msg["message"]
-        })
+        msg_type = msg.get("type", "assistant")
+        if msg_type == "assistant_with_tools" or msg_type == "tool":
+            continue
+        else:
+            api_messages.append({
+                "role": "assistant",
+                "content": msg["message"]
+            })
     
     for msg in messages:
         if isinstance(msg, dict):
@@ -92,7 +96,30 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
             parameters = None
             # Ensure we always have a valid JSON schema
             # tool.args.properties can be None, empty dict {}, or a dict with properties
-            if tool.args.properties is not None and isinstance(tool.args.properties, dict):
+            # For agent_end and subagent tools with type="input", always use input parameter
+            if tool.name == "agent_end" and tool.args.type == "input":
+                parameters = {
+                    "type": "object",
+                    "properties": {
+                        "input": {
+                            "type": "string",
+                            "description": tool.args.description or "Final response content. This is REQUIRED - provide your complete final answer here."
+                        }
+                    },
+                    "required": ["input"]
+                }
+            elif tool.args.type == "input":
+                parameters = {
+                    "type": "object",
+                    "properties": {
+                        "input": {
+                            "type": "string",
+                            "description": tool.args.description or f"Input for {tool.name}"
+                        }
+                    },
+                    "required": ["input"]
+                }
+            elif tool.args.properties is not None and isinstance(tool.args.properties, dict):
                 if len(tool.args.properties) > 0:
                     # Non-empty properties dict - use it but ensure proper structure
                     if "type" in tool.args.properties and tool.args.properties["type"] == "object":

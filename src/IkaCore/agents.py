@@ -461,6 +461,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                 description="End the agent loop with a final answer. Use this tool when you have completed the task. Provide the final output as detailed as possible, this should be based on your initial prompt and any context you have gathered. CRITICAL: You MUST provide your final answer in the 'input' parameter. Do NOT call this tool with empty arguments.",
                 args=ToolArgs(type="input", description="Final response content. This is REQUIRED - provide your complete final answer here."),
                 required=True,
+                limit_calls=1,
             )
             stage_tools.append(agent_end_tool)
 
@@ -793,6 +794,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
             description="End the agent loop with a final answer. Provide the final output and any key reasoning. CRITICAL: You MUST provide your final answer in the 'input' parameter. Do NOT call this tool with empty arguments.",
             args=ToolArgs(type="input", description="Final response content. This is REQUIRED - provide your complete final answer here."),
             required=True,
+            limit_calls=1,
         )
         
         memory_tools = self._build_stage_memory_tools(self.memory_access)
@@ -806,6 +808,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         content_prompt = self.prompt + "\n\n" + AGENT_END_INSTRUCTION
         messages: List[dict] = [{"role": "user", "content": content_prompt}]
         last_content = ""
+        last_agent_end_text = None
 
         current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
         tool_executors = self.build_tool_executors(self.tools, memory_access=self.memory_access, subagents=self.subagents, parent_hierarchy=current_hierarchy)
@@ -860,6 +863,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                     None,
                     response_content=content_before_tools,
                 )
+                if agent_end_called and agent_end_text:
+                    last_agent_end_text = agent_end_text
             except ValueError as e:
                 error_msg = str(e)
                 cli.agent_response(
@@ -994,14 +999,15 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
             remaining_after = max(0, max_steps_val - (current_step_val + 1))
             self._save_agent_checkpoint(remaining_after, last_content)
 
+        final_response = last_agent_end_text if last_agent_end_text else last_content
         cli.agent_response(
             self.name,
-            f"Reached max steps ({self.maxsteps}). Returning last content.\n{last_content}",
+            f"Reached max steps ({self.maxsteps}). Returning last content.\n\n{final_response}",
             current_hierarchy,
             step=self.maxsteps,
             is_final=True
         )
-        return last_content, last_content
+        return final_response, final_response
 
     def _build_final_output(self, final_message: str, barebone_model: BareBoneModel) -> Dict[str, str]:
         summary = ""

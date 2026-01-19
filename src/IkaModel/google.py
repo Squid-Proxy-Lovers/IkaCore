@@ -25,7 +25,7 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
             "parts": [{"text": message_history["summary"]["message"]}]
         })
     
-    for msg_id in sorted(message_history["messages"].keys()):
+    for msg_id in message_history["messages"]:
         msg = message_history["messages"][msg_id]
         contents.append({
             "role": "model",
@@ -66,8 +66,31 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
     if model.agent_tools:
         function_declarations = []
         for tool in model.agent_tools:
+            # For agent_end and subagent tools with type="input", always use input parameter
+            if tool.name == "agent_end" and tool.args.type == "input":
+                parameters = {
+                    "type": "object",
+                    "properties": {
+                        "input": {
+                            "type": "string",
+                            "description": tool.args.description or "Final response content. This is REQUIRED - provide your complete final answer here."
+                        }
+                    },
+                    "required": ["input"]
+                }
+            elif tool.args.type == "input":
+                parameters = {
+                    "type": "object",
+                    "properties": {
+                        "input": {
+                            "type": "string",
+                            "description": tool.args.description or f"Input for {tool.name}"
+                        }
+                    },
+                    "required": ["input"]
+                }
             # Handle tools with explicit properties
-            if tool.args.properties and len(tool.args.properties) > 0:
+            elif tool.args.properties and len(tool.args.properties) > 0:
                 required_list = tool.args.properties.pop("__required__", [])
                 properties = {}
                 for prop_name, prop_def in tool.args.properties.items():

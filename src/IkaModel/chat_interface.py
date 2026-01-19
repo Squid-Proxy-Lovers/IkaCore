@@ -151,7 +151,7 @@ def get_conversation_text(message_history: dict) -> str:
         parts.append(message_history["first_input"]["message"])
     if message_history["summary"]["message"]:
         parts.append(message_history["summary"]["message"])
-    for msg_id in sorted(message_history["messages"].keys()):
+    for msg_id in message_history["messages"]:
         parts.append(message_history["messages"][msg_id]["message"])
     return "\n".join(parts)
 
@@ -701,7 +701,7 @@ def execute_tool_calls(
     agent_hierarchy: Optional[List[str]] = None,
     step: int = 0,
     tool_call_counts: Optional[Dict[str, int]] = None
-) -> tuple[List[dict], List[str], Dict[str, int]]:
+) -> tuple[List[dict], List[str], Dict[str, int], List[dict]]:
     """Execute tool calls either in parallel or sequentially based on tool metadata.
     
     Args:
@@ -715,21 +715,24 @@ def execute_tool_calls(
         tool_call_counts: Optional dictionary tracking tool call counts (will be updated in place)
     
     Returns:
-        Tuple of (formatted_messages, tool_results, updated_tool_call_counts)
+        Tuple of (formatted_messages, tool_results, updated_tool_call_counts, executed_tool_call_list)
     """
     if not tool_calls or not tool_executors:
-        return [], [], tool_call_counts or {}
+        return [], [], tool_call_counts or {}, []
     
     tool_metadata = tool_metadata or {}
     tool_call_counts = tool_call_counts or {}
+    tool_call_order = tool_calls.copy()
+    tool_call_id_to_result: Dict[str, str] = {}
     
-    # Parse tool calls into (tool_name, args) tuples and filter by limit_calls
-    parsed_calls = []
-    filtered_calls = []
-    for tool_call in tool_calls:
+    parallel_calls = []
+    sequential_calls = []
+    
+    for idx, tool_call in enumerate(tool_calls):
         fn = tool_call.get("function", {})
         tool_name = fn.get("name") or tool_call.get("name", "")
         args_raw = fn.get("arguments") or "{}"
+        tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
         
         try:
             args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
@@ -738,67 +741,52 @@ def execute_tool_calls(
             args = {}
         
         metadata = tool_metadata.get(tool_name, {})
-        limit_calls = metadata.get("limit_calls", 1)
+        limit_calls = metadata.get("limit_calls", 0)
         current_count = tool_call_counts.get(tool_name, 0)
         
         if limit_calls > 0 and current_count >= limit_calls:
             LOG.warning(f"Tool '{tool_name}' has reached its call limit ({limit_calls}). Skipping this call.")
+            error_msg = json.dumps({"error": f"Tool '{tool_name}' call limit ({limit_calls}) reached. Skipping execution."})
+            tool_call_id_to_result[tool_call_id] = error_msg
             continue
         
-        parsed_calls.append((tool_name, args, tool_call))
-        filtered_calls.append(tool_call)
-    
-    # Separate parallel and sequential tools
-    parallel_calls = []
-    sequential_calls = []
-    
-    for tool_name, args, tool_call in parsed_calls:
-        metadata = tool_metadata.get(tool_name, {})
         is_parallel = metadata.get("parallel", True)  # Default to parallel
         
         if is_parallel:
-            parallel_calls.append((tool_name, args, tool_call))
+            parallel_calls.append((tool_name, args, tool_call_id))
         else:
-            sequential_calls.append((tool_name, args, tool_call))
+            sequential_calls.append((tool_name, args, tool_call_id))
     
-    tool_results = []
-    tool_call_order = []  # Track the order for results
-
-    # Execute parallel tools first (if any)
     if parallel_calls:
         with ThreadPoolExecutor(max_workers=len(parallel_calls)) as executor:
             futures = {}
-            for tool_name, args, tool_call in parallel_calls:
+            for tool_name, args, tool_call_id in parallel_calls:
                 future = executor.submit(execute_tool, tool_name, args, tool_executors, timeout, agent_hierarchy, step)
-                futures[future] = (tool_name, tool_call)
-                tool_call_order.append(tool_call)
+                futures[future] = (tool_name, tool_call_id)
 
-            # Wait for all parallel tools to complete
             for future in futures:
+                tool_name, tool_call_id = futures[future]
                 try:
                     result = future.result()
-                    tool_results.append(result)
-                    tool_name, _ = futures[future]
+                    tool_call_id_to_result[tool_call_id] = result
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
                 except Exception as e:
                     error_msg = f"Parallel tool execution error: {str(e)}"
                     LOG.error(error_msg)
-                    tool_results.append(json.dumps({"error": error_msg}))
-                    tool_name, _ = futures[future]
+                    tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
 
-    # Execute sequential tools (if any)
-    for tool_name, args, tool_call in sequential_calls:
+    for tool_name, args, tool_call_id in sequential_calls:
         result = execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
-        tool_results.append(result)
-        tool_call_order.append(tool_call)
+        tool_call_id_to_result[tool_call_id] = result
         tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
     
-    # Update counts for parallel tools
-    for tool_name, _, _ in parallel_calls:
-        tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+    tool_results = []
+    for idx, tool_call in enumerate(tool_call_order):
+        fn = tool_call.get("function", {})
+        tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
+        tool_results.append(tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})))
     
-    # Format results based on provider
     if provider == "deepseek" or provider == "openai":
         formatted_messages = format_openai_results(tool_call_order, tool_results)
     elif provider == "anthropic":
@@ -808,7 +796,7 @@ def execute_tool_calls(
     else:
         formatted_messages = []
     
-    return formatted_messages, tool_results, tool_call_counts
+    return formatted_messages, tool_results, tool_call_counts, tool_call_order
 
 
 async def async_execute_tool(
@@ -878,19 +866,23 @@ async def async_execute_tool_calls(
     agent_hierarchy: Optional[List[str]] = None,
     step: int = 0,
     tool_call_counts: Optional[Dict[str, int]] = None
-) -> tuple[List[dict], List[str], Dict[str, int]]:
+) -> tuple[List[dict], List[str], Dict[str, int], List[dict]]:
     if not tool_calls or not tool_executors:
-        return [], [], tool_call_counts or {}
+        return [], [], tool_call_counts or {}, []
 
     tool_metadata = tool_metadata or {}
     tool_call_counts = tool_call_counts or {}
+    tool_call_order = tool_calls.copy()
+    tool_call_id_to_result: Dict[str, str] = {}
 
-    # Parse tool calls into (tool_name, args) tuples and filter by limit_calls
-    parsed_calls = []
-    for tool_call in tool_calls:
+    parallel_calls = []
+    sequential_calls = []
+
+    for idx, tool_call in enumerate(tool_calls):
         fn = tool_call.get("function", {})
         tool_name = fn.get("name") or tool_call.get("name", "")
         args_raw = fn.get("arguments") or "{}"
+        tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
 
         try:
             args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
@@ -899,58 +891,55 @@ async def async_execute_tool_calls(
             args = {}
 
         metadata = tool_metadata.get(tool_name, {})
-        limit_calls = metadata.get("limit_calls", 1)
+        limit_calls = metadata.get("limit_calls", 0)
         current_count = tool_call_counts.get(tool_name, 0)
         
         if limit_calls > 0 and current_count >= limit_calls:
             LOG.warning(f"Tool '{tool_name}' has reached its call limit ({limit_calls}). Skipping this call.")
+            error_msg = json.dumps({"error": f"Tool '{tool_name}' call limit ({limit_calls}) reached. Skipping execution."})
+            tool_call_id_to_result[tool_call_id] = error_msg
             continue
 
-        parsed_calls.append((tool_name, args, tool_call))
-
-    # Separate parallel and sequential tools
-    parallel_calls = []
-    sequential_calls = []
-
-    for tool_name, args, tool_call in parsed_calls:
-        metadata = tool_metadata.get(tool_name, {})
         is_parallel = metadata.get("parallel", True)
 
         if is_parallel:
-            parallel_calls.append((tool_name, args, tool_call))
+            parallel_calls.append((tool_name, args, tool_call_id))
         else:
-            sequential_calls.append((tool_name, args, tool_call))
-
-    tool_results = []
-    tool_call_order = []
+            sequential_calls.append((tool_name, args, tool_call_id))
 
     # Execute parallel tools concurrently using asyncio.gather
     if parallel_calls:
         tasks = []
-        tool_names_for_parallel = []
-        for tool_name, args, tool_call in parallel_calls:
+        tool_call_ids_for_parallel = []
+        for tool_name, args, tool_call_id in parallel_calls:
             task = async_execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
             tasks.append(task)
-            tool_names_for_parallel.append(tool_name)
-            tool_call_order.append(tool_call)
+            tool_call_ids_for_parallel.append(tool_call_id)
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for i, result in enumerate(results):
-            tool_name = tool_names_for_parallel[i]
+            tool_call_id = tool_call_ids_for_parallel[i]
+            tool_name = parallel_calls[i][0] if i < len(parallel_calls) else ""
             tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
             if isinstance(result, Exception):
                 error_msg = f"Parallel tool execution error: {str(result)}"
                 LOG.error(error_msg)
-                tool_results.append(json.dumps({"error": error_msg}))
+                tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
             else:
-                tool_results.append(result)
+                tool_call_id_to_result[tool_call_id] = result if isinstance(result, str) else json.dumps(result)
 
     # Execute sequential tools one by one
-    for tool_name, args, tool_call in sequential_calls:
+    for tool_name, args, tool_call_id in sequential_calls:
         result = await async_execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
-        tool_results.append(result)
-        tool_call_order.append(tool_call)
+        tool_call_id_to_result[tool_call_id] = result if isinstance(result, str) else json.dumps(result)
         tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+    
+    # Build tool_results in the same order as tool_call_order
+    tool_results = []
+    for idx, tool_call in enumerate(tool_call_order):
+        fn = tool_call.get("function", {})
+        tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
+        tool_results.append(tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})))
 
     # Format results based on provider
     if provider == "deepseek" or provider == "openai":
@@ -962,7 +951,7 @@ async def async_execute_tool_calls(
     else:
         formatted_messages = []
 
-    return formatted_messages, tool_results, tool_call_counts
+    return formatted_messages, tool_results, tool_call_counts, tool_call_order
 
 
 def chat(
@@ -1103,7 +1092,7 @@ def chat(
             for agent_tool in barebone_model.agent_tools:
                 tool_metadata[agent_tool.name] = {
                     "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
-                    "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 1
+                    "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
                 }
         
         # Get agent hierarchy from BareBoneModel
@@ -1111,15 +1100,15 @@ def chat(
         step = getattr(barebone_model, '_current_step', 0)
         
         executed_tool_calls = tool_calls.copy()
-        tool_messages, tool_results, updated_counts = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+        tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
         if hasattr(barebone_model, '_tool_call_counts'):
             barebone_model._tool_call_counts.update(updated_counts)
         if logger:
-            logger.log_tool_results(tool_calls, tool_results)
+            logger.log_tool_results(executed_tool_call_list, tool_results)
         
         if provider == "gemini":
             assistant_msg = {"role": "model", "parts": [{"text": content}]}
-            for tool_call in tool_calls:
+            for tool_call in executed_tool_call_list:
                 assistant_msg["parts"].append({
                     "functionCall": {
                         "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
@@ -1127,19 +1116,47 @@ def chat(
                     }
                 })
             messages.append(assistant_msg)
-            function_responses = format_gemini_results(tool_calls, tool_results)
-            messages.append({"role": "user", "parts": function_responses})
+            function_responses = format_gemini_results(executed_tool_call_list, tool_results)
+            tool_response_msg = {"role": "user", "parts": function_responses}
+            messages.append(tool_response_msg)
+            # Persist assistant/tool messages so follow-up payloads keep ordering
+            msg_id = str(uuid.uuid4())
+            message_history["messages"][msg_id] = {
+                "message": json.dumps(assistant_msg),
+                "tokens": tokens,
+                "type": "assistant_with_tools",
+            }
+            msg_id = str(uuid.uuid4())
+            message_history["messages"][msg_id] = {
+                "message": json.dumps(tool_response_msg),
+                "tokens": 0,
+                "type": "tool",
+            }
         elif provider == "deepseek" or provider == "openai":
             assistant_msg = {"role": "assistant", "content": content}
-            if tool_calls:
-                assistant_msg["tool_calls"] = tool_calls
+            if executed_tool_call_list:
+                assistant_msg["tool_calls"] = executed_tool_call_list
             messages.append(assistant_msg)
             messages.extend(tool_messages)
+            if executed_tool_call_list:
+                msg_id = str(uuid.uuid4())
+                message_history["messages"][msg_id] = {
+                    "message": json.dumps(assistant_msg),
+                    "tokens": tokens,
+                    "type": "assistant_with_tools",
+                }
+            for tool_msg in tool_messages:
+                msg_id = str(uuid.uuid4())
+                message_history["messages"][msg_id] = {
+                    "message": json.dumps(tool_msg),
+                    "tokens": 0,
+                    "type": "tool",
+                }
         elif provider == "anthropic":
             assistant_msg = {"role": "assistant", "content": []}
             if content:
                 assistant_msg["content"].append({"type": "text", "text": content})
-            for tool_call in tool_calls:
+            for tool_call in executed_tool_call_list:
                 assistant_msg["content"].append({
                     "type": "tool_use",
                     "id": tool_call.get("id"),
@@ -1148,6 +1165,19 @@ def chat(
                 })
             messages.append(assistant_msg)
             messages.extend(tool_messages)
+            msg_id = str(uuid.uuid4())
+            message_history["messages"][msg_id] = {
+                "message": json.dumps(assistant_msg),
+                "tokens": tokens,
+                "type": "assistant_with_tools",
+            }
+            for tool_msg in tool_messages:
+                msg_id = str(uuid.uuid4())
+                message_history["messages"][msg_id] = {
+                    "message": json.dumps(tool_msg),
+                    "tokens": 0,
+                    "type": "tool",
+                }
         
         if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
             headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
@@ -1230,10 +1260,9 @@ def chat(
             if assistant_msg["parts"]:
                  messages.append(assistant_msg)
         elif provider == "deepseek" or provider == "openai":
-            assistant_msg = {"role": "assistant", "content": content}
-            if tool_calls:
-                assistant_msg["tool_calls"] = tool_calls
-            messages.append(assistant_msg)
+            if not tool_calls:
+                assistant_msg = {"role": "assistant", "content": content}
+                messages.append(assistant_msg)
         elif provider == "anthropic":
             assistant_msg = {"role": "assistant", "content": []}
             if content:
@@ -1448,22 +1477,22 @@ async def async_chat(
                 for agent_tool in barebone_model.agent_tools:
                     tool_metadata[agent_tool.name] = {
                         "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
-                        "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 1
+                        "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
                     }
 
             agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
             step = getattr(barebone_model, '_current_step', 0)
 
             executed_tool_calls = tool_calls.copy()
-            tool_messages, tool_results, updated_counts = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+            tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
             if hasattr(barebone_model, '_tool_call_counts'):
                 barebone_model._tool_call_counts.update(updated_counts)
             if logger:
-                logger.log_tool_results(tool_calls, tool_results)
+                logger.log_tool_results(executed_tool_call_list, tool_results)
 
             if provider == "gemini":
                 assistant_msg = {"role": "model", "parts": [{"text": content}]}
-                for tool_call in tool_calls:
+                for tool_call in executed_tool_call_list:
                     assistant_msg["parts"].append({
                         "functionCall": {
                             "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
@@ -1471,19 +1500,19 @@ async def async_chat(
                         }
                     })
                 messages.append(assistant_msg)
-                function_responses = format_gemini_results(tool_calls, tool_results)
+                function_responses = format_gemini_results(executed_tool_call_list, tool_results)
                 messages.append({"role": "user", "parts": function_responses})
             elif provider == "deepseek" or provider == "openai":
                 assistant_msg = {"role": "assistant", "content": content}
-                if tool_calls:
-                    assistant_msg["tool_calls"] = tool_calls
+                if executed_tool_call_list:
+                    assistant_msg["tool_calls"] = executed_tool_call_list
                 messages.append(assistant_msg)
                 messages.extend(tool_messages)
             elif provider == "anthropic":
                 assistant_msg = {"role": "assistant", "content": []}
                 if content:
                     assistant_msg["content"].append({"type": "text", "text": content})
-                for tool_call in tool_calls:
+                for tool_call in executed_tool_call_list:
                     assistant_msg["content"].append({
                         "type": "tool_use",
                         "id": tool_call.get("id"),

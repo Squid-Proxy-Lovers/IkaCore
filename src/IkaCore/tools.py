@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Dict
 import uuid
 
 
@@ -12,7 +12,7 @@ class IkaTools:
         name:str, 
         description:str, 
         parameters:dict, 
-        limit_calls:int = 1, 
+        limit_calls:int = 0, 
         required:bool = True, 
         execute_function:Callable = None, 
         parallel:bool = True, 
