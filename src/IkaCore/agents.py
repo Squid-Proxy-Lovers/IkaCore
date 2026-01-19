@@ -1,5 +1,6 @@
 from typing import Optional, List, Dict, Callable, get_type_hints
 import json
+import re
 import sys
 from pathlib import Path
 import time
@@ -32,8 +33,16 @@ from IkaModel.chat_interface import chat, summarise_message_history, execute_too
 
 # Instruction appended to all agent prompts to ensure proper task completion
 AGENT_END_INSTRUCTION = """
+CRITICAL: When you call the agent_end tool, you MUST provide your final answer/output in the tool arguments.
+The agent_end tool REQUIRES a non-empty response. You must pass your final answer using one of these argument names:
+- "input": Your final answer/output
+- "final": Your final answer/output  
+- "message": Your final answer/output
 
-IMPORTANT: When you have completed your assigned task, you MUST call the agent_end tool with your final answer. Do not continue making tool calls after the task is complete. The agent_end tool signals that you have finished and provides your final output."""
+DO NOT call agent_end with empty arguments {}. This will cause an error.
+Your final answer must be based on your initial prompt and any context you have gathered.
+The output format is given by the rest of the prompt.
+"""
 
 
 class IkaBaseAgent:
@@ -72,6 +81,7 @@ class IkaBaseAgent:
         logging_file: str = "logs.txt",
         show_usage_level0: bool = True,
         checkpoint_db_path: str = "checkpoints.db",
+        enable_summarization: bool = True,
     ):
         tools = tools or []
         Stages = Stages or []
@@ -155,6 +165,7 @@ class IkaBaseAgent:
         
         self.short_term_memory: Optional[STMemory] = None
         self.long_term_memory: Optional[LTMemory] = get_global_long_term_memory()
+        self.enable_summarization = enable_summarization
 
         if final_answer_check is None:
             final_answer_check = []
@@ -597,6 +608,44 @@ class IkaBaseAgent:
                     return json.dumps(result)  # Convert dict to JSON string
                 tool_executors["long_term_search"] = long_search_executor
         
+        def agent_end_executor(args: dict) -> str:
+            content = args.get("input") or args.get("final") or args.get("message") or ""
+            if not content:
+                for key, value in args.items():
+                    if isinstance(value, str):
+                        stripped = value.strip()
+                        if stripped.startswith("{") or stripped.startswith("["):
+                            content = value
+                            break
+                        elif len(stripped) > 10:
+                            content = value
+                            break
+                    elif value and not isinstance(value, (dict, list)):
+                        content = str(value)
+                        break
+            
+            if not content or content.strip() == "":
+                raise ValueError("agent_end was called with empty arguments. You MUST provide your final answer/output in the agent_end tool arguments using 'input', 'final', or 'message' parameter.")
+            
+            stripped_content = content.strip()
+            if stripped_content in ["{}", "[]", "null", '""', "''"]:
+                raise ValueError(f"agent_end was called with invalid/empty content: '{stripped_content}'. You MUST provide a meaningful final answer, not empty JSON objects, arrays, or null values.")
+            
+            try:
+                parsed = json.loads(stripped_content)
+                if isinstance(parsed, dict):
+                    if len(parsed) == 0:
+                        raise ValueError(f"agent_end was called with empty JSON object: '{stripped_content}'. You MUST provide a meaningful final answer.")
+                    if len(parsed) == 1 and "functions" in parsed and isinstance(parsed["functions"], list) and len(parsed["functions"]) == 0:
+                        pass
+                elif isinstance(parsed, list) and len(parsed) == 0:
+                    raise ValueError(f"agent_end was called with empty JSON array: '{stripped_content}'. You MUST provide a meaningful final answer.")
+            except json.JSONDecodeError:
+                pass
+            
+            return "Agent execution ended successfully."
+        tool_executors["agent_end"] = agent_end_executor
+        
         return tool_executors
 
     # --------------------
@@ -631,9 +680,9 @@ class IkaBaseAgent:
             agent_end_tool = AgentTool(
                 id="agent_end",
                 name="agent_end",
-                description="End the agent loop with a final answer. Use this tool when you have completed the task. Provide the final output and any key reasoning.",
-                args=ToolArgs(type="input", description="Final response content."),
-                required=False,
+                description="End the agent loop with a final answer. Use this tool when you have completed the task. Provide the final output as detailed as possible, this should be based on your initial prompt and any context you have gathered. CRITICAL: You MUST provide your final answer in the 'input' parameter. Do NOT call this tool with empty arguments.",
+                args=ToolArgs(type="input", description="Final response content. This is REQUIRED - provide your complete final answer here."),
+                required=True,
             )
             stage_tools.append(agent_end_tool)
             # Remove stage_end tool by finding it by name (not string comparison)
@@ -745,7 +794,38 @@ class IkaBaseAgent:
         model.agent_tools = agent_tools
         return model
 
-    def parse_control_calls(self, tool_calls: List[dict], stage: Optional[IkaStage], current_stage_idx: int = 0) -> tuple[Optional[int], bool, Optional[str]]:
+    def _extract_json_from_text(self, text: str) -> Optional[str]:
+        """Extract JSON from text, handling embedded JSON in markdown or other formats."""
+        if not text or not text.strip():
+            return None
+        
+        stripped = text.strip()
+        
+        # Try direct JSON parse
+        try:
+            json.loads(stripped)
+            return stripped
+        except:
+            pass
+        
+        # Try to find JSON in code blocks or after markers
+        patterns = [
+            r'```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```',  # Markdown code blocks
+            r'(\{.*?\}|\[.*?\])',  # Any JSON-like structure
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, stripped, re.DOTALL)
+            for match in matches:
+                try:
+                    json.loads(match)
+                    return match
+                except:
+                    continue
+        
+        return None
+
+    def parse_control_calls(self, tool_calls: List[dict], stage: Optional[IkaStage], current_stage_idx: int = 0, response_content: Optional[str] = None) -> tuple[Optional[int], bool, Optional[str]]:
         target_stage = None
         agent_end_called = False
         agent_end_text = None
@@ -768,6 +848,46 @@ class IkaBaseAgent:
             if name == "agent_end":
                 agent_end_called = True
                 agent_end_text = args.get("input") or args.get("final") or args.get("message") or ""
+                if not agent_end_text or agent_end_text.strip() in [".", ""]:
+                    for key, value in args.items():
+                        if isinstance(value, str):
+                            stripped = value.strip()
+                            if stripped.startswith("{") or stripped.startswith("["):
+                                agent_end_text = value
+                                break
+                            elif len(stripped) > 10 and stripped != ".":
+                                agent_end_text = value
+                                break
+                        elif value and not isinstance(value, (dict, list)) and str(value).strip() not in [".", ""]:
+                            agent_end_text = str(value)
+                            break
+                
+                # If still empty, try to extract from response content
+                if not agent_end_text or agent_end_text.strip() in [".", ""]:
+                    if response_content:
+                        extracted_json = self._extract_json_from_text(response_content)
+                        if extracted_json:
+                            agent_end_text = extracted_json
+                
+                if not agent_end_text or agent_end_text.strip() in [".", ""]:
+                    raise ValueError("agent_end was called with empty or invalid arguments. The agent MUST provide a final answer/output when calling agent_end. Use 'input', 'final', or 'message' parameter to pass your response.")
+                
+                stripped_text = agent_end_text.strip()
+                if stripped_text in ["{}", "[]", "null", '""', "''"]:
+                    raise ValueError(f"agent_end was called with invalid/empty content: '{stripped_text}'. You MUST provide a meaningful final answer, not empty JSON objects, arrays, or null values.")
+                
+                try:
+                    parsed = json.loads(stripped_text)
+                    if isinstance(parsed, dict):
+                        if len(parsed) == 0:
+                            raise ValueError(f"agent_end was called with empty JSON object: '{stripped_text}'. You MUST provide a meaningful final answer.")
+                        if len(parsed) == 1 and "functions" in parsed and isinstance(parsed["functions"], list) and len(parsed["functions"]) == 0:
+                            pass
+                    elif isinstance(parsed, list) and len(parsed) == 0:
+                        raise ValueError(f"agent_end was called with empty JSON array: '{stripped_text}'. You MUST provide a meaningful final answer.")
+                except json.JSONDecodeError:
+                    pass
+                
                 break
             if name == "stage_end" and stage is not None:
                 target_stage = "next"
@@ -826,12 +946,41 @@ class IkaBaseAgent:
             )
             self.message_history = response.get("message_history", self.message_history)
             last_content = response.get("content", "")
+            content_before_tools = response.get("content_before_tools", "")
             tool_calls = response.get("tool_calls", []) or []
+            executed_tool_calls = response.get("executed_tool_calls", []) or []
             used_steps += 1
 
-            target_stage, agent_end_called, agent_end_text = self.parse_control_calls(tool_calls, stage, stage_index)
+            try:
+                target_stage, agent_end_called, agent_end_text = self.parse_control_calls(executed_tool_calls if executed_tool_calls else tool_calls, stage, stage_index, response_content=content_before_tools)
+            except ValueError as e:
+                error_msg = str(e)
+                if self.logger:
+                    self.logger.log_action(f"ERROR in agent_end: {error_msg}")
+                raise
+            
             if agent_end_called:
-                return stage_index, agent_end_text or last_content, True, agent_end_text or last_content, used_steps
+                if not agent_end_text or agent_end_text.strip() in [".", ""]:
+                    # Try to extract JSON from content_before_tools
+                    extracted_json = None
+                    if content_before_tools and content_before_tools.strip() not in ["", "{}"]:
+                        extracted_json = self._extract_json_from_text(content_before_tools)
+                    
+                    # Fallback chain: extracted JSON -> content_before_tools -> last_content
+                    if extracted_json:
+                        final_content = extracted_json
+                    elif content_before_tools and content_before_tools.strip() not in ["", "{}"]:
+                        final_content = content_before_tools
+                    elif last_content and last_content.strip() not in ["", "{}"]:
+                        final_content = last_content
+                    else:
+                        error_msg = "agent_end was called but no output was provided. The agent MUST provide a final answer when calling agent_end."
+                        if self.logger:
+                            self.logger.log_action(f"ERROR: {error_msg}")
+                        raise ValueError(error_msg)
+                else:
+                    final_content = agent_end_text
+                return stage_index, final_content, True, final_content, used_steps
             if target_stage == "next":
                 return stage_index + 1, last_content, False, None, used_steps
             if isinstance(target_stage, int):
@@ -878,9 +1027,9 @@ class IkaBaseAgent:
         agent_end_tool = AgentTool(
             id="agent_end",
             name="agent_end",
-            description="End the agent loop with a final answer. Provide the final output and any key reasoning.",
-            args=ToolArgs(type="input", description="Final response content."),
-            required=False,
+            description="End the agent loop with a final answer. Provide the final output and any key reasoning. CRITICAL: You MUST provide your final answer in the 'input' parameter. Do NOT call this tool with empty arguments.",
+            args=ToolArgs(type="input", description="Final response content. This is REQUIRED - provide your complete final answer here."),
+            required=True,
         )
         
         # Build memory tools based on agent-level access control
@@ -980,13 +1129,53 @@ class IkaBaseAgent:
             )
             self.message_history = response.get("message_history", self.message_history)
             last_content = response.get("content", "")
+            content_before_tools = response.get("content_before_tools", "")
             tool_calls = response.get("tool_calls", []) or []
+            executed_tool_calls = response.get("executed_tool_calls", []) or []
 
-            _, agent_end_called, agent_end_text = self.parse_control_calls(tool_calls, None)
-            if agent_end_called:
+            try:
+                _, agent_end_called, agent_end_text = self.parse_control_calls(executed_tool_calls if executed_tool_calls else tool_calls, None, response_content=content_before_tools)
+            except ValueError as e:
+                error_msg = str(e)
                 cli.agent_response(
                     self.name,
-                    agent_end_text or last_content,
+                    f"ERROR: {error_msg}",
+                    current_hierarchy,
+                    step=step_num + 1,
+                    is_final=False
+                )
+                raise
+            
+            if agent_end_called:
+                if not agent_end_text or agent_end_text.strip() in [".", ""]:
+                    # Try to extract JSON from content_before_tools
+                    extracted_json = None
+                    if content_before_tools and content_before_tools.strip() not in ["", "{}"]:
+                        extracted_json = self._extract_json_from_text(content_before_tools)
+                    
+                    # Fallback chain: extracted JSON -> content_before_tools -> last_content
+                    if extracted_json:
+                        final_content = extracted_json
+                    elif content_before_tools and content_before_tools.strip() not in ["", "{}"]:
+                        final_content = content_before_tools
+                    elif last_content and last_content.strip() not in ["", "{}"]:
+                        final_content = last_content
+                    else:
+                        error_msg = "agent_end was called but no output was provided. The agent MUST provide a final answer when calling agent_end."
+                        cli.agent_response(
+                            self.name,
+                            f"ERROR: {error_msg}",
+                            current_hierarchy,
+                            step=step_num + 1,
+                            is_final=False
+                        )
+                        raise ValueError(error_msg)
+                else:
+                    final_content = agent_end_text
+                
+                cli.agent_response(
+                    self.name,
+                    final_content,
                     current_hierarchy,
                     step=step_num + 1,
                     is_final=True
@@ -1001,34 +1190,72 @@ class IkaBaseAgent:
                         cost=response.get("cost", {}),
                         elapsed=time.time() - step_start,
                     )
-                final = agent_end_text or last_content
-                return final, final
+                return final_content, final_content
 
             # Handle pending tool calls that weren't executed by chat (e.g. chained calls)
-            if tool_calls:
+            # But skip if agent_end was already called - we should have returned by now
+            if tool_calls and not agent_end_called:
                 provider = get_provider(barebone_model.model_id)
-                tool_msgs, tool_res = execute_tool_calls(
-                    tool_calls, tool_executors, provider, self.step_timeout,
-                    agent_hierarchy=current_hierarchy, step=step_num + 1
-                )
-                if self.logger:
-                    self.logger.log_tool_results(tool_calls, tool_res)
-                messages.extend(tool_msgs)
+                try:
+                    tool_msgs, tool_res = execute_tool_calls(
+                        tool_calls, tool_executors, provider, self.step_timeout,
+                        agent_hierarchy=current_hierarchy, step=step_num + 1
+                    )
+                    if self.logger:
+                        self.logger.log_tool_results(tool_calls, tool_res)
+                    messages.extend(tool_msgs)
+                    
+                    # Check again after tool execution if agent_end was called
+                    _, agent_end_called_after, agent_end_text_after = self.parse_control_calls(tool_calls, None, response_content=content_before_tools)
+                    if agent_end_called_after:
+                        if agent_end_text_after and agent_end_text_after.strip() not in [".", ""]:
+                            final_content = agent_end_text_after
+                        else:
+                            # Try to extract JSON from content_before_tools
+                            extracted_json = None
+                            if content_before_tools and content_before_tools.strip() not in ["", "{}"]:
+                                extracted_json = self._extract_json_from_text(content_before_tools)
+                            
+                            if extracted_json:
+                                final_content = extracted_json
+                            elif content_before_tools and content_before_tools.strip() not in ["", "{}"]:
+                                final_content = content_before_tools
+                            elif last_content and last_content.strip() not in ["", "{}"]:
+                                final_content = last_content
+                            else:
+                                final_content = agent_end_text_after or "Agent completed."
+                        
+                        cli.agent_response(
+                            self.name,
+                            final_content,
+                            current_hierarchy,
+                            step=step_num + 1,
+                            is_final=True
+                        )
+                        return final_content, final_content
+                except ValueError as e:
+                    if "agent_end" in str(e).lower():
+                        raise
+                    tool_msgs = []
+                    tool_res = []
 
             # Do NOT reset messages to preserve context
             # messages = [{"role": "assistant", "content": last_content}]
 
             if not tool_calls and last_content:
+                # If the agent is just thinking or talking, we let it continue unless it's the last step
+                # We append the message to history so it remembers what it said
+                messages.append({"role": "assistant", "content": last_content})
                 cli.agent_response(
                     self.name,
                     last_content,
                     current_hierarchy,
                     step=step_num + 1,
-                    is_final=True
+                    is_final=False
                 )
-            if self.logger:
-                self.logger.log_step(
-                    stage_name="simple",
+                if self.logger:
+                     self.logger.log_step(
+                        stage_name="simple",
                         step_idx=step_num,
                         output=last_content,
                         tool_calls=[],
@@ -1036,7 +1263,8 @@ class IkaBaseAgent:
                         cost=response.get("cost", {}),
                         elapsed=time.time() - step_start,
                     )
-                return last_content, last_content
+                # Continue to next step instead of returning
+                continue
 
             if self.logger:
                 self.logger.log_step(
@@ -1064,16 +1292,22 @@ class IkaBaseAgent:
         return last_content, last_content
 
     def _build_final_output(self, final_message: str, barebone_model: BareBoneModel) -> Dict[str, str]:
-        summary = summarise_message_history(barebone_model, self.message_history) or self.message_history.get("summary", {}).get("message", "")
-        if summary:
-            if self.logger:
-                self.logger.log_summary(summary)
-            # Also emit via CLI output with dedicated summarization color and no truncation
-            cli = get_cli_output()
-            current_hierarchy = getattr(self, "_parent_hierarchy", []) + [self.name]
-            # Use final step number for summary box
-            step = cli.get_step(self.name) or 0
-            cli.summarization(self.name, summary, current_hierarchy, step=step)
+        summary = ""
+        if self.enable_summarization:
+            summary = summarise_message_history(barebone_model, self.message_history) or self.message_history.get("summary", {}).get("message", "")
+            if summary:
+                if self.logger:
+                    self.logger.log_summary(summary)
+                # Also emit via CLI output with dedicated summarization color and no truncation
+                cli = get_cli_output()
+                current_hierarchy = getattr(self, "_parent_hierarchy", []) + [self.name]
+                # Use final step number for summary box
+                step = cli.get_step(self.name) or 0
+                cli.summarization(self.name, summary, current_hierarchy, step=step)
+        
+        if not final_message or final_message.strip() == "":
+            final_message = summary
+        
         return {"final_message": final_message, "summary": summary}
 
     def execution(self, checkpoint_uid: Optional[str] = None) -> Dict[str, str]:
@@ -1099,7 +1333,7 @@ class IkaBaseAgent:
                 if agent_end_called:
                     agent_end_text = end_text
                     break
-            final_message = agent_end_text or last_content
+            final_message = agent_end_text if agent_end_text and agent_end_text.strip() not in [".", ""] else last_content
             current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
             barebone_model = self.get_barebone(self.message_history["system"]["message"], [], parent_hierarchy=current_hierarchy)
             return self._build_final_output(final_message, barebone_model)
@@ -1108,7 +1342,10 @@ class IkaBaseAgent:
             final_message, _ = self.run_simple()
             current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
             barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy)
-            summary = summarise_message_history(barebone_model, self.message_history) or final_message
+            if self.enable_summarization:
+                summary = summarise_message_history(barebone_model, self.message_history) or final_message
+            else:
+                summary = final_message
             self.next_agent.message_history = {
                 "system": {"message": self.next_agent.system_prompt or "", "tokens": 0},
                 "first_input": {"message": f"Previous agent summary:\n{summary}", "tokens": 0},
@@ -1180,7 +1417,8 @@ class IkaBaseAgent:
                 self.maxsteps = original_maxsteps
                 self.prompt = original_prompt
                 failed_check_names = ", ".join(failed_checks)
-                _LOG.warning(f"Final answer validation failed after {max_retries} retries. Returning last output despite failed checks: {failed_check_names}")
+                if self.logger:
+                    self.logger.log_action(f"Final answer validation failed after {max_retries} retries. Returning last output despite failed checks: {failed_check_names}")
                 return final_output
 
         self.maxsteps = original_maxsteps

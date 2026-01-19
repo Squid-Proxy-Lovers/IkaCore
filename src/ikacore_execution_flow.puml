@@ -1,0 +1,246 @@
+@startuml IkaCore Execution Flow
+
+skinparam activity {
+    BackgroundColor #BBDEFB
+    BorderColor #1976D2
+    FontSize 12
+}
+
+skinparam partition {
+    BackgroundColor #F5F5F5
+    BorderColor #757575
+    FontSize 11
+    FontStyle bold
+}
+
+start
+
+:User creates IkaBaseAgent;
+note right
+  Configure:
+  - prompt, tools, stages
+  - memory, checkpoint
+  - model settings
+end note
+
+if (Has Stages?) then (yes)
+  :Initialize Stages;
+  :Set stage_idx = 0;
+  :remaining_steps = maxsteps;
+  
+  while (stage_idx < len(Stages) && remaining_steps > 0?) is (yes)
+    :Load Stage[stage_idx];
+    :Build stage tools + memory tools;
+    :Create BareBoneModel;
+    :Create tool_executors;
+    
+    partition "Stage Execution Loop" {
+      :Execute stage loop;
+      note right
+        For each step:
+        1. Call chat() with model
+        2. Get response + tool_calls
+        3. Execute tools
+        4. Check control calls
+      end note
+      
+      partition "Tool Execution" {
+        :chat() called with BareBoneModel;
+        :Get provider (OpenAI/Claude/etc);
+        :Build API payload with tools;
+        :Call model API;
+        :Parse response;
+        :Extract tool_calls;
+        
+        if (Has tool_calls?) then (yes)
+          :For each tool_call;
+          :Find executor in tool_executors;
+          
+          if (Is subagent?) then (yes)
+            :Create subagent executor;
+            :Set parent hierarchy;
+            :subagent.execution();
+            :Return summary;
+          else (no)
+            if (Is memory tool?) then (yes)
+              partition "Memory Operations" {
+                :Check memory_access;
+                if (Access allowed?) then (yes)
+                  if (short_term_save?) then (yes)
+                    :Create STMemItem;
+                    :Save to STMemory;
+                  else (no)
+                    if (short_term_search?) then (yes)
+                      :Search STMemory;
+                      :Return structured results;
+                    else (no)
+                      if (long_term_save?) then (yes)
+                        :Create LTMemItem;
+                        :Save to LTMemory;
+                      else (no)
+                        if (long_term_search?) then (yes)
+                          :Search LTMemory;
+                          :Apply filter_func if exists;
+                          :Return structured results;
+                        endif
+                      endif
+                    endif
+                  endif
+                endif
+              }
+            else (no)
+              :Execute tool.execute_function();
+            endif
+          endif
+          
+          :Add tool result to messages;
+        endif
+      }
+      
+      if (agent_end called?) then (yes)
+        :Extract final answer;
+        :Return final_message;
+        stop
+      else (no)
+        if (stage_end called?) then (yes)
+          :stage_idx++;
+          :Continue to next stage;
+        else (no)
+          if (change_stage called?) then (yes)
+            :stage_idx = target_stage;
+            :Continue to target stage;
+          else (no)
+            :Continue current stage;
+          endif
+        endif
+      endif
+      
+      if (HITL enabled?) then (yes)
+        :Prompt user input;
+        if (user says "stage_end"?) then (yes)
+          :stage_idx++;
+        else (no)
+          :Add user message to context;
+        endif
+      endif
+    }
+    
+    :remaining_steps--;
+    
+    partition "Checkpoint System" {
+      if (Checkpoint enabled?) then (yes)
+        :Save checkpoint to SQLite;
+        note right
+          Checkpoint contains:
+          - message_history
+          - remaining_steps
+          - stage_index
+          - last_content
+          - memory_access
+        end note
+      endif
+    }
+  endwhile (no)
+  
+else (no)
+  if (Has next_agent?) then (yes)
+    :Execute run_simple();
+    :Get summary;
+    :Pass to next_agent;
+    :next_agent.execution();
+    stop
+  else (no)
+    if (Has final_answer_checks?) then (yes)
+      :retry_count = 0;
+      while (retry_count <= max_retries?) is (yes)
+        :Execute run_simple();
+        :Run final_answer_checks;
+        if (All checks pass?) then (yes)
+          :Return final_output;
+          stop
+        else (no)
+          if (retry_count < max_retries?) then (yes)
+            :Update prompt with feedback;
+            :retry_count++;
+            :Continue loop;
+          else (no)
+            :Return last output;
+            stop
+          endif
+        endif
+      endwhile (no)
+    else (no)
+      partition "Simple Execution" {
+        :Execute run_simple();
+        note right
+          **run_simple() flow:**
+          1. Build agent tools + memory tools
+          2. Create BareBoneModel
+          3. Loop maxsteps times:
+             - Call chat()
+             - Execute tools
+             - Check agent_end
+             - Continue or return
+        end note
+        
+        :Return final_message;
+      }
+      stop
+    endif
+  endif
+endif
+
+partition "Workflow Execution (if used)" {
+  if (use_async?) then (yes)
+    :Initialize AsyncWorkflowExecutor;
+    :Build dependency graph;
+    :ready_nodes = {start_node};
+    
+    while (ready_nodes not empty?) is (yes)
+      :For each ready node;
+      :Get node instances;
+      
+      :For each instance;
+      :Create agent copy;
+      :Prepare context from upstream;
+      :Schedule async execution;
+      
+      :Wait for completion;
+      :Aggregate results;
+      :Update upstream_contexts;
+      :Mark node as completed;
+      :Add dependent nodes to ready_nodes;
+    endwhile (no)
+    
+    :Return all results;
+  else (no)
+    :Start from start_node;
+    :For each node in topological order;
+    :Prepare context from upstream;
+    :Apply stage_wiring;
+    :Inject context;
+    :node.agent.execution();
+    :Get summary;
+    
+    :For each child edge;
+    :Execute child node;
+    :Collect child summaries;
+    
+    :Compress context;
+    :Pass to next nodes;
+  endif
+}
+
+if (Resume from checkpoint?) then (yes)
+  partition "Checkpoint Resume" {
+    :Load checkpoint by UID;
+    :Restore message_history;
+    :Restore remaining_steps;
+    :Restore stage_index;
+    :Continue execution;
+  }
+endif
+
+stop
+
+@enduml

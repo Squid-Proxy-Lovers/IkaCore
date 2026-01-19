@@ -393,16 +393,16 @@ def validate_tool_args(tool_name: str, tool_args: dict, max_size: int = 10000, m
     if not isinstance(tool_args, dict):
         raise ValueError(f"Tool '{tool_name}' arguments must be a JSON object, got {type(tool_args).__name__}")
 
-    if len(tool_args) > max_keys:
-        raise ValueError(f"Tool '{tool_name}' received too many arguments ({len(tool_args)} > {max_keys})")
+    # if len(tool_args) > max_keys:
+    #     raise ValueError(f"Tool '{tool_name}' received too many arguments ({len(tool_args)} > {max_keys})")
 
     try:
         serialized = json.dumps(tool_args)
     except TypeError as e:
         raise ValueError(f"Tool '{tool_name}' arguments must be JSON-serializable: {e}")
 
-    if len(serialized) > max_size:
-        raise ValueError(f"Tool '{tool_name}' arguments payload too large ({len(serialized)} bytes > {max_size})")
+    # if len(serialized) > max_size:
+    #     raise ValueError(f"Tool '{tool_name}' arguments payload too large ({len(serialized)} bytes > {max_size})")
 
     coerced_args: dict = {}
     for key, value in tool_args.items():
@@ -750,6 +750,8 @@ def chat(
     
     cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
 
+    executed_tool_calls = []
+    content_before_tools = content
     if tool_calls and tool_executors:
         # Extract tool metadata from BareBoneModel
         tool_metadata = {}
@@ -762,6 +764,7 @@ def chat(
         # Get agent hierarchy from BareBoneModel
         agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
         
+        executed_tool_calls = tool_calls.copy()
         tool_messages, tool_results = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy)
         if logger:
             logger.log_tool_results(tool_calls, tool_results)
@@ -902,4 +905,4 @@ def chat(
 
     msg_id = str(uuid.uuid4())
     message_history["messages"][msg_id] = {"message": content, "tokens": tokens}
-    return {"content": content, "tool_calls": tool_calls, "message_history": message_history, "usage": usage_info, "cost": cost_info}
+    return {"content": content, "tool_calls": tool_calls, "executed_tool_calls": executed_tool_calls, "content_before_tools": content_before_tools, "message_history": message_history, "usage": usage_info, "cost": cost_info}

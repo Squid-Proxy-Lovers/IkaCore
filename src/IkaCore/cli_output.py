@@ -75,7 +75,7 @@ class BoxRenderer:
         OutputType.SUMMARIZATION: "SUMMARIZATION",
     }
 
-    MAX_CONTENT_LENGTH = 500
+    MAX_CONTENT_LENGTH = 999999
     DEFAULT_WIDTH = 80
 
     # Output types that should never be truncated

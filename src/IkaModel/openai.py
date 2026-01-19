@@ -90,6 +90,7 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
     if model.agent_tools:
         tools = []
         for tool in model.agent_tools:
+            parameters = None
             # Ensure we always have a valid JSON schema
             # tool.args.properties can be None, empty dict {}, or a dict with properties
             if tool.args.properties is not None and isinstance(tool.args.properties, dict):
@@ -125,8 +126,27 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                 json_type = "string"
                 if arg_name in ["stage_index"]:
                     json_type = "integer"
+                    parameters = {
+                        "type": "object",
+                        "properties": {
+                            arg_name: {
+                                "type": json_type,
+                                "description": tool.args.description or f"Parameter for {tool.name}"
+                            }
+                        },
+                        "required": [arg_name] if tool.required else []
+                    }
                 elif arg_name == "input":
-                    json_type = "string"
+                    parameters = {
+                        "type": "object",
+                        "properties": {
+                            "input": {
+                                "type": "string",
+                                "description": tool.args.description or "Final response content."
+                            }
+                        },
+                        "required": ["input"] if tool.required else []
+                    }
                 elif arg_name == "object":
                     # If type is "object", create an empty properties schema
                     parameters = {
