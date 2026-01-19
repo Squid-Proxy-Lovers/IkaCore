@@ -75,7 +75,7 @@ class ToolArgs:
 
 @dataclass
 class AgentTool:
-    def __init__(self, id:str, name: str, description: str, args: ToolArgs, required: bool = True,parallel: bool = False): 
+    def __init__(self, id:str, name: str, description: str, args: ToolArgs, required: bool = True, parallel: bool = False, limit_calls: int = 1): 
         self.validate(name)
         self.id = id
         self.name = name
@@ -83,6 +83,7 @@ class AgentTool:
         self.args = args   
         self.required = required
         self.parallel = parallel # assume that all tools are not parallel by default
+        self.limit_calls = limit_calls
 
 
     @staticmethod

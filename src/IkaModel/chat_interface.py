@@ -699,8 +699,9 @@ def execute_tool_calls(
     timeout: float = 900.0,
     tool_metadata: Optional[Dict[str, dict]] = None,
     agent_hierarchy: Optional[List[str]] = None,
-    step: int = 0
-) -> tuple[List[dict], List[str]]:
+    step: int = 0,
+    tool_call_counts: Optional[Dict[str, int]] = None
+) -> tuple[List[dict], List[str], Dict[str, int]]:
     """Execute tool calls either in parallel or sequentially based on tool metadata.
     
     Args:
@@ -710,17 +711,21 @@ def execute_tool_calls(
         timeout: Timeout for tool execution
         tool_metadata: Optional dictionary mapping tool names to metadata (including 'parallel' flag)
         agent_hierarchy: Optional list of agent names representing the call hierarchy
+        step: Current step number
+        tool_call_counts: Optional dictionary tracking tool call counts (will be updated in place)
     
     Returns:
-        Tuple of (formatted_messages, tool_results)
+        Tuple of (formatted_messages, tool_results, updated_tool_call_counts)
     """
     if not tool_calls or not tool_executors:
-        return [], []
+        return [], [], tool_call_counts or {}
     
     tool_metadata = tool_metadata or {}
+    tool_call_counts = tool_call_counts or {}
     
-    # Parse tool calls into (tool_name, args) tuples
+    # Parse tool calls into (tool_name, args) tuples and filter by limit_calls
     parsed_calls = []
+    filtered_calls = []
     for tool_call in tool_calls:
         fn = tool_call.get("function", {})
         tool_name = fn.get("name") or tool_call.get("name", "")
@@ -732,7 +737,16 @@ def execute_tool_calls(
             LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
             args = {}
         
+        metadata = tool_metadata.get(tool_name, {})
+        limit_calls = metadata.get("limit_calls", 1)
+        current_count = tool_call_counts.get(tool_name, 0)
+        
+        if limit_calls > 0 and current_count >= limit_calls:
+            LOG.warning(f"Tool '{tool_name}' has reached its call limit ({limit_calls}). Skipping this call.")
+            continue
+        
         parsed_calls.append((tool_name, args, tool_call))
+        filtered_calls.append(tool_call)
     
     # Separate parallel and sequential tools
     parallel_calls = []
@@ -764,16 +778,25 @@ def execute_tool_calls(
                 try:
                     result = future.result()
                     tool_results.append(result)
+                    tool_name, _ = futures[future]
+                    tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
                 except Exception as e:
                     error_msg = f"Parallel tool execution error: {str(e)}"
                     LOG.error(error_msg)
                     tool_results.append(json.dumps({"error": error_msg}))
+                    tool_name, _ = futures[future]
+                    tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
 
     # Execute sequential tools (if any)
     for tool_name, args, tool_call in sequential_calls:
         result = execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
         tool_results.append(result)
         tool_call_order.append(tool_call)
+        tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+    
+    # Update counts for parallel tools
+    for tool_name, _, _ in parallel_calls:
+        tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
     
     # Format results based on provider
     if provider == "deepseek" or provider == "openai":
@@ -785,7 +808,7 @@ def execute_tool_calls(
     else:
         formatted_messages = []
     
-    return formatted_messages, tool_results
+    return formatted_messages, tool_results, tool_call_counts
 
 
 async def async_execute_tool(
@@ -853,14 +876,16 @@ async def async_execute_tool_calls(
     timeout: float = 900.0,
     tool_metadata: Optional[Dict[str, dict]] = None,
     agent_hierarchy: Optional[List[str]] = None,
-    step: int = 0
-) -> tuple[List[dict], List[str]]:
+    step: int = 0,
+    tool_call_counts: Optional[Dict[str, int]] = None
+) -> tuple[List[dict], List[str], Dict[str, int]]:
     if not tool_calls or not tool_executors:
-        return [], []
+        return [], [], tool_call_counts or {}
 
     tool_metadata = tool_metadata or {}
+    tool_call_counts = tool_call_counts or {}
 
-    # Parse tool calls into (tool_name, args) tuples
+    # Parse tool calls into (tool_name, args) tuples and filter by limit_calls
     parsed_calls = []
     for tool_call in tool_calls:
         fn = tool_call.get("function", {})
@@ -872,6 +897,14 @@ async def async_execute_tool_calls(
         except Exception as e:
             LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
             args = {}
+
+        metadata = tool_metadata.get(tool_name, {})
+        limit_calls = metadata.get("limit_calls", 1)
+        current_count = tool_call_counts.get(tool_name, 0)
+        
+        if limit_calls > 0 and current_count >= limit_calls:
+            LOG.warning(f"Tool '{tool_name}' has reached its call limit ({limit_calls}). Skipping this call.")
+            continue
 
         parsed_calls.append((tool_name, args, tool_call))
 
@@ -894,13 +927,17 @@ async def async_execute_tool_calls(
     # Execute parallel tools concurrently using asyncio.gather
     if parallel_calls:
         tasks = []
+        tool_names_for_parallel = []
         for tool_name, args, tool_call in parallel_calls:
             task = async_execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
             tasks.append(task)
+            tool_names_for_parallel.append(tool_name)
             tool_call_order.append(tool_call)
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        for result in results:
+        for i, result in enumerate(results):
+            tool_name = tool_names_for_parallel[i]
+            tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
             if isinstance(result, Exception):
                 error_msg = f"Parallel tool execution error: {str(result)}"
                 LOG.error(error_msg)
@@ -913,6 +950,7 @@ async def async_execute_tool_calls(
         result = await async_execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
         tool_results.append(result)
         tool_call_order.append(tool_call)
+        tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
 
     # Format results based on provider
     if provider == "deepseek" or provider == "openai":
@@ -924,7 +962,7 @@ async def async_execute_tool_calls(
     else:
         formatted_messages = []
 
-    return formatted_messages, tool_results
+    return formatted_messages, tool_results, tool_call_counts
 
 
 def chat(
@@ -1057,20 +1095,25 @@ def chat(
 
     executed_tool_calls = []
     content_before_tools = content
+    tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
     if tool_calls and tool_executors:
         # Extract tool metadata from BareBoneModel
         tool_metadata = {}
         if hasattr(barebone_model, 'agent_tools'):
             for agent_tool in barebone_model.agent_tools:
                 tool_metadata[agent_tool.name] = {
-                    "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True
+                    "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
+                    "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 1
                 }
         
         # Get agent hierarchy from BareBoneModel
         agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
+        step = getattr(barebone_model, '_current_step', 0)
         
         executed_tool_calls = tool_calls.copy()
-        tool_messages, tool_results = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy)
+        tool_messages, tool_results, updated_counts = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+        if hasattr(barebone_model, '_tool_call_counts'):
+            barebone_model._tool_call_counts.update(updated_counts)
         if logger:
             logger.log_tool_results(tool_calls, tool_results)
         
@@ -1398,18 +1441,23 @@ async def async_chat(
 
         executed_tool_calls = []
         content_before_tools = content
+        tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
         if tool_calls and tool_executors:
             tool_metadata = {}
             if hasattr(barebone_model, 'agent_tools'):
                 for agent_tool in barebone_model.agent_tools:
                     tool_metadata[agent_tool.name] = {
-                        "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True
+                        "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
+                        "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 1
                     }
 
             agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
+            step = getattr(barebone_model, '_current_step', 0)
 
             executed_tool_calls = tool_calls.copy()
-            tool_messages, tool_results = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy)
+            tool_messages, tool_results, updated_counts = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+            if hasattr(barebone_model, '_tool_call_counts'):
+                barebone_model._tool_call_counts.update(updated_counts)
             if logger:
                 logger.log_tool_results(tool_calls, tool_results)
 

@@ -96,7 +96,7 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                             "description": tool.args.description
                         }
                     },
-                    "required": [arg_name] if tool.required else []
+                    "required": []
                 }
 
             function_declarations.append({
@@ -107,5 +107,11 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
 
         # Gemini expects tools as array with single object containing functionDeclarations
         payload["tools"] = [{"functionDeclarations": function_declarations}]
+        
+        required_tools = [t for t in model.agent_tools if t.required]
+        if len(required_tools) == 1:
+            payload["toolChoice"] = {"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": [required_tools[0].name]}}
+        elif len(required_tools) > 1:
+            payload["toolChoice"] = {"functionCallingConfig": {"mode": "ANY"}}
     
     return payload

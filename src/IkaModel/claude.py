@@ -105,7 +105,7 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
                             "description": tool.args.description
                         }
                     },
-                    "required": [arg_name] if tool.required else []
+                    "required": []
                 }
 
             tools.append({
@@ -117,7 +117,13 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
 
         # Set tool_choice with optional parallel tool use control
         # disable_parallel_tool_use must be inside tool_choice, not at top level
-        tool_choice = {"type": "auto"}
+        required_tools = [t for t in model.agent_tools if t.required]
+        if len(required_tools) == 1:
+            tool_choice = {"type": "tool", "name": required_tools[0].name}
+        elif len(required_tools) > 1:
+            tool_choice = {"type": "required"}
+        else:
+            tool_choice = {"type": "auto"}
 
         # Disable parallel tool use if the model doesn't support it
         # Only available for Claude 4 models (opus-4, sonnet-4)
@@ -125,7 +131,8 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
         model_id_lower = model.model_id.lower()
         if hasattr(model, 'parallel_tool_calls') and not model.parallel_tool_calls:
             if "opus-4" in model_id_lower or "sonnet-4" in model_id_lower or "claude-4" in model_id_lower:
-                tool_choice["disable_parallel_tool_use"] = True
+                if isinstance(tool_choice, dict) and tool_choice.get("type") in ["auto", "required"]:
+                    tool_choice["disable_parallel_tool_use"] = True
 
         payload["tool_choice"] = tool_choice
     

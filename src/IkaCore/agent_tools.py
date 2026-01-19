@@ -86,6 +86,7 @@ class AgentToolsMixin(AgentParseMixin):
                     description=tool.description,
                     args=tool_args,
                     required=tool.required,
+                    limit_calls=getattr(tool, 'limit_calls', 1),
                 )
             )
         return converted

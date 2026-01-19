@@ -127,7 +127,6 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
                         "required": []
                     }
                 else:
-                    required_list = [arg_name] if tool.required else []
                     parameters = {
                         "type": "object",
                         "properties": {
@@ -136,7 +135,7 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
                                 "description": tool.args.description or f"Parameter for {tool.name}"
                             }
                         },
-                        "required": required_list
+                        "required": []
                     }
 
             # Ensure parameters is never None and always has type: object
@@ -156,6 +155,13 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
                 }
             })
         payload["tools"] = tools
-        payload["tool_choice"] = "auto"
+        
+        required_tools = [t for t in model.agent_tools if t.required]
+        if len(required_tools) == 1:
+            payload["tool_choice"] = {"type": "function", "function": {"name": required_tools[0].name}}
+        elif len(required_tools) > 1:
+            payload["tool_choice"] = "required"
+        else:
+            payload["tool_choice"] = "auto"
     
     return payload

@@ -219,6 +219,10 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         self.summarize_final = summarize_final
         self.use_async = use_async
         self.final_answer_checks = self._validate_final_answer_checks(final_answer_check)
+        self._tool_call_counts: Dict[str, int] = {}
+    
+    def _reset_tool_call_counts(self):
+        self._tool_call_counts = {}
         
         if self.Stages:
             if self.subagents or self.next_agent or self.feedback_agent:
@@ -654,6 +658,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         # Include stage in the hierarchy so CLI logging clearly shows which IkaStage is active
         current_hierarchy = getattr(self, "_parent_hierarchy", []) + [self.name, f"Stage {stage_index}: {stage.name}"]
         barebone_model = self.get_barebone(system_prompt, agent_tools, parent_hierarchy=current_hierarchy)
+        barebone_model._tool_call_counts = self._tool_call_counts
 
         content_prompt = (stage.prompt or self.prompt) + "\n\n" + AGENT_END_INSTRUCTION
         messages: List[dict] = [{"role": "user", "content": content_prompt}]
@@ -663,6 +668,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         step_limit = min(getattr(stage, "stage_max_step", 1), max(1, remaining_steps))
         if getattr(stage, "hitl", False):
             step_limit = max(1, remaining_steps)
+
+        self._reset_tool_call_counts()
 
         stage_memory_access = getattr(stage, "memory_access", None) or self.memory_access
         tool_executors = self.build_tool_executors(
@@ -676,9 +683,10 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         if self.logger:
             self.logger.log_stage_start(stage.name, getattr(stage, "hitl", False), remaining_steps, step_limit)
 
-        for _ in range(step_limit):
+        for step_num in range(step_limit):
             if self.logger:
                 self.logger.log_action(f"stage_start:{stage.name}")
+            barebone_model._current_step = step_num + 1
             self._enforce_rate_limit_model()
             step_start = time.time()
 
@@ -708,6 +716,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
             tool_calls = response.get("tool_calls", []) or []
             executed_tool_calls = response.get("executed_tool_calls", []) or []
             used_steps += 1
+            if hasattr(barebone_model, '_tool_call_counts'):
+                self._tool_call_counts.update(barebone_model._tool_call_counts)
 
             try:
                 target_stage, agent_end_called, agent_end_text = self.parse_control_calls(
@@ -813,6 +823,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                 step=step_num + 1,
                 description=f"Step {step_num + 1}/{self.maxsteps}"
             )
+            barebone_model._current_step = step_num + 1
             self._enforce_rate_limit_model()
             step_start = time.time()
             if self.use_async:
@@ -840,6 +851,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
             content_before_tools = response.get("content_before_tools", "")
             tool_calls = response.get("tool_calls", []) or []
             executed_tool_calls = response.get("executed_tool_calls", []) or []
+            if hasattr(barebone_model, '_tool_call_counts'):
+                self._tool_call_counts.update(barebone_model._tool_call_counts)
 
             try:
                 _, agent_end_called, agent_end_text = self.parse_control_calls(

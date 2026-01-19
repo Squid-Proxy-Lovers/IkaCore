@@ -134,7 +134,7 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                                 "description": tool.args.description or f"Parameter for {tool.name}"
                             }
                         },
-                        "required": [arg_name] if tool.required else []
+                        "required": []
                     }
                 elif arg_name == "input":
                     parameters = {
@@ -145,7 +145,7 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                                 "description": tool.args.description or "Final response content."
                             }
                         },
-                        "required": ["input"] if tool.required else []
+                        "required": ["input"]
                     }
                 elif arg_name == "object":
                     # If type is "object", create an empty properties schema
@@ -163,7 +163,7 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                                 "description": tool.args.description or f"Parameter for {tool.name}"
                             }
                         },
-                        "required": [arg_name] if tool.required else []
+                        "required": []
                     }
 
             # Ensure parameters is never None and always has type: object
@@ -183,7 +183,14 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                 }
             })
         payload["tools"] = tools
-        payload["tool_choice"] = "auto"
+        
+        required_tools = [t for t in model.agent_tools if t.required]
+        if len(required_tools) == 1:
+            payload["tool_choice"] = {"type": "function", "function": {"name": required_tools[0].name}}
+        elif len(required_tools) > 1:
+            payload["tool_choice"] = "required"
+        else:
+            payload["tool_choice"] = "auto"
         
         # Enable parallel tool calls if the model supports it
         if hasattr(model, 'parallel_tool_calls') and model.parallel_tool_calls:
