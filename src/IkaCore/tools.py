@@ -1,4 +1,4 @@
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 import uuid
 
 
@@ -14,9 +14,9 @@ class IkaTools:
         parameters:dict, 
         limit_calls:int = 0, 
         required:bool = True, 
-        execute_function:Callable = None, 
-        parallel:bool = True, 
-        id:str = None
+        execute_function: Optional[Callable] = None,
+        parallel: bool = True,
+        id: Optional[str] = None
     ) -> None:
     
         if id is None:

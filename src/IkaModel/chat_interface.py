@@ -591,7 +591,7 @@ def validate_tool_args(tool_name: str, tool_args: dict, max_size: int = 10000, m
         else:
             coerced_args[key] = value
 
-    if "input" in coerced_args and (coerced_args["input"] is None or coerced_args["input"] == ""):
+    if tool_name == "agent_end" and "input" in coerced_args and (coerced_args["input"] is None or coerced_args["input"] == ""):
         raise ValueError(f"Tool '{tool_name}' requires a non-empty 'input' argument")
 
     return coerced_args

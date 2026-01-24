@@ -31,7 +31,8 @@ def load_gemini_payload():
         raise
 
 
-DEFAULT_SYSTEM_PROMPT = """You are a member in a complex Agentic system, every behavior you take is to help the system achieve its goals.
+DEFAULT_SYSTEM_PROMPT = """
+You are a member in a complex Agentic system, every behavior you take is to help the system achieve its goals.
 
 IMPORTANT: When you have completed your assigned task, you MUST call the agent_end tool with your final answer. 
 Do not continue making tool calls after the task is complete. The agent_end tool signals that you have finished and provides your final output.

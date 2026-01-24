@@ -86,6 +86,7 @@ class AgentToolsMixin(AgentParseMixin):
                     description=tool.description,
                     args=tool_args,
                     required=tool.required,
+                    parallel=getattr(tool, 'parallel', True),
                     limit_calls=getattr(tool, 'limit_calls', 0),
                 )
             )

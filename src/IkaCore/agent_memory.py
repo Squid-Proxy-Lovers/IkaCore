@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Dict
+from typing import Optional, Dict, Callable, Any
 
 from pathlib import Path
 import sys
@@ -11,7 +11,7 @@ if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 sys.path.insert(0, str(src_dir / "IkaMem"))
 
-from IkaMem import STMemory, LTMemory, STMemItem, LTMemItem  # type: ignore
+from IkaMem import STMemory, LTMemory, LTMemItem  # type: ignore
 
 
 class AgentMemoryMixin:
@@ -28,8 +28,7 @@ class AgentMemoryMixin:
             return "error: short-term memory not initialized"
         
         try:
-            item = STMemItem(data=data, agent=self.name, metadata=metadata or {})
-            self.short_term_memory.storage.save(item.data, item.metadata)
+            self.short_term_memory.save(data, metadata or {})
             return f"saved to short-term memory: {data[:50]}..."
         except Exception as e:
             return f"error saving to short-term memory: {str(e)}"
@@ -87,7 +86,7 @@ class AgentMemoryMixin:
         query: str,
         limit: int = 5,
         score_threshold: float = 0.6,
-        filter_func: Optional[callable] = None,
+        filter_func: Optional[Callable[..., Any]] = None,
     ) -> dict:
         if not self.long_term_memory:
             return {"error": "long-term memory not initialized"}

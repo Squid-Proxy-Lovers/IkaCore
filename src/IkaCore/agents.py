@@ -10,8 +10,6 @@ from typing import Callable, Dict, List, Optional, get_type_hints
 
 from IkaCore.tools import IkaTools
 from IkaCore.stages import IkaStage
-from IkaCore.ikarag import IkaRAGSource
-from IkaCore.memory import Memory
 from IkaCore.logging_utils import IkaLogger
 from IkaCore.checkpoint import CheckpointStore
 from IkaCore.cli_output import get_cli_output, OutputType
@@ -36,7 +34,7 @@ from .agent_tools import AgentToolsMixin
 from .agent_execution import AgentExecutionMixin
 
 
-# Instruction appended to all agent prompts to ensure proper task completion
+# We add this instruction to all agent prompts to ensure proper task completion
 AGENT_END_INSTRUCTION = """
 CRITICAL: When you call the agent_end tool, you MUST provide your final answer/output in the tool arguments.
 The agent_end tool REQUIRES a non-empty response. You must pass your final answer using the "input" parameter.
@@ -149,9 +147,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         step_timeout: int = 900,
         rate_limit_per_min: Optional[float] = None,
         per_tool_rate_limit: Optional[Dict[str, float]] = None,
-        RAGSource: Optional[List[type[IkaRAGSource]]] = None,
         memory: bool = False,
-        memory_finder: Optional["Memory"] = None,
         memory_access: Optional[Dict[str, bool]] = None,
         final_answer_check: Optional[List[Callable]] = None,
         logging_level: int = 0,
@@ -194,11 +190,15 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         self.subagents = subagents
         self.next_agent = next_agent
         self.feedback_agent = feedback_agent
+        if self.Stages:
+            if self.subagents or self.next_agent or self.feedback_agent:
+                raise ValueError("Subagents/next/feedback agents are not allowed when stages are defined.")
+        else:
+            if self.subagents and self.next_agent:
+                raise ValueError("Only one of subagents or next_agent may be set when no stages are provided.")
         self.maxsteps = maxsteps
         self.step_timeout = step_timeout
-        self.RAGSource = RAGSource
         self.memory = memory
-        self.memory_finder = memory_finder
         self.memory_access = self._build_memory_access_defaults(memory, memory_access)
         self.message_history = self._initial_message_history(self.system_prompt)
         self.logging_level = logging_level
@@ -223,13 +223,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
     
     def _reset_tool_call_counts(self):
         self._tool_call_counts = {}
-        
-        if self.Stages:
-            if self.subagents or self.next_agent or self.feedback_agent:
-                raise ValueError("Subagents/next/feedback agents are not allowed when stages are defined.")
-        else:
-            if self.subagents and self.next_agent:
-                raise ValueError("Only one of subagents or next_agent may be set when no stages are provided.")
 
     def _enforce_rate_limit(self, per_minute: Optional[float], last_ts_attr: str) -> None:
         if not per_minute or per_minute <= 0:
@@ -344,6 +337,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         checkpoint_data = self.checkpoint_store.load_checkpoint(uid)
         if checkpoint_data:
             self._resume_checkpoint = checkpoint_data
+        else:
+            self._resume_checkpoint = None
         return checkpoint_data
 
 
@@ -666,9 +661,14 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         last_content = ""
 
         used_steps = 0
-        step_limit = min(getattr(stage, "stage_max_step", 1), max(1, remaining_steps))
-        if getattr(stage, "hitl", False):
+        stage_max = getattr(stage, "stage_max_step", 1)
+        hitl = getattr(stage, "hitl", False)
+        if hitl:
             step_limit = max(1, remaining_steps)
+        elif stage_max == 0:
+            step_limit = max(1, remaining_steps)
+        else:
+            step_limit = min(stage_max, max(1, remaining_steps))
 
         self._reset_tool_call_counts()
 
@@ -791,7 +791,10 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         agent_end_tool = AgentTool(
             id="agent_end",
             name="agent_end",
-            description="End the agent loop with a final answer. Provide the final output and any key reasoning. CRITICAL: You MUST provide your final answer in the 'input' parameter. Do NOT call this tool with empty arguments.",
+            description="""End the agent loop with a final answer.
+                Provide the final output and any key reasoning.
+                CRITICAL: You MUST provide your final answer in the 'input' parameter. 
+                Do NOT call this tool with empty arguments.""",
             args=ToolArgs(type="input", description="Final response content. This is REQUIRED - provide your complete final answer here."),
             required=True,
             limit_calls=1,

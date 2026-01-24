@@ -29,7 +29,7 @@ IkaCore is an agent framework built around `IkaBaseAgent` plus modular mixins fo
 - **Stages (`src/IkaCore/stages.py`)**
   - `IkaStage` describes one step in a workflow: prompt, tools, step limits, HITL, memory access, and allowed back edges.
 
-- **Memory (`src/IkaMem` + `src/IkaCore/memory.py`)**
+- **Memory (`src/IkaMem`)**
   - Short term memory: per run, for local context.
   - Long term memory: cross run, backed by mem0 storage when configured.
   - `AgentMemoryMixin` provides helper methods.
@@ -86,9 +86,7 @@ agent = IkaBaseAgent(
     step_timeout=900,
     rate_limit_per_min=None,
     per_tool_rate_limit=None,
-    RAGSource=None,
     memory=False,
-    memory_finder=None,
     memory_access=None,
     final_answer_check=None,        # list[callable] returning bool
     logging_level=0,

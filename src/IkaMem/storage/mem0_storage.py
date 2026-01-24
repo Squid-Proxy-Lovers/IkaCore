@@ -34,8 +34,6 @@ class Mem0Store(Storage):
                 - excludes: Categories to exclude
                 - custom_categories: Custom categories list
         """
-        super().__init__()
-        
         self._validate_type(memory_type)
         self.memory_type = memory_type
         self.config = config or {}

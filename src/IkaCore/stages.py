@@ -1,7 +1,6 @@
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Callable, Any
 
 from IkaCore.tools import IkaTools
-from IkaCore.ikarag import IkaRAGSource
 from IkaModel.base import AgentTool, ToolArgs
 
 
@@ -11,19 +10,17 @@ class IkaStage:
         name: str,
         prompt: str,
         tools: List[IkaTools],
-        RAGSource: List[type[IkaRAGSource]] = [],
         stage_max_step: int = 1,
         subagents: Optional[list] = None,
         allowed_back_to: Optional[List[int]] = None,
         hitl: bool = False,
         memory_access: Optional[Dict[str, bool]] = None,
-        long_term_filter: Optional[callable] = None,
+        long_term_filter: Optional[Callable[..., Any]] = None,
         checkpoint: bool = False,
     ):
         self.name = name
         self.prompt = prompt
-        self.tools = tools
-        self.RAGSource = RAGSource
+        self.tools = list(tools)
         self.stage_max_step = stage_max_step
         self.subagents = subagents or []
         self.allowed_back_to = allowed_back_to or []

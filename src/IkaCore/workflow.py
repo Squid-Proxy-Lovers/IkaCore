@@ -404,7 +404,8 @@ class IkaWorkflow:
             agent_copy.prompt = instance_input
             context_text = instance_input
 
-        self._apply_stage_wiring(node)
+        if node.stage_wiring:
+            agent_copy.apply_workflow_stage_wiring(node.stage_wiring)
         if context_text:
             agent_copy.inject_workflow_context(context_text)
 
@@ -487,7 +488,7 @@ class IkaWorkflow:
             
             for node_name in list(ready_nodes):
                 node = self._node_index[node_name]
-                num_instances = getattr(node, 'instances', 1)
+                num_instances = node.instances
                 instance_inputs = getattr(node, 'instance_inputs', None) or [None] * num_instances
 
                 cli.workflow_status(
@@ -503,7 +504,9 @@ class IkaWorkflow:
                     
                     # Create agent instance for parallel execution
                     agent_instance = self._create_agent_instance(node.agent, instance_id, instance_input)
-                    
+                    if node.stage_wiring:
+                        agent_instance.apply_workflow_stage_wiring(node.stage_wiring)
+
                     # Prepare context
                     context_text = ""
                     if upstream_contexts.get(node_name):
