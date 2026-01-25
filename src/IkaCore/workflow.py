@@ -16,6 +16,30 @@ WorkflowCompressionHook = Callable[[List[str], IkaBaseAgent], str]
 
 @dataclass
 class WorkflowEdge:
+    """
+    Base class used to define exectuion flow between nodes
+    and exectuion type ie next or child. The stage index 
+    is used to allow for staged agents to be executed.
+    - we can only have stage index if the edge_type is child.
+    --> the idea here is that we allow the existance of staged agents, 
+    and creating specific subagents for each stage.
+
+    Example:
+
+    edges = [WorkflowEdge(source="node_a", target="node_b", edge_type="next"),]
+    This will execute node_a and then node_b in a linear fashion.
+
+    here is an example of a staged agent workflow:
+    edges = [
+        WorkflowEdge(source="node_a", target="node_b", edge_type="child", stage_index=1),
+        WorkflowEdge(source="node_a", target="node_c", edge_type="child", stage_index=2),
+        WorkflowEdge(source="node_c", target="node_d", edge_type="next"),
+    ]
+    This will execute node_a and then node_b and node_c in a staged fashion.
+    node_b will be executed with the stage_index 1 and node_c will be executed with the stage_index 2.
+    node_d will be executed after node_c.
+    """
+
     source: str
     target: str
     edge_type: str = "next"
@@ -23,21 +47,41 @@ class WorkflowEdge:
 
     def __post_init__(self) -> None:
         if self.edge_type not in {"next", "child"}:
-            raise ValueError("edge_type must be 'next' or 'child'")
+            raise ValueError("edge_type must be next or child")
 
 
 @dataclass
 class WorkflowNode:
+    """
+    This is the base class used to define a node in the workflow
+
+    It contains the agent to be executed and the stage_wiring
+    The stage_wiring is used to define the subagents to be executed for each stage
+
+    The instances is used to define the number of instances of the agent to be executed
+    -> this is used to allow for parallel execution of the same agent
+
+    The instance_inputs is used to define the input for each instance
+    -> this is used to allow for parallel execution of the same agent with different inputs (useful for compelex task and trying different approaches)
+    """
     name: str
     agent: IkaBaseAgent
     stage_wiring: Optional[Dict[int, Dict[str, List[IkaBaseAgent]]]] = None
-    metadata: Optional[Dict] = None
     instances: int = 1
     instance_inputs: Optional[List[str]] = None
 
 
 @dataclass
 class WorkflowResult:
+    """
+    This is how we managed agent messages and results
+    a) final: the final message from the agent
+    b) summary: when enabled we have summarzation based on the agent message-history 
+     ==> this is not enabled by default, but can be enabled by setting the summarize_final attribute to True in the IkaAgent class
+    c) history: this the raw result of `agent.execution()`
+    d) child_summaries: the summaries of the child agents, we can use this 
+    for compressing the context for the next agent in the workflow
+    """
     name: str
     final: str
     summary: str
@@ -438,26 +482,29 @@ class IkaWorkflow:
             if current_futures:
                 results = self.async_executor.wait_for_completion(current_futures)
                 for result in results:
+                    if not result.get("success"):
+                        continue
                     node_name = result['node_name']
                     instance_id = result['instance_id']
+                    execution_output = result['result']
+                    final_message = execution_output.get("final_message", "")
+                    summary = execution_output.get("summary", "")
+
+                    # Robust fallback: use final_message if summary is empty
+                    if not summary or summary.strip() == "":
+                        summary = final_message
+
                     if node_name not in self._results:
-                        execution_output = result['result']
-                        final_message = execution_output.get("final_message", "")
-                        summary = execution_output.get("summary", final_message)
-                        
                         self._results[node_name] = WorkflowResult(
                             name=node_name,
                             final=final_message,
-                            summary=summary,
+                            summary=f"[Instance {instance_id}]: {summary}",  # Always prefix with instance ID
                             history=execution_output,
                             child_summaries={},
                         )
                     else:
-                        if instance_id > 0:
-                            execution_output = result['result']
-                            summary = execution_output.get("summary", execution_output.get("final_message", ""))
-                            existing_summary = self._results[node_name].summary
-                            self._results[node_name].summary = f"{existing_summary}\n\n[Instance {instance_id}]: {summary}"
+                        existing = self._results[node_name].summary
+                        self._results[node_name].summary = f"{existing}\n\n[Instance {instance_id}]: {summary}"
                 for result in results:
                     node_name = result['node_name']
                     if result['success']:
@@ -470,11 +517,14 @@ class IkaWorkflow:
                                     if edge.target not in completed_nodes and edge.target not in ready_nodes:
                                         ready_nodes.add(edge.target)
                                         pending_nodes.discard(edge.target)
+                for n in {r["node_name"] for r in results}:
+                    node_futures.pop(n, None)
             for node_name in list(pending_nodes):
                 node_deps = self._node_dependencies[node_name]
                 if node_deps.issubset(completed_nodes):
                     ready_nodes.add(node_name)
                     pending_nodes.discard(node_name)
+
         self.async_executor.drain()
         cli.end_parallel()
 

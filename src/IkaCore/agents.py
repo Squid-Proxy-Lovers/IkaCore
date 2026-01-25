@@ -1069,10 +1069,14 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                 # Use final step number for summary box
                 step = cli.get_step(self.name) or 0
                 cli.summarization(self.name, summary, current_hierarchy, step=step)
-        
+
+        # Always use final_message as summary fallback when summary is empty
+        if not summary or summary.strip() == "":
+            summary = final_message
+
         if not final_message or final_message.strip() == "":
             final_message = summary
-        
+
         return {"final_message": final_message, "summary": summary}
 
     def execution(self, checkpoint_uid: Optional[str] = None) -> Dict[str, str]:

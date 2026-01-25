@@ -1,12 +1,15 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from threading import Lock, local
 from collections import defaultdict
 import sys
 import time
 import json
 import threading
+
+# Global stdout lock - shared across all output systems for thread-safe console output
+_stdout_lock = Lock()
 
 
 class OutputType(Enum):
@@ -177,7 +180,7 @@ class OutputBuffer:
 
     def __init__(self, renderer: Optional[BoxRenderer] = None):
         self._lock = Lock()
-        self._buffers: Dict[int, List[OutputContext]] = defaultdict(list)
+        self._buffers: Dict[Tuple[str, int], List[OutputContext]] = defaultdict(list)
         self._buffering_enabled = False
         self._renderer = renderer or BoxRenderer()
 
@@ -201,13 +204,18 @@ class OutputBuffer:
     def add(self, ctx: OutputContext):
         with self._lock:
             if self._buffering_enabled:
-                self._buffers[ctx.instance_id].append(ctx)
+                buffer_key = (ctx.hierarchy_chain[0] if ctx.hierarchy_chain else "unknown", ctx.instance_id)
+                self._buffers[buffer_key].append(ctx)
             else:
                 self._print_output(ctx)
 
     def _print_output(self, ctx: OutputContext):
-        print(self._renderer.render(ctx))
-        sys.stdout.flush()
+        # Render outside the lock to minimize lock hold time
+        rendered = self._renderer.render(ctx) + "\n"
+        with _stdout_lock:
+            # Use write() for more atomic output than print()
+            sys.stdout.write(rendered)
+            sys.stdout.flush()
 
     def flush(self):
         with self._lock:
@@ -215,19 +223,28 @@ class OutputBuffer:
                 self._buffering_enabled = False
                 return
 
-            # Sort by instance_id for logical ordering
-            sorted_instance_ids = sorted(self._buffers.keys())
+            # Flatten all buffers and sort by timestamp globally
+            all_outputs: List[OutputContext] = []
+            for outputs in self._buffers.values():
+                all_outputs.extend(outputs)
 
-            for instance_id in sorted_instance_ids:
-                outputs = self._buffers[instance_id]
-                # Sort outputs within instance by timestamp
-                sorted_outputs = sorted(outputs, key=lambda x: x.timestamp)
+            sorted_outputs = sorted(all_outputs, key=lambda x: x.timestamp)
 
-                for ctx in sorted_outputs:
-                    self._print_output(ctx)
+            # Render all outputs and batch them into a single write for atomic output
+            all_rendered: List[str] = []
+            for ctx in sorted_outputs:
+                all_rendered.append(self._renderer.render(ctx))
 
             self._buffers.clear()
             self._buffering_enabled = False
+
+        # Write all buffered output as a single atomic operation outside self._lock
+        # to avoid holding both locks simultaneously
+        if all_rendered:
+            full_output = "\n".join(all_rendered) + "\n"
+            with _stdout_lock:
+                sys.stdout.write(full_output)
+                sys.stdout.flush()
 
 
 class CLIOutput:

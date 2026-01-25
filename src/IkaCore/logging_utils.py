@@ -1,7 +1,16 @@
+import atexit
 import json
+import queue
+import sys
+import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+from IkaCore.cli_output import _stdout_lock
+
+# Type alias for queue items
+_WriteItem = Tuple[str, Union[str, Dict[str, Any]]]  # ("line", str) or ("json", dict)
 
 
 class IkaLogger:
@@ -10,6 +19,64 @@ class IkaLogger:
         self.log_file = Path(log_file)
         self.use_colors = use_colors
         self.show_usage_level0 = show_usage_level0
+
+        # Queue-based async writer
+        self._queue: queue.Queue[Optional[_WriteItem]] = queue.Queue()
+        self._shutdown = threading.Event()
+        self._writer_thread = threading.Thread(target=self._writer_loop, daemon=True, name="IkaLogger-Writer")
+        self._writer_thread.start()
+
+        # Register shutdown handler to flush on exit
+        atexit.register(self.shutdown)
+
+    def _writer_loop(self) -> None:
+        """Background thread that processes the write queue."""
+        while not self._shutdown.is_set():
+            try:
+                item = self._queue.get(timeout=0.1)
+                if item is None:  # Shutdown signal
+                    break
+                self._process_item(item)
+                self._queue.task_done()
+            except queue.Empty:
+                continue
+
+        # Drain remaining items on shutdown
+        while True:
+            try:
+                item = self._queue.get_nowait()
+                if item is not None:
+                    self._process_item(item)
+                self._queue.task_done()
+            except queue.Empty:
+                break
+
+    def _process_item(self, item: _WriteItem) -> None:
+        """Process a single queue item (runs in writer thread)."""
+        item_type, data = item
+
+        if item_type == "line" and isinstance(data, str):
+            if self.level == 0:
+                with _stdout_lock:
+                    print(data)
+                    sys.stdout.flush()
+            elif self.level == 1:
+                self.log_file.parent.mkdir(parents=True, exist_ok=True)
+                with self.log_file.open("a", encoding="utf-8") as f:
+                    f.write(data + "\n")
+            elif self.level == 2:
+                self._write_json({"text": data})
+
+        elif item_type == "json" and isinstance(data, dict):
+            if self.level == 2:
+                self._write_json(data)
+
+    def _write_json(self, payload: Dict[str, Any]) -> None:
+        """Write JSON payload to file (runs in writer thread)."""
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        payload_with_ts = {"ts": time.time(), **payload}
+        with self.log_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload_with_ts, ensure_ascii=True) + "\n")
 
     def _color(self, text: str, color: str) -> str:
         if not self.use_colors or self.level != 0:
@@ -26,23 +93,35 @@ class IkaLogger:
         return f"{colors.get(color,'')}{text}{colors['reset']}"
 
     def write_line(self, line: str) -> None:
-        if self.level == 0:
-            print(line)
-        elif self.level == 1:
-            self.log_file.parent.mkdir(parents=True, exist_ok=True)
-            with self.log_file.open("a", encoding="utf-8") as f:
-                f.write(line + "\n")
-        elif self.level == 2:
-            # level 2 uses JSON lines, handled by log_json
-            self.log_json({"text": line})
+        """Queue a line for writing (non-blocking)."""
+        self._queue.put(("line", line))
 
     def log_json(self, payload: Dict[str, Any]) -> None:
+        """Queue a JSON payload for writing (non-blocking)."""
         if self.level != 2:
             return
-        self.log_file.parent.mkdir(parents=True, exist_ok=True)
-        payload_with_ts = {"ts": time.time(), **payload}
-        with self.log_file.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload_with_ts, ensure_ascii=True) + "\n")
+        self._queue.put(("json", payload))
+
+    def flush(self) -> None:
+        """Block until all queued writes are complete."""
+        self._queue.join()
+
+    def shutdown(self) -> None:
+        """Gracefully shutdown the writer thread."""
+        if self._shutdown.is_set():
+            return
+        self._shutdown.set()
+        self._queue.put(None)  # Signal writer to exit
+        self._writer_thread.join(timeout=5.0)
+
+    def __deepcopy__(self, memo: Dict[int, Any]) -> "IkaLogger":
+        """Return self on deepcopy - all copies share the same writer thread."""
+        memo[id(self)] = self
+        return self
+
+    def __copy__(self) -> "IkaLogger":
+        """Return self on copy - all copies share the same writer thread."""
+        return self
 
     def log_input(self, messages: List[dict]) -> None:
         if not messages:
