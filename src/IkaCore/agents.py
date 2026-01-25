@@ -6,7 +6,7 @@ import time
 import typing
 from copy import deepcopy
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, get_type_hints
+from typing import Any, Callable, Dict, List, Optional, get_type_hints
 
 from IkaCore.tools import IkaTools
 from IkaCore.stages import IkaStage
@@ -42,6 +42,16 @@ The agent_end tool REQUIRES a non-empty response. You must pass your final answe
 DO NOT call agent_end with empty arguments {}. This will cause an error.
 Your final answer must be based on your initial prompt and any context you have gathered.
 The output format is given by the rest of the prompt.
+"""
+
+STAGE_MOVEMENT_INSTRUCTION = """
+STAGE MOVEMENT:
+Use the stage_end tool when the current stage is complete to advance to the next stage.
+If the change_stage tool is available, use it with stage_index (the stage to change to) and reason (why you need to go back). stage_index must be in that stage's allowed_back_to list.
+"""
+
+HITL_INSTRUCTION = """
+HITL: You can use the ask_user tool when you need the user to answer something. Use it as often as needed. The question must be clear and direct.
 """
 
 
@@ -247,18 +257,19 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         self._enforce_rate_limit(effective, last_attr)
 
 
-    def _prompt_hitl_input(self, stage_name: str, last_response: str = "") -> Optional[str]:
+    def _prompt_hitl_question(self, stage_name: str, question: str) -> str:
         if self.logger:
-            self.logger.log_hitl_prompt(stage_name)
-            if last_response:
-                self.logger.write_line(self.logger._color(f"[HITL LAST] {last_response}", "yellow"))
+            self.logger.log_hitl_question(stage_name, question)
         try:
-            user_text = builtins.input(f"[HITL:{stage_name}] Enter message or 'stage_end' or '/end' to finish (empty to continue): ").strip()
+            prompt = f"[HITL] {question}\nYour answer: "
+            if self.logger and self.logger.use_colors and self.logger.level == 0:
+                prompt = self.logger._color(prompt, "orange")
+            user_text = builtins.input(prompt).strip()
             if self.logger and user_text:
-                self.logger.log_hitl_input(stage_name, user_text)
-            return user_text
+                self.logger.log_hitl_answer(stage_name, user_text)
+            return user_text or ""
         except EOFError:
-            return None
+            return ""
 
     def inject_workflow_context(self, context: str) -> None:
         if not context:
@@ -303,8 +314,20 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         checkpoint_uid = self.checkpoint_store.save_checkpoint(scope="stage", payload=payload)
         
         if checkpoint_uid:
-            cli = get_cli_output()
             stage_name = self.Stages[stage_index].name if stage_index < len(self.Stages) else "unknown"
+            if self.logger:
+                if self.logger.level == 2:
+                    self.logger.log_json({
+                        "event": "checkpoint_saved",
+                        "scope": "stage",
+                        "stage_index": stage_index,
+                        "stage_name": stage_name,
+                        "checkpoint_uid": checkpoint_uid,
+                        "remaining_steps": remaining_steps,
+                    })
+                else:
+                    self.logger.write_line(f"[CHECKPOINT] scope=stage stage_index={stage_index} stage_name={stage_name} uid={checkpoint_uid} remaining={remaining_steps}")
+            cli = get_cli_output()
             current_hierarchy = getattr(self, "_parent_hierarchy", []) + [self.name, f"Stage {stage_index}: {stage_name}"]
             checkpoint_msg = f"Checkpoint saved at Stage {stage_index}: {stage_name}\nCheckpoint UID: {checkpoint_uid}\nRemaining steps: {remaining_steps}"
             cli.emit(
@@ -469,35 +492,44 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
 
         return stage_tools + subagent_tools + memory_tools
 
-    def get_barebone(self, system_prompt: str, agent_tools: List[AgentTool], parent_hierarchy: Optional[List[str]] = None, suppress_init_output: bool = False) -> BareBoneModel:
+    def get_barebone(self, system_prompt: str, agent_tools: List[AgentTool], parent_hierarchy: Optional[List[str]] = None, suppress_init_output: bool = False, model_overrides: Optional[Dict[str, Any]] = None, content_prompt_override: Optional[str] = None) -> BareBoneModel:
         """
         conversion to barebone model, this is used to create the model instance for the agent
         barebone model is used for conversion to apis and handling of the model instance.
-        
+
         Args:
             system_prompt: System prompt for the agent
             agent_tools: List of AgentTool instances
             parent_hierarchy: Optional list of parent agent names for tracking hierarchy
             suppress_init_output: If True, suppress the initialization CLI output
+            model_overrides: Optional dict with model_id, api_key, api_url, max_tokens, temperature.
+                When a key is present and not None, it overrides the agent's value; otherwise the agent's value is used.
+            content_prompt_override: If set, used as content_prompt instead of self.prompt (e.g. the stage-aware first user message in execute_stage).
         """
-        # Check if all tools support parallel execution
+        o = model_overrides or {}
+        model_id = o["model_id"] if "model_id" in o and o["model_id"] is not None else self.model_id
+        api_key = o["api_key"] if "api_key" in o and o["api_key"] is not None else self.api_key
+        api_url = o["api_url"] if "api_url" in o and o["api_url"] is not None else self.api_url
+        max_tokens = o["max_tokens"] if "max_tokens" in o and o["max_tokens"] is not None else self.max_tokens
+        temperature = o["temperature"] if "temperature" in o and o["temperature"] is not None else self.temperature
+
         parallel_tool_calls = True
         for tool in agent_tools:
             if hasattr(tool, 'parallel') and not tool.parallel:
                 parallel_tool_calls = False
                 break
-        
-        # Build agent hierarchy - parent_hierarchy already includes self.name if called from parent
+
         agent_hierarchy = parent_hierarchy if parent_hierarchy else [self.name]
-        
+        content_prompt = content_prompt_override if content_prompt_override is not None else self.prompt
+
         model = BareBoneModel(
-            model_id=self.model_id,
-            api_key=self.api_key,
-            api_url=self.api_url,
+            model_id=model_id,
+            api_key=api_key,
+            api_url=api_url,
             system_prompt=system_prompt,
-            content_prompt=self.prompt,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
+            content_prompt=content_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
             parallel_tool_calls=parallel_tool_calls,
             agent_name=self.name,
             agent_hierarchy=agent_hierarchy,
@@ -647,25 +679,53 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         import asyncio
 
         stage = self.Stages[stage_index]
-        system_prompt = self.final_prompt(stage)
+        base_system = self.final_prompt(stage)
+        system_prompt = (self.system_prompt + "\n\n" + base_system) if self.system_prompt else base_system
         self.message_history["system"]["message"] = system_prompt
 
         agent_tools = self.build_stage(stage)
-        # Include stage in the hierarchy so CLI logging clearly shows which IkaStage is active
         current_hierarchy = getattr(self, "_parent_hierarchy", []) + [self.name, f"Stage {stage_index}: {stage.name}"]
-        barebone_model = self.get_barebone(system_prompt, agent_tools, parent_hierarchy=current_hierarchy)
+
+        parts = []
+        if self.prompt:
+            parts.append(self.prompt)
+        if self.Stages:
+            stages_block = "\n\n".join(
+                f"Stage {i} ({s.name}):\n{s.prompt or ''}" for i, s in enumerate(self.Stages)
+            )
+            parts.append("STAGES:\n\n" + stages_block)
+        parts.append("CURRENT STAGE IS:\n\n" + (stage.prompt or ""))
+        parts.append(STAGE_MOVEMENT_INSTRUCTION)
+        if getattr(stage, "hitl", False):
+            parts.append(HITL_INSTRUCTION)
+        if stage_index == len(self.Stages) - 1:
+            parts.append(AGENT_END_INSTRUCTION)
+        content_prompt = "\n\n".join(parts)
+
+        model_overrides: Dict[str, Any] = {}
+        if getattr(stage, "model_id", None) is not None:
+            model_overrides["model_id"] = stage.model_id
+        if getattr(stage, "api_key", None) is not None:
+            model_overrides["api_key"] = stage.api_key
+        if getattr(stage, "api_url", None) is not None:
+            model_overrides["api_url"] = stage.api_url
+        elif model_overrides.get("model_id") is not None:
+            model_overrides["api_url"] = self.geturl(model_overrides["model_id"])
+        if getattr(stage, "max_tokens", None) is not None:
+            model_overrides["max_tokens"] = stage.max_tokens
+        if getattr(stage, "temperature", None) is not None:
+            model_overrides["temperature"] = stage.temperature
+
+        suppress_init_output = (stage_index != 0)
+        barebone_model = self.get_barebone(system_prompt, agent_tools, parent_hierarchy=current_hierarchy, suppress_init_output=suppress_init_output, model_overrides=model_overrides if model_overrides else None, content_prompt_override=content_prompt)
         barebone_model._tool_call_counts = self._tool_call_counts
 
-        content_prompt = (stage.prompt or self.prompt) + "\n\n" + AGENT_END_INSTRUCTION
         messages: List[dict] = [{"role": "user", "content": content_prompt}]
         last_content = ""
 
         used_steps = 0
         stage_max = getattr(stage, "stage_max_step", 1)
-        hitl = getattr(stage, "hitl", False)
-        if hitl:
-            step_limit = max(1, remaining_steps)
-        elif stage_max == 0:
+        if stage_max == 0:
             step_limit = max(1, remaining_steps)
         else:
             step_limit = min(stage_max, max(1, remaining_steps))
@@ -679,6 +739,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
             long_term_filter=getattr(stage, "long_term_filter", None),
             subagents=getattr(stage, "subagents", None),
             parent_hierarchy=current_hierarchy,
+            stage=stage,
         )
 
         if self.logger:
@@ -752,19 +813,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
 
             messages = [{"role": "assistant", "content": last_content}]
 
-            # custom user input handling for HITL stages 
-            if getattr(stage, "hitl", False):
-                user_text = self._prompt_hitl_input(stage.name, last_response=last_content)
-                if user_text is None:
-                    continue
-                lower_text = user_text.lower()
-                if lower_text in ("stage_end", "/end", "end", "exit"):
-                    if self.logger:
-                        self.logger.log_stage_end(stage.name, used_steps)
-                    return stage_index + 1, last_content, False, None, used_steps
-                if user_text:
-                    messages.append({"role": "user", "content": user_text})
-
             if self.logger:
                 self.logger.log_step(
                     stage_name=stage.name,
@@ -779,10 +827,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
             if self.checkpoint:
                 self._save_stage_checkpoint(stage_index, remaining_after, last_content)
 
-        if getattr(stage, "hitl", False):
-            if self.logger:
-                self.logger.log_stage_end(stage.name, used_steps)
-            return stage_index, last_content, False, None, used_steps
         if self.logger:
             self.logger.log_stage_end(stage.name, used_steps)
         return stage_index + 1, last_content, False, None, used_steps
@@ -1048,7 +1092,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                 remaining_steps = max(1, resume_cp.get("remaining_steps", remaining_steps))
                 self.message_history = resume_cp.get("message_history", self.message_history)
                 last_content = resume_cp.get("last_content", "")
-            while 0 <= stage_idx < len(self.Stages) and remaining_steps > 0:
+            while 0 <= stage_idx < len(self.Stages):
                 stage_idx, last_content, agent_end_called, end_text, used = self.execute_stage(stage_idx, remaining_steps)
                 remaining_steps -= used
                 if agent_end_called:

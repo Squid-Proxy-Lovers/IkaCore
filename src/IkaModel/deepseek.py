@@ -1,3 +1,4 @@
+import json
 from typing import Any, Dict, List, Optional
 
 
@@ -31,12 +32,21 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
     for msg_id in message_history["messages"]:
         msg = message_history["messages"][msg_id]
         msg_type = msg.get("type", "assistant")
-        if msg_type == "assistant_with_tools" or msg_type == "tool":
-            continue
+        raw = msg.get("message", "")
+        if msg_type == "assistant_with_tools":
+            try:
+                api_messages.append(json.loads(raw))
+            except (json.JSONDecodeError, TypeError):
+                continue
+        elif msg_type == "tool":
+            try:
+                api_messages.append(json.loads(raw))
+            except (json.JSONDecodeError, TypeError):
+                continue
         else:
             api_messages.append({
                 "role": "assistant",
-                "content": msg["message"]
+                "content": raw if isinstance(raw, str) else str(raw)
             })
     
     for msg in messages:
@@ -133,8 +143,8 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
                     json_type = "integer"
                 elif arg_name == "input":
                     json_type = "string"
-                elif arg_name == "object":
-                    # If type is "object", create an empty properties schema
+
+                if arg_name == "object":
                     parameters = {
                         "type": "object",
                         "properties": {},

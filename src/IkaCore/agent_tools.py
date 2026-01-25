@@ -140,6 +140,7 @@ class AgentToolsMixin(AgentParseMixin):
         long_term_filter: Optional[Callable] = None,
         subagents: Optional[List["IkaBaseAgent"]] = None,
         parent_hierarchy: Optional[List[str]] = None,
+        stage: Optional[IkaStage] = None,
     ) -> Dict[str, Callable]:
         tool_executors: Dict[str, Callable] = {}
         
@@ -147,7 +148,8 @@ class AgentToolsMixin(AgentParseMixin):
             return "Stage end signal received. Moving to next stage."
         
         def change_stage_executor(args: dict) -> str:
-            return "Stage change signal received. Processing stage transition."
+            reason = args.get("reason", "")
+            return f"Stage change requested. Reason: {reason}. Processing stage transition."
         
         control_tools = {"stage_end", "change_stage", "agent_end"}
         
@@ -158,6 +160,10 @@ class AgentToolsMixin(AgentParseMixin):
                     tool_executors[tool_name] = stage_end_executor
                 elif tool_name == "change_stage":
                     tool_executors[tool_name] = change_stage_executor
+                elif tool_name == "ask_user":
+                    if stage and getattr(stage, "hitl", False):
+                        sn = stage.name
+                        tool_executors["ask_user"] = lambda args, sn=sn: self._prompt_hitl_question(sn, args.get("question") or "")
                 elif tool_name not in control_tools:
                     if hasattr(tool, "execute_function") and tool.execute_function:
                         tool_executors[tool_name] = tool.execute_function

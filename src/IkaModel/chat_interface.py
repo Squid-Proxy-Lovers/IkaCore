@@ -53,6 +53,25 @@ def get_provider(model_id: str) -> str:
     return "openai"
 
 
+def _apply_tools_filter_for_payload(barebone_model: Any) -> None:
+    counts = getattr(barebone_model, "_tool_call_counts", None) or {}
+    full = getattr(barebone_model, "agent_tools", None) or []
+    def keep(t: Any) -> bool:
+        lim = getattr(t, "limit_calls", 0) or 0
+        if lim <= 0:
+            return True
+        return counts.get(getattr(t, "name", ""), 0) < lim
+    filtered = [t for t in full if keep(t)]
+    barebone_model._agent_tools_saved = full
+    barebone_model.agent_tools = filtered
+
+
+def _restore_tools_after_payload(barebone_model: Any) -> None:
+    if hasattr(barebone_model, "_agent_tools_saved"):
+        barebone_model.agent_tools = barebone_model._agent_tools_saved
+        delattr(barebone_model, "_agent_tools_saved")
+
+
 def create_summary_payload(provider: str, model_name: str, api_key: str, conversation_text: str) -> tuple[dict, dict]:
     headers = {
         "Content-Type": "application/json",
@@ -136,12 +155,21 @@ def init_message_history() -> dict:
     }
 
 
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(1, len(str(text)) // 4)
+
+
 def get_total_tokens(message_history: dict) -> int:
     total = 0
-    total += message_history["system"]["tokens"]
-    total += message_history["first_input"]["tokens"]
-    total += message_history["summary"]["tokens"]
-    total += sum(msg["tokens"] for msg in message_history["messages"].values())
+    for key in ("system", "first_input", "summary"):
+        d = message_history.get(key) or {}
+        t = d.get("tokens", 0) or 0
+        total += t if t > 0 else _estimate_tokens(d.get("message", ""))
+    for msg in (message_history.get("messages") or {}).values():
+        t = msg.get("tokens", 0) or 0
+        total += t if t > 0 else _estimate_tokens(msg.get("message", ""))
     return total
 
 
@@ -1001,17 +1029,23 @@ def chat(
     
     if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
         headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+        _apply_tools_filter_for_payload(barebone_model)
         payload = deepseek_fill_payload(barebone_model, messages, message_history)
+        _restore_tools_after_payload(barebone_model)
         response = api_request_retry(api_url, headers, payload, timeout=timeout)
 
     elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
         headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+        _apply_tools_filter_for_payload(barebone_model)
         payload = openai_fill_payload(barebone_model, messages, message_history)
+        _restore_tools_after_payload(barebone_model)
         response = api_request_retry(api_url, headers, payload, timeout=timeout)
 
     elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
         headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
+        _apply_tools_filter_for_payload(barebone_model)
         payload = anthropic_fill_payload(barebone_model, messages, message_history)
+        _restore_tools_after_payload(barebone_model)
         if "max_tokens" not in payload or not payload["max_tokens"]:
             payload["max_tokens"] = 4096
         # Cap max_tokens for models with lower limits
@@ -1024,7 +1058,9 @@ def chat(
         response = api_request_retry(api_url, headers, payload, timeout=timeout)
         
     elif "gemini" in barebone_model.model_id.lower():
+        _apply_tools_filter_for_payload(barebone_model)
         payload = gemini_fill_payload(barebone_model, messages, message_history)
+        _restore_tools_after_payload(barebone_model)
         api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
         headers = {"Content-Type": "application/json"}
         response = api_request_retry(api_url, headers, payload, timeout=timeout)
@@ -1181,23 +1217,31 @@ def chat(
         
         if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
             headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+            _apply_tools_filter_for_payload(barebone_model)
             payload = deepseek_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
             response = api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout)
 
         elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
             headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+            _apply_tools_filter_for_payload(barebone_model)
             payload = openai_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
             response = api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout)
 
         elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
             headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
+            _apply_tools_filter_for_payload(barebone_model)
             payload = anthropic_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
             if "max_tokens" not in payload or not payload["max_tokens"]:
                 payload["max_tokens"] = 4096
             response = api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout)
             
         elif "gemini" in barebone_model.model_id.lower():
+            _apply_tools_filter_for_payload(barebone_model)
             payload = gemini_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
             api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
             headers = {"Content-Type": "application/json"}
             response = api_request_retry(api_url, headers, payload, timeout=timeout)
@@ -1389,17 +1433,23 @@ async def async_chat(
     try:
         if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
             headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+            _apply_tools_filter_for_payload(barebone_model)
             payload = deepseek_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
             response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
 
         elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
             headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+            _apply_tools_filter_for_payload(barebone_model)
             payload = openai_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
             response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
 
         elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
             headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
+            _apply_tools_filter_for_payload(barebone_model)
             payload = anthropic_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
             if "max_tokens" not in payload or not payload["max_tokens"]:
                 payload["max_tokens"] = 4096
             model_id_lower = barebone_model.model_id.lower()
@@ -1410,7 +1460,9 @@ async def async_chat(
             response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
 
         elif "gemini" in barebone_model.model_id.lower():
+            _apply_tools_filter_for_payload(barebone_model)
             payload = gemini_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
             api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
             headers = {"Content-Type": "application/json"}
             response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
@@ -1525,23 +1577,31 @@ async def async_chat(
             # Make follow-up API call after tool execution
             if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
                 headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+                _apply_tools_filter_for_payload(barebone_model)
                 payload = deepseek_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
                 response = await async_api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout, client=client)
 
             elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
                 headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
+                _apply_tools_filter_for_payload(barebone_model)
                 payload = openai_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
                 response = await async_api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout, client=client)
 
             elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
                 headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
+                _apply_tools_filter_for_payload(barebone_model)
                 payload = anthropic_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
                 if "max_tokens" not in payload or not payload["max_tokens"]:
                     payload["max_tokens"] = 4096
                 response = await async_api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout, client=client)
 
             elif "gemini" in barebone_model.model_id.lower():
+                _apply_tools_filter_for_payload(barebone_model)
                 payload = gemini_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
                 api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
                 headers = {"Content-Type": "application/json"}
                 response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)

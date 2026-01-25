@@ -186,6 +186,11 @@ Common `IkaStage` fields you can use:
 - `long_term_filter`: optional filter applied when reading long term memory.
 - `subagents`: optional subagents that are converted into tools for this stage.
 - `allowed_back_to`: list of stage indices the agent is allowed to jump back to via `change_stage`.
+- Per-stage model overrides (when unset, the agent's values are used):
+  - `model_id`: model to use for this stage (e.g. `gpt-4o`, `claude-sonnet-4`). If set and `api_url` is not, `api_url` is derived from `model_id`.
+  - `api_key`: API key for this stage (required when switching provider, e.g. OpenAI to Anthropic).
+  - `api_url`: optional custom API base URL.
+  - `max_tokens`, `temperature`: overrides for this stage.
 
 #### 5.3 Chaining agents
 

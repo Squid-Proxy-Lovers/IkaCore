@@ -18,6 +18,7 @@ class IkaLogger:
             "cyan": "\033[96m",
             "green": "\033[92m",
             "yellow": "\033[93m",
+            "orange": "\033[38;5;208m",
             "red": "\033[91m",
             "magenta": "\033[95m",
             "reset": "\033[0m",
@@ -116,16 +117,28 @@ class IkaLogger:
             })
 
     def log_hitl_prompt(self, stage_name: str) -> None:
-        line = self._color(f"[HITL] Stage '{stage_name}' awaiting user input. Type your message or 'stage_end' to finish.", "yellow")
+        line = self._color(f"[HITL] Stage '{stage_name}' awaiting user input. Type your message or 'stage_end' to finish.", "orange")
         self.write_line(line)
         if self.level == 2:
             self.log_json({"event": "hitl_prompt", "stage": stage_name})
 
     def log_hitl_input(self, stage_name: str, user_text: str) -> None:
-        line = self._color(f"[HITL INPUT] stage={stage_name} user='{user_text}'", "yellow")
+        line = self._color(f"[HITL INPUT] stage={stage_name} user='{user_text}'", "orange")
         self.write_line(line)
         if self.level == 2:
             self.log_json({"event": "hitl_input", "stage": stage_name, "user_text": user_text})
+
+    def log_hitl_question(self, stage_name: str, question: str) -> None:
+        line = self._color(f"[HITL] stage={stage_name} question='{question}'", "orange")
+        self.write_line(line)
+        if self.level == 2:
+            self.log_json({"event": "hitl_question", "stage": stage_name, "question": question})
+
+    def log_hitl_answer(self, stage_name: str, user_text: str) -> None:
+        line = self._color(f"[HITL ANSWER] stage={stage_name} user='{user_text}'", "orange")
+        self.write_line(line)
+        if self.level == 2:
+            self.log_json({"event": "hitl_answer", "stage": stage_name, "user_text": user_text})
 
     @staticmethod
     def get_model_cost(model_id: str) -> Optional[tuple[float, float, float]]:
