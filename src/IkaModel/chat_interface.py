@@ -267,6 +267,16 @@ def _is_rate_limit_error(response: httpx.Response) -> bool:
     return False
 
 
+def _is_context_length_error(e: Exception) -> bool:
+    s = str(e).lower()
+    return (
+        "maximum context length" in s
+        or "context length" in s
+        or "reduce the length of the messages" in s
+        or "requested" in s and "tokens" in s and "maximum" in s
+    )
+
+
 def api_request_retry(
     api_url: str,
     headers: dict,
@@ -555,6 +565,45 @@ async def async_api_request_retry(
     finally:
         if should_close_client:
             await client.aclose()
+
+
+def _api_request_with_context_fallback(
+    build_payload_fn: Callable[[], tuple[str, dict, dict]],
+    barebone_model: BareBoneModel,
+    message_history: dict,
+    timeout: float = 900.0
+) -> httpx.Response:
+    api_url, headers, payload = build_payload_fn()
+    try:
+        return api_request_retry(api_url, headers, payload, timeout=timeout)
+    except Exception as e:
+        if not _is_context_length_error(e):
+            raise
+        LOG.warning("Context length exceeded. Forcing summarization and retrying.")
+        get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
+        summarise_message_history(barebone_model, message_history)
+        api_url, headers, payload = build_payload_fn()
+        return api_request_retry(api_url, headers, payload, timeout=timeout)
+
+
+async def _api_request_with_context_fallback_async(
+    build_payload_fn: Callable[[], tuple[str, dict, dict]],
+    barebone_model: BareBoneModel,
+    message_history: dict,
+    timeout: float = 900.0,
+    client: Optional[httpx.AsyncClient] = None
+) -> httpx.Response:
+    api_url, headers, payload = build_payload_fn()
+    try:
+        return await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+    except Exception as e:
+        if not _is_context_length_error(e):
+            raise
+        LOG.warning("Context length exceeded. Forcing summarization and retrying.")
+        get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
+        await async_summarise_message_history(barebone_model, message_history, client=client)
+        api_url, headers, payload = build_payload_fn()
+        return await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
 
 
 def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
@@ -1028,42 +1077,40 @@ def chat(
     api_url = barebone_model.api_url
     
     if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
-        headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
-        _apply_tools_filter_for_payload(barebone_model)
-        payload = deepseek_fill_payload(barebone_model, messages, message_history)
-        _restore_tools_after_payload(barebone_model)
-        response = api_request_retry(api_url, headers, payload, timeout=timeout)
+        def _build():
+            _apply_tools_filter_for_payload(barebone_model)
+            p = deepseek_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
+            return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
+        response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout)
 
     elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
-        headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
-        _apply_tools_filter_for_payload(barebone_model)
-        payload = openai_fill_payload(barebone_model, messages, message_history)
-        _restore_tools_after_payload(barebone_model)
-        response = api_request_retry(api_url, headers, payload, timeout=timeout)
+        def _build():
+            _apply_tools_filter_for_payload(barebone_model)
+            p = openai_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
+            return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
+        response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout)
 
     elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
-        headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
-        _apply_tools_filter_for_payload(barebone_model)
-        payload = anthropic_fill_payload(barebone_model, messages, message_history)
-        _restore_tools_after_payload(barebone_model)
-        if "max_tokens" not in payload or not payload["max_tokens"]:
-            payload["max_tokens"] = 4096
-        # Cap max_tokens for models with lower limits
-        model_id_lower = barebone_model.model_id.lower()
-        if "haiku" in model_id_lower:
-            # Claude Haiku has a max of 4096 tokens
-            if payload["max_tokens"] > 4096:
-                payload["max_tokens"] = 4096
-        LOG.debug(f"Anthropic payload: {json.dumps(payload, indent=2)[:500]}")
-        response = api_request_retry(api_url, headers, payload, timeout=timeout)
-        
+        def _build():
+            _apply_tools_filter_for_payload(barebone_model)
+            p = anthropic_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
+            if "max_tokens" not in p or not p["max_tokens"]:
+                p["max_tokens"] = 4096
+            if "haiku" in barebone_model.model_id.lower() and p["max_tokens"] > 4096:
+                p["max_tokens"] = 4096
+            return (barebone_model.api_url, {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}, p)
+        response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout)
+
     elif "gemini" in barebone_model.model_id.lower():
-        _apply_tools_filter_for_payload(barebone_model)
-        payload = gemini_fill_payload(barebone_model, messages, message_history)
-        _restore_tools_after_payload(barebone_model)
-        api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
-        headers = {"Content-Type": "application/json"}
-        response = api_request_retry(api_url, headers, payload, timeout=timeout)
+        def _build():
+            _apply_tools_filter_for_payload(barebone_model)
+            p = gemini_fill_payload(barebone_model, messages, message_history)
+            _restore_tools_after_payload(barebone_model)
+            return (f"{barebone_model.api_url}?key={barebone_model.api_key}", {"Content-Type": "application/json"}, p)
+        response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout)
     else:
         raise ValueError(f"Model {barebone_model.model_id} not supported")
     
@@ -1216,36 +1263,39 @@ def chat(
                 }
         
         if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
-            headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
-            _apply_tools_filter_for_payload(barebone_model)
-            payload = deepseek_fill_payload(barebone_model, messages, message_history)
-            _restore_tools_after_payload(barebone_model)
-            response = api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout)
+            def _build_follow():
+                _apply_tools_filter_for_payload(barebone_model)
+                p = deepseek_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
+                return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
+            response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout)
 
         elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
-            headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
-            _apply_tools_filter_for_payload(barebone_model)
-            payload = openai_fill_payload(barebone_model, messages, message_history)
-            _restore_tools_after_payload(barebone_model)
-            response = api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout)
+            def _build_follow():
+                _apply_tools_filter_for_payload(barebone_model)
+                p = openai_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
+                return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
+            response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout)
 
         elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
-            headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
-            _apply_tools_filter_for_payload(barebone_model)
-            payload = anthropic_fill_payload(barebone_model, messages, message_history)
-            _restore_tools_after_payload(barebone_model)
-            if "max_tokens" not in payload or not payload["max_tokens"]:
-                payload["max_tokens"] = 4096
-            response = api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout)
-            
+            def _build_follow():
+                _apply_tools_filter_for_payload(barebone_model)
+                p = anthropic_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
+                if "max_tokens" not in p or not p["max_tokens"]:
+                    p["max_tokens"] = 4096
+                return (barebone_model.api_url, {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}, p)
+            response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout)
+
         elif "gemini" in barebone_model.model_id.lower():
-            _apply_tools_filter_for_payload(barebone_model)
-            payload = gemini_fill_payload(barebone_model, messages, message_history)
-            _restore_tools_after_payload(barebone_model)
-            api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
-            headers = {"Content-Type": "application/json"}
-            response = api_request_retry(api_url, headers, payload, timeout=timeout)
-        
+            def _build_follow():
+                _apply_tools_filter_for_payload(barebone_model)
+                p = gemini_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
+                return (f"{barebone_model.api_url}?key={barebone_model.api_key}", {"Content-Type": "application/json"}, p)
+            response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout)
+
         response.raise_for_status()
         data = response.json()
         
@@ -1432,40 +1482,40 @@ async def async_chat(
 
     try:
         if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
-            headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
-            _apply_tools_filter_for_payload(barebone_model)
-            payload = deepseek_fill_payload(barebone_model, messages, message_history)
-            _restore_tools_after_payload(barebone_model)
-            response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+            def _build():
+                _apply_tools_filter_for_payload(barebone_model)
+                p = deepseek_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
+                return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
+            response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client)
 
         elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
-            headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
-            _apply_tools_filter_for_payload(barebone_model)
-            payload = openai_fill_payload(barebone_model, messages, message_history)
-            _restore_tools_after_payload(barebone_model)
-            response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+            def _build():
+                _apply_tools_filter_for_payload(barebone_model)
+                p = openai_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
+                return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
+            response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client)
 
         elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
-            headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
-            _apply_tools_filter_for_payload(barebone_model)
-            payload = anthropic_fill_payload(barebone_model, messages, message_history)
-            _restore_tools_after_payload(barebone_model)
-            if "max_tokens" not in payload or not payload["max_tokens"]:
-                payload["max_tokens"] = 4096
-            model_id_lower = barebone_model.model_id.lower()
-            if "haiku" in model_id_lower:
-                if payload["max_tokens"] > 4096:
-                    payload["max_tokens"] = 4096
-            LOG.debug(f"Anthropic payload: {json.dumps(payload, indent=2)[:500]}")
-            response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+            def _build():
+                _apply_tools_filter_for_payload(barebone_model)
+                p = anthropic_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
+                if "max_tokens" not in p or not p["max_tokens"]:
+                    p["max_tokens"] = 4096
+                if "haiku" in barebone_model.model_id.lower() and p["max_tokens"] > 4096:
+                    p["max_tokens"] = 4096
+                return (barebone_model.api_url, {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}, p)
+            response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client)
 
         elif "gemini" in barebone_model.model_id.lower():
-            _apply_tools_filter_for_payload(barebone_model)
-            payload = gemini_fill_payload(barebone_model, messages, message_history)
-            _restore_tools_after_payload(barebone_model)
-            api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
-            headers = {"Content-Type": "application/json"}
-            response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+            def _build():
+                _apply_tools_filter_for_payload(barebone_model)
+                p = gemini_fill_payload(barebone_model, messages, message_history)
+                _restore_tools_after_payload(barebone_model)
+                return (f"{barebone_model.api_url}?key={barebone_model.api_key}", {"Content-Type": "application/json"}, p)
+            response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client)
         else:
             raise ValueError(f"Model {barebone_model.model_id} not supported")
 
@@ -1576,35 +1626,38 @@ async def async_chat(
 
             # Make follow-up API call after tool execution
             if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
-                headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
-                _apply_tools_filter_for_payload(barebone_model)
-                payload = deepseek_fill_payload(barebone_model, messages, message_history)
-                _restore_tools_after_payload(barebone_model)
-                response = await async_api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout, client=client)
+                def _build_follow():
+                    _apply_tools_filter_for_payload(barebone_model)
+                    p = deepseek_fill_payload(barebone_model, messages, message_history)
+                    _restore_tools_after_payload(barebone_model)
+                    return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
+                response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client)
 
             elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
-                headers = {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}
-                _apply_tools_filter_for_payload(barebone_model)
-                payload = openai_fill_payload(barebone_model, messages, message_history)
-                _restore_tools_after_payload(barebone_model)
-                response = await async_api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout, client=client)
+                def _build_follow():
+                    _apply_tools_filter_for_payload(barebone_model)
+                    p = openai_fill_payload(barebone_model, messages, message_history)
+                    _restore_tools_after_payload(barebone_model)
+                    return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
+                response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client)
 
             elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
-                headers = {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
-                _apply_tools_filter_for_payload(barebone_model)
-                payload = anthropic_fill_payload(barebone_model, messages, message_history)
-                _restore_tools_after_payload(barebone_model)
-                if "max_tokens" not in payload or not payload["max_tokens"]:
-                    payload["max_tokens"] = 4096
-                response = await async_api_request_retry(barebone_model.api_url, headers, payload, timeout=timeout, client=client)
+                def _build_follow():
+                    _apply_tools_filter_for_payload(barebone_model)
+                    p = anthropic_fill_payload(barebone_model, messages, message_history)
+                    _restore_tools_after_payload(barebone_model)
+                    if "max_tokens" not in p or not p["max_tokens"]:
+                        p["max_tokens"] = 4096
+                    return (barebone_model.api_url, {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}, p)
+                response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client)
 
             elif "gemini" in barebone_model.model_id.lower():
-                _apply_tools_filter_for_payload(barebone_model)
-                payload = gemini_fill_payload(barebone_model, messages, message_history)
-                _restore_tools_after_payload(barebone_model)
-                api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
-                headers = {"Content-Type": "application/json"}
-                response = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+                def _build_follow():
+                    _apply_tools_filter_for_payload(barebone_model)
+                    p = gemini_fill_payload(barebone_model, messages, message_history)
+                    _restore_tools_after_payload(barebone_model)
+                    return (f"{barebone_model.api_url}?key={barebone_model.api_key}", {"Content-Type": "application/json"}, p)
+                response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client)
 
             response.raise_for_status()
             data = response.json()

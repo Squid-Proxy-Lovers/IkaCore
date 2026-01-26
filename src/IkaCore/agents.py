@@ -852,7 +852,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
         barebone_model = self.get_barebone(system_prompt, agent_tools, parent_hierarchy=current_hierarchy)
 
-        content_prompt = self.prompt + "\n\n" + AGENT_END_INSTRUCTION
+        first_msg = (self.message_history.get("first_input") or {}).get("message") or ""
+        content_prompt = (first_msg or self.prompt or "") + "\n\n" + AGENT_END_INSTRUCTION
         messages: List[dict] = [{"role": "user", "content": content_prompt}]
         last_content = ""
         last_agent_end_text = None

@@ -14,11 +14,14 @@ _WriteItem = Tuple[str, Union[str, Dict[str, Any]]]  # ("line", str) or ("json",
 
 
 class IkaLogger:
-    def __init__(self, level: int = 0, log_file: str = "logs.txt", use_colors: bool = True, show_usage_level0: bool = True):
+    """level 0: no logging; 1: file; 2: JSON file."""
+
+    def __init__(self, level: int = 0, log_file: str = "logs.txt", use_colors: bool = True, show_usage_level0: bool = True, log_input_enabled: bool = False):
         self.level = level
         self.log_file = Path(log_file)
         self.use_colors = use_colors
         self.show_usage_level0 = show_usage_level0
+        self.log_input_enabled = log_input_enabled
 
         # Queue-based async writer
         self._queue: queue.Queue[Optional[_WriteItem]] = queue.Queue()
@@ -30,7 +33,6 @@ class IkaLogger:
         atexit.register(self.shutdown)
 
     def _writer_loop(self) -> None:
-        """Background thread that processes the write queue."""
         while not self._shutdown.is_set():
             try:
                 item = self._queue.get(timeout=0.1)
@@ -57,9 +59,7 @@ class IkaLogger:
 
         if item_type == "line" and isinstance(data, str):
             if self.level == 0:
-                with _stdout_lock:
-                    print(data)
-                    sys.stdout.flush()
+                pass
             elif self.level == 1:
                 self.log_file.parent.mkdir(parents=True, exist_ok=True)
                 with self.log_file.open("a", encoding="utf-8") as f:
@@ -93,7 +93,9 @@ class IkaLogger:
         return f"{colors.get(color,'')}{text}{colors['reset']}"
 
     def write_line(self, line: str) -> None:
-        """Queue a line for writing (non-blocking)."""
+        """Queue a line for writing (non-blocking). No-op when level is 0."""
+        if self.level == 0:
+            return
         self._queue.put(("line", line))
 
     def log_json(self, payload: Dict[str, Any]) -> None:
@@ -124,7 +126,7 @@ class IkaLogger:
         return self
 
     def log_input(self, messages: List[dict]) -> None:
-        if not messages:
+        if not self.log_input_enabled or not messages:
             return
         user_msg = messages[-1]
         line = f"[INPUT] role={user_msg.get('role')} content={user_msg.get('content')}"
