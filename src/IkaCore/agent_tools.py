@@ -50,28 +50,31 @@ class AgentToolsMixin(AgentParseMixin):
                 converted.append(tool)
                 continue
             
-            properties = None
+            properties = {}
             required_params = []
             if tool.parameters:
-                properties = {}
-                for param_name, param_value in tool.parameters.items():
-                    if isinstance(param_value, dict):
-                        param_dict = {k: v for k, v in param_value.items() if k != "required"}
-                        properties[param_name] = param_dict
-                        if param_value.get("required", False):
-                            required_params.append(param_name)
-                    elif isinstance(param_value, str):
-                        properties[param_name] = {
-                            "type": "string",
-                            "description": param_value
-                        }
-                    else:
-                        properties[param_name] = {
-                            "type": "string",
-                            "description": str(param_value)
-                        }
+                if isinstance(tool.parameters, dict) and "properties" in tool.parameters:
+                    properties = tool.parameters.get("properties", {})
+                    required_params = tool.parameters.get("required", [])
+                else:
+                    for param_name, param_value in tool.parameters.items():
+                        if isinstance(param_value, dict):
+                            param_dict = {k: v for k, v in param_value.items() if k != "required"}
+                            properties[param_name] = param_dict
+                            if param_value.get("required", False):
+                                required_params.append(param_name)
+                        elif isinstance(param_value, str):
+                            properties[param_name] = {
+                                "type": "string",
+                                "description": param_value
+                            }
+                        else:
+                            properties[param_name] = {
+                                "type": "string",
+                                "description": str(param_value)
+                            }
             
-            if properties and required_params:
+            if required_params:
                 properties["__required__"] = required_params
             
             tool_args = ToolArgs(
