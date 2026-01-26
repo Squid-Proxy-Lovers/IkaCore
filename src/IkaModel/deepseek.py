@@ -44,10 +44,14 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
             except (json.JSONDecodeError, TypeError):
                 continue
         else:
-            api_messages.append({
+            assistant_entry = {
                 "role": "assistant",
                 "content": raw if isinstance(raw, str) else str(raw)
-            })
+            }
+            reasoning_text = msg.get("reasoning_content")
+            if reasoning_text:
+                assistant_entry["reasoning_content"] = reasoning_text
+            api_messages.append(assistant_entry)
     
     for msg in messages:
         if isinstance(msg, dict):
@@ -73,7 +77,9 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
         "stream": False
     }
     
-    if model.deepthinking:
+    model_id_lower = (model.model_id or "").lower()
+    thinking_enabled = model.deepthinking or "reasoner" in model_id_lower
+    if thinking_enabled:
         payload["thinking"] = {"type": "enabled"}
     else:
         payload["thinking"] = {"type": "disabled"}
@@ -180,12 +186,16 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
             })
         payload["tools"] = tools
         
-        required_tools = [t for t in model.agent_tools if t.required]
-        if len(required_tools) == 1:
-            payload["tool_choice"] = {"type": "function", "function": {"name": required_tools[0].name}}
-        elif len(required_tools) > 1:
-            payload["tool_choice"] = "required"
-        else:
-            payload["tool_choice"] = "auto"
+        model_id_lower = (model.model_id or "").lower()
+        is_reasoner = "reasoner" in model_id_lower
+        
+        if not is_reasoner:
+            required_tools = [t for t in model.agent_tools if t.required]
+            if len(required_tools) == 1:
+                payload["tool_choice"] = {"type": "function", "function": {"name": required_tools[0].name}}
+            elif len(required_tools) > 1:
+                payload["tool_choice"] = "required"
+            else:
+                payload["tool_choice"] = "auto"
     
     return payload

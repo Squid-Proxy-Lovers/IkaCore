@@ -8,7 +8,7 @@ from IkaCore.agents import IkaBaseAgent
 from IkaCore.workflow import IkaWorkflow, WorkflowNode, WorkflowEdge
 
 API_KEY = os.getenv("API_KEY")
-MODEL_ID = os.getenv("MODEL_ID", "deepseek-chat")
+MODEL_ID = os.getenv("MODEL_ID", "deepseek-reasoner")
 if not API_KEY:
     raise ValueError("API_KEY is not set")
 
