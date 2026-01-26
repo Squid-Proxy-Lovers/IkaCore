@@ -1118,6 +1118,7 @@ def chat(
     data = response.json()
     
     content = ""
+    reasoning_content: Optional[str] = None
     tokens = 0
     tool_calls: List[dict] = []
     usage_info: Dict[str, Any] = {}
@@ -1127,6 +1128,7 @@ def chat(
         content = message_obj.get("content") or ""
         tool_calls = message_obj.get("tool_calls", []) or []
         tokens = data.get("usage", {}).get("total_tokens", 0)
+        reasoning_content = message_obj.get("reasoning_content") if "deepseek" in barebone_model.model_id.lower() else None
     elif "claude" in barebone_model.model_id.lower():
         content_blocks = data.get("content", [])
         content = "".join([block["text"] for block in content_blocks if block.get("type") == "text"])
@@ -1217,6 +1219,8 @@ def chat(
             }
         elif provider == "deepseek" or provider == "openai":
             assistant_msg = {"role": "assistant", "content": content}
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
             if executed_tool_call_list:
                 assistant_msg["tool_calls"] = executed_tool_call_list
             messages.append(assistant_msg)
@@ -1300,6 +1304,7 @@ def chat(
         data = response.json()
         
         content = ""
+        reasoning_content = None
         tokens = 0
         tool_calls = []
         usage_info = extract_usage(provider, data)
@@ -1310,6 +1315,7 @@ def chat(
             message_obj = data["choices"][0]["message"]
             content = message_obj.get("content") or ""
             tool_calls = message_obj.get("tool_calls", []) or []
+            reasoning_content = message_obj.get("reasoning_content") if "deepseek" in barebone_model.model_id.lower() else None
         elif "claude" in barebone_model.model_id.lower():
             content_blocks = data.get("content", [])
             content = "".join([block["text"] for block in content_blocks if block.get("type") == "text"])
@@ -1356,6 +1362,8 @@ def chat(
         elif provider == "deepseek" or provider == "openai":
             if not tool_calls:
                 assistant_msg = {"role": "assistant", "content": content}
+                if reasoning_content:
+                    assistant_msg["reasoning_content"] = reasoning_content
                 messages.append(assistant_msg)
         elif provider == "anthropic":
             assistant_msg = {"role": "assistant", "content": []}
@@ -1375,8 +1383,20 @@ def chat(
         logger.log_output(content, usage_info, cost_info, message_history)
 
     msg_id = str(uuid.uuid4())
-    message_history["messages"][msg_id] = {"message": content, "tokens": tokens}
-    return {"content": content, "tool_calls": tool_calls, "executed_tool_calls": executed_tool_calls, "content_before_tools": content_before_tools, "message_history": message_history, "usage": usage_info, "cost": cost_info}
+    history_entry = {"message": content, "tokens": tokens}
+    if reasoning_content:
+        history_entry["reasoning_content"] = reasoning_content
+    message_history["messages"][msg_id] = history_entry
+    return {
+        "content": content,
+        "reasoning_content": reasoning_content,
+        "tool_calls": tool_calls,
+        "executed_tool_calls": executed_tool_calls,
+        "content_before_tools": content_before_tools,
+        "message_history": message_history,
+        "usage": usage_info,
+        "cost": cost_info,
+    }
 
 
 async def async_summarise_message_history(
@@ -1523,6 +1543,7 @@ async def async_chat(
         data = response.json()
 
         content = ""
+        reasoning_content: Optional[str] = None
         tokens = 0
         tool_calls: List[dict] = []
         usage_info: Dict[str, Any] = {}
@@ -1532,6 +1553,7 @@ async def async_chat(
             content = message_obj.get("content") or ""
             tool_calls = message_obj.get("tool_calls", []) or []
             tokens = data.get("usage", {}).get("total_tokens", 0)
+            reasoning_content = message_obj.get("reasoning_content") if "deepseek" in barebone_model.model_id.lower() else None
         elif "claude" in barebone_model.model_id.lower():
             content_blocks = data.get("content", [])
             content = "".join([block["text"] for block in content_blocks if block.get("type") == "text"])
@@ -1606,6 +1628,8 @@ async def async_chat(
                 messages.append({"role": "user", "parts": function_responses})
             elif provider == "deepseek" or provider == "openai":
                 assistant_msg = {"role": "assistant", "content": content}
+                if reasoning_content:
+                    assistant_msg["reasoning_content"] = reasoning_content
                 if executed_tool_call_list:
                     assistant_msg["tool_calls"] = executed_tool_call_list
                 messages.append(assistant_msg)
@@ -1663,6 +1687,7 @@ async def async_chat(
             data = response.json()
 
             content = ""
+            reasoning_content = None
             tokens = 0
             tool_calls = []
             usage_info = extract_usage(provider, data)
@@ -1673,6 +1698,7 @@ async def async_chat(
                 message_obj = data["choices"][0]["message"]
                 content = message_obj.get("content") or ""
                 tool_calls = message_obj.get("tool_calls", []) or []
+                reasoning_content = message_obj.get("reasoning_content") if "deepseek" in barebone_model.model_id.lower() else None
             elif "claude" in barebone_model.model_id.lower():
                 content_blocks = data.get("content", [])
                 content = "".join([block["text"] for block in content_blocks if block.get("type") == "text"])
@@ -1718,6 +1744,8 @@ async def async_chat(
                     messages.append(assistant_msg)
             elif provider == "deepseek" or provider == "openai":
                 assistant_msg = {"role": "assistant", "content": content}
+                if reasoning_content:
+                    assistant_msg["reasoning_content"] = reasoning_content
                 if tool_calls:
                     assistant_msg["tool_calls"] = tool_calls
                 messages.append(assistant_msg)
@@ -1740,8 +1768,20 @@ async def async_chat(
             logger.log_output(content, usage_info, cost_info, message_history)
 
         msg_id = str(uuid.uuid4())
-        message_history["messages"][msg_id] = {"message": content, "tokens": tokens}
-        return {"content": content, "tool_calls": tool_calls, "executed_tool_calls": executed_tool_calls, "content_before_tools": content_before_tools, "message_history": message_history, "usage": usage_info, "cost": cost_info}
+        history_entry = {"message": content, "tokens": tokens}
+        if reasoning_content:
+            history_entry["reasoning_content"] = reasoning_content
+        message_history["messages"][msg_id] = history_entry
+        return {
+            "content": content,
+            "reasoning_content": reasoning_content,
+            "tool_calls": tool_calls,
+            "executed_tool_calls": executed_tool_calls,
+            "content_before_tools": content_before_tools,
+            "message_history": message_history,
+            "usage": usage_info,
+            "cost": cost_info,
+        }
 
     finally:
         if should_close_client:
