@@ -1,12 +1,3 @@
-"""
-Advanced workflow example using:
-- Sync: staged orchestrator, child edges with stage_index, next edge, custom compress_hook
-- Async: instances, instance_inputs, run_async
-
-Run: API_KEY=xxx python examples/example_workflow_advanced.py
-     RUN_WORKFLOW=async  for async-only
-     RUN_WORKFLOW=both   for sync then async
-"""
 import os
 import sys
 from pathlib import Path
@@ -38,13 +29,6 @@ def truncate_compress(contexts: List[str], _agent: IkaBaseAgent) -> str:
 
 
 def build_sync_workflow(compress_hook: WorkflowCompressionHook) -> IkaWorkflow:
-    """
-    Sync workflow using:
-    - Staged orchestrator (Stages) with child edges and stage_index
-    - Child edges: researcher wired to stage 0, critic to stage 1
-    - Next edge: orchestrator -> synthesizer
-    - Custom compress_hook
-    """
     stg0 = IkaStage(
         name="gather",
         prompt="Expand on the topic. If a research subagent is available, you may delegate to it. Then call stage_end.",
@@ -132,12 +116,6 @@ def build_sync_workflow(compress_hook: WorkflowCompressionHook) -> IkaWorkflow:
 
 
 def build_async_workflow() -> IkaWorkflow:
-    """
-    Async workflow using:
-    - instances=2 and instance_inputs on brainstorm (parallel runs with different prompts)
-    - Next edge: brainstorm -> decider
-    - run_async for dependency-based parallel execution
-    """
     brainstorm = IkaBaseAgent(
         name="brainstorm",
         description="Brainstorms from multiple angles",
@@ -187,41 +165,40 @@ def build_async_workflow() -> IkaWorkflow:
 
 
 def run_sync() -> None:
+    print("="*100)
+    print("Running sync workflow:")
     workflow = build_sync_workflow(compress_hook=truncate_compress)
     results = workflow.run(initial_context="Explain the basics of machine learning and why it matters.")
-    print("=== Sync workflow (staged + child+stage_index + next + custom compress) ===")
     for name, res in results.items():
-        summary = (res.summary or "")[:300]
+        summary = res.summary or ""
         childs = list(res.child_summaries.keys()) if res.child_summaries else []
-        print(f"[{name}] summary: {summary}...")
+        print(f"[{name}] summary: {summary}")
         if childs:
             print(f"  child_summaries: {childs}")
     r = results.get("synthesizer")
-    print("Final (synthesizer):", ((r.final or "")[:400] + "...") if r else "N/A")
+    print("Final (synthesizer):", (r.final or ""))
 
 
 def run_async() -> None:
+    print("="*100)
+    print("Running async workflow:")
     workflow = build_async_workflow()
     results = workflow.run(initial_context="The future of renewable energy.", use_async=True)
-    print("=== Async workflow (instances + instance_inputs + run_async) ===")
     for name, res in results.items():
         summary = res.summary or ""
-        # Check if both instances are present for multi-instance nodes
         has_instance_0 = "[Instance 0]:" in summary
         has_instance_1 = "[Instance 1]:" in summary
         if has_instance_0 and has_instance_1:
             print(f"[{name}] summary: (contains Instance 0 and Instance 1)")
-            # Print first 600 chars to show both instances
-            print(f"  {summary[:600]}...")
+            print(f"  {summary}")
         else:
-            print(f"[{name}] summary: {summary[:400]}...")
+            print(f"[{name}] summary: {summary}")
     decider = results.get("decider")
     if decider:
-        print("Final (decider):", (decider.final or "")[:400], "...")
+        print("Final (decider):", (decider.final or ""))
 
 
 def main() -> None:
-    which = (os.getenv("RUN_WORKFLOW") or "sync").strip().lower()
     # run_sync()
     run_async()
 

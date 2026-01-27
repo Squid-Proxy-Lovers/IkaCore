@@ -866,6 +866,9 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         from IkaModel.chat_interface import chat, async_chat
         import asyncio
 
+        # Accumulate all executed tool calls across all steps to prevent duplicates
+        all_executed_tool_calls = []
+
         for step_num in range(self.maxsteps):
             cli.set_step(self.name, step_num + 1)
             cli.agent_init(
@@ -902,6 +905,9 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
             content_before_tools = response.get("content_before_tools", "")
             tool_calls = response.get("tool_calls", []) or []
             executed_tool_calls = response.get("executed_tool_calls", []) or []
+
+            # Add newly executed tools from this step to cumulative list
+            all_executed_tool_calls.extend(executed_tool_calls)
             if hasattr(barebone_model, '_tool_call_counts'):
                 self._tool_call_counts.update(barebone_model._tool_call_counts)
 
@@ -961,48 +967,108 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                     )
                 return final_content, final_content
 
-            # Handle pending tool calls that weren't executed by chat (e.g. chained calls)
-            # But skip if agent_end was already called - we should have returned by now
+            # Handle tool calls from follow-up API response that weren't executed yet
+            # Filter out tool calls that were already executed to avoid duplicates
             if tool_calls and not agent_end_called:
-                provider = get_provider(barebone_model.model_id)
-                try:
-                    tool_msgs, tool_res = execute_tool_calls(
-                        tool_calls, tool_executors, provider, self.step_timeout,
-                        agent_hierarchy=current_hierarchy, step=step_num + 1
+                # Log what we're comparing against
+                if self.logger:
+                    self.logger.log_action(f"Deduplicating {len(tool_calls)} tool calls against {len(all_executed_tool_calls)} executed")
+
+                # Build set of executed tool call IDs and signatures from ALL steps to avoid duplicates
+                executed_ids = {
+                    call_id for call in all_executed_tool_calls
+                    if (call_id := (call.get("id") or call.get("function", {}).get("id")))
+                }
+
+                # Normalize arguments to canonical JSON format for reliable comparison
+                def normalize_args(args_str):
+                    try:
+                        import json
+                        parsed = json.loads(args_str) if isinstance(args_str, str) else args_str
+                        return json.dumps(parsed, sort_keys=True, separators=(',', ':'))
+                    except:
+                        return str(args_str)
+
+                executed_signatures = {
+                    (
+                        call.get("name") or call.get("function", {}).get("name", ""),
+                        normalize_args(call.get("function", {}).get("arguments", "") or str(call.get("arguments", "")))
                     )
-                    if self.logger:
-                        self.logger.log_tool_results(tool_calls, tool_res)
-                    messages.extend(tool_msgs)
-                    
-                    # Check again after tool execution if agent_end was called
-                    _, agent_end_called_after, agent_end_text_after = self.parse_control_calls(
-                        tool_calls,
-                        None,
-                        response_content=content_before_tools,
-                    )
-                    if agent_end_called_after:
-                        try:
-                            final_content = self._fallback_final_content(
-                                agent_end_text_after,
-                                content_before_tools,
-                                last_content,
-                            )
-                        except ValueError:
-                                final_content = agent_end_text_after or "Agent completed."
-                        
-                        cli.agent_response(
-                            self.name,
-                            final_content,
-                            current_hierarchy,
-                            step=step_num + 1,
-                            is_final=True
+                    for call in all_executed_tool_calls
+                }
+
+                # Filter to only pending (not yet executed) tool calls
+                pending_tool_calls = []
+                for call in tool_calls:
+                    call_id = call.get("id") or call.get("function", {}).get("id", "")
+                    call_name = call.get("name") or call.get("function", {}).get("name", "")
+                    call_args_raw = call.get("function", {}).get("arguments", "") or str(call.get("arguments", ""))
+                    call_args_normalized = normalize_args(call_args_raw)
+                    call_sig = (call_name, call_args_normalized)
+
+                    # Skip if already executed
+                    if call_id and call_id in executed_ids:
+                        continue
+                    if call_sig in executed_signatures:
+                        continue
+                    pending_tool_calls.append(call)
+
+                if self.logger:
+                    self.logger.log_action(f"Executing {len(pending_tool_calls)} pending tool calls (filtered {len(tool_calls) - len(pending_tool_calls)} duplicates)")
+
+                if pending_tool_calls:
+                    provider = get_provider(barebone_model.model_id)
+                    try:
+                        tool_msgs, tool_res = execute_tool_calls(
+                            pending_tool_calls, tool_executors, provider, self.step_timeout,
+                            agent_hierarchy=current_hierarchy, step=step_num + 1
                         )
-                        return final_content, final_content
-                except ValueError as e:
-                    if "agent_end" in str(e).lower():
-                        raise
-                    tool_msgs = []
-                    tool_res = []
+                        if self.logger:
+                            self.logger.log_tool_results(pending_tool_calls, tool_res)
+                        messages.extend(tool_msgs)
+                        
+                        # Add newly executed tools to cumulative list to prevent re-execution
+                        all_executed_tool_calls.extend(pending_tool_calls)
+                        
+                        # Check again after tool execution if agent_end was called
+                        _, agent_end_called_after, agent_end_text_after = self.parse_control_calls(
+                            pending_tool_calls,
+                            None,
+                            response_content=content_before_tools,
+                        )
+                        if agent_end_called_after:
+                            try:
+                                final_content = self._fallback_final_content(
+                                    agent_end_text_after,
+                                    content_before_tools,
+                                    last_content,
+                                )
+                            except ValueError:
+                                    final_content = agent_end_text_after or "Agent completed."
+                            
+                            cli.agent_response(
+                                self.name,
+                                final_content,
+                                current_hierarchy,
+                                step=step_num + 1,
+                                is_final=True
+                            )
+                            if self.logger:
+                                self.logger.log_step(
+                                    stage_name="simple",
+                                    step_idx=step_num,
+                                    output=last_content,
+                                    tool_calls=pending_tool_calls,
+                                    usage=response.get("usage", {}),
+                                    cost=response.get("cost", {}),
+                                    elapsed=time.time() - step_start,
+                                )
+                            return final_content, final_content
+                    except ValueError as e:
+                        if "agent_end" in str(e).lower():
+                            raise
+                        tool_msgs = []
+                        tool_res = []
 
             # Do NOT reset messages to preserve context
             # messages = [{"role": "assistant", "content": last_content}]

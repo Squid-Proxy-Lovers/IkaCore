@@ -1167,7 +1167,7 @@ def chat(
     
     cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
 
-    executed_tool_calls = []
+    executed_tool_call_list = []
     content_before_tools = content
     tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
     if tool_calls and tool_executors:
@@ -1183,8 +1183,7 @@ def chat(
         # Get agent hierarchy from BareBoneModel
         agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
         step = getattr(barebone_model, '_current_step', 0)
-        
-        executed_tool_calls = tool_calls.copy()
+
         tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
         if hasattr(barebone_model, '_tool_call_counts'):
             barebone_model._tool_call_counts.update(updated_counts)
@@ -1344,39 +1343,52 @@ def chat(
                             "arguments": json.dumps(func_call.get("args", {}))
                         }
                     })
-    
+
         # Appending final response to messages list for state consistency
+        # For follow-up API responses, don't add tool_calls because we don't have results yet
         if provider == "gemini":
-            assistant_msg = {"role": "model", "parts": []}
-            if content:
-                assistant_msg["parts"].append({"text": content})
-            for tool_call in tool_calls:
-                assistant_msg["parts"].append({
-                    "functionCall": {
-                        "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
-                        "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
-                    }
-                })
-            if assistant_msg["parts"]:
-                 messages.append(assistant_msg)
+            if content or not tool_calls:
+                assistant_msg = {"role": "model", "parts": []}
+                if content:
+                    assistant_msg["parts"].append({"text": content})
+                # Only add tool calls if there's also content (initial response)
+                # Don't add them if this is a follow-up response with only tool calls
+                if tool_calls and content:
+                    for tool_call in tool_calls:
+                        assistant_msg["parts"].append({
+                            "functionCall": {
+                                "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
+                                "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                            }
+                        })
+                if assistant_msg["parts"]:
+                    messages.append(assistant_msg)
         elif provider == "deepseek" or provider == "openai":
+            # For follow-up API responses, don't add tool_calls to the assistant message
+            # because we don't have the tool results yet. Return them for the next iteration.
             if not tool_calls:
                 assistant_msg = {"role": "assistant", "content": content}
                 if reasoning_content:
                     assistant_msg["reasoning_content"] = reasoning_content
                 messages.append(assistant_msg)
         elif provider == "anthropic":
-            assistant_msg = {"role": "assistant", "content": []}
-            if content:
-                assistant_msg["content"].append({"type": "text", "text": content})
-            for tool_call in tool_calls:
-                assistant_msg["content"].append({
-                    "type": "tool_use",
-                    "id": tool_call.get("id"),
-                    "name": tool_call.get("name"),
-                    "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
-                })
-            messages.append(assistant_msg)
+            # For follow-up API responses, don't add tool_use blocks without results
+            if content or not tool_calls:
+                assistant_msg = {"role": "assistant", "content": []}
+                if content:
+                    assistant_msg["content"].append({"type": "text", "text": content})
+                # Only add tool_use if there's also text content (initial response)
+                # Don't add them if this is a follow-up response with only tool calls
+                if tool_calls and content:
+                    for tool_call in tool_calls:
+                        assistant_msg["content"].append({
+                            "type": "tool_use",
+                            "id": tool_call.get("id"),
+                            "name": tool_call.get("name"),
+                            "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                        })
+                if assistant_msg["content"]:
+                    messages.append(assistant_msg)
 
         cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
     if logger:
@@ -1391,7 +1403,7 @@ def chat(
         "content": content,
         "reasoning_content": reasoning_content,
         "tool_calls": tool_calls,
-        "executed_tool_calls": executed_tool_calls,
+        "executed_tool_calls": executed_tool_call_list,
         "content_before_tools": content_before_tools,
         "message_history": message_history,
         "usage": usage_info,
@@ -1592,7 +1604,7 @@ async def async_chat(
 
         cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
 
-        executed_tool_calls = []
+        executed_tool_call_list = []
         content_before_tools = content
         tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
         if tool_calls and tool_executors:
@@ -1607,7 +1619,6 @@ async def async_chat(
             agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
             step = getattr(barebone_model, '_current_step', 0)
 
-            executed_tool_calls = tool_calls.copy()
             tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
             if hasattr(barebone_model, '_tool_call_counts'):
                 barebone_model._tool_call_counts.update(updated_counts)
@@ -1776,7 +1787,7 @@ async def async_chat(
             "content": content,
             "reasoning_content": reasoning_content,
             "tool_calls": tool_calls,
-            "executed_tool_calls": executed_tool_calls,
+            "executed_tool_calls": executed_tool_call_list,
             "content_before_tools": content_before_tools,
             "message_history": message_history,
             "usage": usage_info,
