@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Callable
 from threading import Lock, local
 from collections import defaultdict
 import sys
@@ -10,6 +10,37 @@ import threading
 
 # Global stdout lock - shared across all output systems for thread-safe console output
 _stdout_lock = Lock()
+
+# Global flag to enable or disable all stdout emission from IkaCore
+_stdout_enabled = True
+
+# Optional sink for routing rendered output somewhere else (for example, log files)
+_output_sink: Optional[Callable[["OutputContext", str], None]] = None
+
+
+def set_stdout_enabled(enabled: bool) -> None:
+    """
+    Enable or disable all stdout output produced by IkaCore.
+    When disabled, CLIOutput will drop all rendered output instead of writing to sys.stdout.
+    """
+    global _stdout_enabled
+    _stdout_enabled = bool(enabled)
+
+
+def is_stdout_enabled() -> bool:
+    """
+    Return current stdout enable state for IkaCore.
+    """
+    return _stdout_enabled
+
+
+def set_output_sink(sink: Optional[Callable[["OutputContext", str], None]]) -> None:
+    """
+    Set a sink callback that receives every rendered output box.
+    The sink is called even when stdout is disabled.
+    """
+    global _output_sink
+    _output_sink = sink
 
 
 class OutputType(Enum):
@@ -212,6 +243,19 @@ class OutputBuffer:
     def _print_output(self, ctx: OutputContext):
         # Render outside the lock to minimize lock hold time
         rendered = self._renderer.render(ctx) + "\n"
+
+        # Route to sink if configured
+        if _output_sink is not None:
+            try:
+                _output_sink(ctx, rendered)
+            except Exception:
+                # Sink failures must not break agent execution
+                pass
+
+        # Respect global stdout flag
+        if not _stdout_enabled:
+            return
+
         with _stdout_lock:
             # Use write() for more atomic output than print()
             sys.stdout.write(rendered)
@@ -233,14 +277,21 @@ class OutputBuffer:
             # Render all outputs and batch them into a single write for atomic output
             all_rendered: List[str] = []
             for ctx in sorted_outputs:
-                all_rendered.append(self._renderer.render(ctx))
+                rendered = self._renderer.render(ctx)
+                all_rendered.append(rendered)
+
+                if _output_sink is not None:
+                    try:
+                        _output_sink(ctx, rendered + "\n")
+                    except Exception:
+                        pass
 
             self._buffers.clear()
             self._buffering_enabled = False
 
         # Write all buffered output as a single atomic operation outside self._lock
         # to avoid holding both locks simultaneously
-        if all_rendered:
+        if all_rendered and _stdout_enabled:
             full_output = "\n".join(all_rendered) + "\n"
             with _stdout_lock:
                 sys.stdout.write(full_output)

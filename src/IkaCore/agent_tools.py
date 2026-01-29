@@ -233,14 +233,18 @@ class AgentToolsMixin(AgentParseMixin):
         
         def agent_end_executor(args: dict) -> str:
             content = args.get("input", "")
-            
-            if not content or content.strip() == "":
+
+            # Normalize boolean inputs that may have been coerced by validate_tool_args
+            if isinstance(content, bool):
+                content = "true" if content else "false"
+
+            if not content or (isinstance(content, str) and content.strip() == ""):
                 raise ValueError(
                     "agent_end was called with empty arguments. You MUST provide your final answer/output "
                     "in the agent_end tool arguments using the 'input' parameter."
                 )
-            
-            stripped_content = content.strip()
+
+            stripped_content = str(content).strip()
             if stripped_content in ["{}", "[]", "null", '""', "''"]:
                 raise ValueError(
                     f"agent_end was called with invalid/empty content: '{stripped_content}'. "
