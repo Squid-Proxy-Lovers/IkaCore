@@ -1152,14 +1152,25 @@ def chat(
             if "text" in part:
                 content += part["text"]
             elif "functionCall" in part:
+                LOG.info(f"Gemini function call part: {json.dumps(part)}")
                 func_call = part["functionCall"]
-                tool_calls.append({
+                tool_call_dict = {
                     "name": func_call.get("name"),
+                    "gemini_raw": func_call,
                     "function": {
                         "name": func_call.get("name"),
                         "arguments": json.dumps(func_call.get("args", {}))
                     }
-                })
+                }
+                # Gemini 3 "thought signatures" must be round-tripped exactly as received.
+                # The API may use either thoughtSignature (camelCase) or thought_signature (snake_case).
+                if "thoughtSignature" in part:
+                    tool_call_dict["gemini_thought_signature"] = part.get("thoughtSignature")
+                    tool_call_dict["gemini_thought_signature_key"] = "thoughtSignature"
+                elif "thought_signature" in part:
+                    tool_call_dict["gemini_thought_signature"] = part.get("thought_signature")
+                    tool_call_dict["gemini_thought_signature_key"] = "thought_signature"
+                tool_calls.append(tool_call_dict)
     else:
         content = ""
         tokens = 0
@@ -1196,12 +1207,21 @@ def chat(
         if provider == "gemini":
             assistant_msg = {"role": "model", "parts": [{"text": content}]}
             for tool_call in executed_tool_call_list:
-                assistant_msg["parts"].append({
-                    "functionCall": {
+                part_dict: Dict[str, Any] = {}
+                if "gemini_raw" in tool_call:
+                    part_dict["functionCall"] = tool_call["gemini_raw"]
+                else:
+                    part_dict["functionCall"] = {
                         "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
                         "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
                     }
-                })
+
+                # Preserve signature key exactly as received (Gemini 3 requires this for tool calling).
+                if "gemini_thought_signature" in tool_call:
+                    sig_key = tool_call.get("gemini_thought_signature_key") or "thoughtSignature"
+                    part_dict[sig_key] = tool_call["gemini_thought_signature"]
+
+                assistant_msg["parts"].append(part_dict)
             messages.append(assistant_msg)
             function_responses = format_gemini_results(executed_tool_call_list, tool_results)
             tool_response_msg = {"role": "user", "parts": function_responses}
@@ -1339,14 +1359,25 @@ def chat(
                 if "text" in part:
                     content += part["text"]
                 elif "functionCall" in part:
+                    LOG.info(f"Gemini function call part keys: {list(part.keys())}")
+                    if "thought" in part:
+                         LOG.info(f"Gemini thought found: {part['thought']}")
                     func_call = part["functionCall"]
-                    tool_calls.append({
+                    tool_call_dict = {
                         "name": func_call.get("name"),
+                        "gemini_raw": func_call,
                         "function": {
                             "name": func_call.get("name"),
                             "arguments": json.dumps(func_call.get("args", {}))
                         }
-                    })
+                    }
+                    if "thoughtSignature" in part:
+                        tool_call_dict["gemini_thought_signature"] = part.get("thoughtSignature")
+                        tool_call_dict["gemini_thought_signature_key"] = "thoughtSignature"
+                    elif "thought_signature" in part:
+                        tool_call_dict["gemini_thought_signature"] = part.get("thought_signature")
+                        tool_call_dict["gemini_thought_signature_key"] = "thought_signature"
+                    tool_calls.append(tool_call_dict)
 
     if tool_calls and tool_executors:
         tool_metadata = {}
@@ -1367,12 +1398,20 @@ def chat(
         if provider == "gemini":
             assistant_msg = {"role": "model", "parts": [{"text": content}]}
             for tool_call in executed_tool_call_list:
-                assistant_msg["parts"].append({
-                    "functionCall": {
+                part_dict = {}
+                if "gemini_raw" in tool_call:
+                    part_dict["functionCall"] = tool_call["gemini_raw"]
+                else:
+                    part_dict["functionCall"] = {
                         "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
                         "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
                     }
-                })
+                
+                if "gemini_thought_signature" in tool_call:
+                    sig_key = tool_call.get("gemini_thought_signature_key") or "thoughtSignature"
+                    part_dict[sig_key] = tool_call["gemini_thought_signature"]
+
+                assistant_msg["parts"].append(part_dict)
             messages.append(assistant_msg)
             messages.append({"role": "user", "parts": format_gemini_results(executed_tool_call_list, tool_results)})
         elif provider == "deepseek" or provider == "openai":
@@ -1595,14 +1634,25 @@ async def async_chat(
                 if "text" in part:
                     content += part["text"]
                 elif "functionCall" in part:
+                    LOG.info(f"Gemini function call part keys: {list(part.keys())}")
+                    if "thought" in part:
+                         LOG.info(f"Gemini thought found: {part['thought']}")
                     func_call = part["functionCall"]
-                    tool_calls.append({
+                    tool_call_dict = {
                         "name": func_call.get("name"),
+                        "gemini_raw": func_call,
                         "function": {
                             "name": func_call.get("name"),
                             "arguments": json.dumps(func_call.get("args", {}))
                         }
-                    })
+                    }
+                    if "thoughtSignature" in part:
+                        tool_call_dict["gemini_thought_signature"] = part.get("thoughtSignature")
+                        tool_call_dict["gemini_thought_signature_key"] = "thoughtSignature"
+                    elif "thought_signature" in part:
+                        tool_call_dict["gemini_thought_signature"] = part.get("thought_signature")
+                        tool_call_dict["gemini_thought_signature_key"] = "thought_signature"
+                    tool_calls.append(tool_call_dict)
         else:
             content = ""
             tokens = 0
@@ -1639,12 +1689,20 @@ async def async_chat(
             if provider == "gemini":
                 assistant_msg = {"role": "model", "parts": [{"text": content}]}
                 for tool_call in executed_tool_call_list:
-                    assistant_msg["parts"].append({
-                        "functionCall": {
+                    part_dict = {}
+                    if "gemini_raw" in tool_call:
+                        part_dict["functionCall"] = tool_call["gemini_raw"]
+                    else:
+                        part_dict["functionCall"] = {
                             "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
                             "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
                         }
-                    })
+                    
+                    if "gemini_thought_signature" in tool_call:
+                        sig_key = tool_call.get("gemini_thought_signature_key") or "thoughtSignature"
+                        part_dict[sig_key] = tool_call["gemini_thought_signature"]
+                        
+                    assistant_msg["parts"].append(part_dict)
                 messages.append(assistant_msg)
                 messages.append({"role": "user", "parts": format_gemini_results(executed_tool_call_list, tool_results)})
             elif provider == "deepseek" or provider == "openai":
@@ -1668,10 +1726,11 @@ async def async_chat(
                     })
                 messages.append(assistant_msg)
                 messages.extend(tool_messages)
+                tool_calls = []
 
-            rounds += 1
-            if rounds >= max_tool_rounds:
-                break
+                rounds += 1
+                if rounds >= max_tool_rounds:
+                    break
 
             if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
                 def _build_follow():
@@ -1741,14 +1800,27 @@ async def async_chat(
                     if "text" in part:
                         content += part["text"]
                     elif "functionCall" in part:
+                        print(f"DEBUG_PRINT: Gemini functionCall part found. Keys: {list(part.keys())}")
+                        if "thought" in part:
+                            print(f"DEBUG_PRINT: Gemini thought found in part: {part['thought']}")
+                        if "thought_signature" in part:
+                             print(f"DEBUG_PRINT: Gemini thought_signature found in part: {part['thought_signature']}")
+                        if "thoughtSignature" in part:
+                             print(f"DEBUG_PRINT: Gemini thoughtSignature found in part: {part['thoughtSignature']}")
+
                         func_call = part["functionCall"]
-                        tool_calls.append({
+                        tool_call_dict = {
                             "name": func_call.get("name"),
+                            "gemini_raw": func_call,
                             "function": {
                                 "name": func_call.get("name"),
                                 "arguments": json.dumps(func_call.get("args", {}))
                             }
-                        })
+                        }
+                        thought_sig = part.get("thought_signature") or part.get("thoughtSignature") or part.get("thought")
+                        if thought_sig:
+                            tool_call_dict["gemini_thought_signature"] = thought_sig
+                        tool_calls.append(tool_call_dict)
 
         if tool_calls and tool_executors:
             tool_metadata = {}
@@ -1766,38 +1838,46 @@ async def async_chat(
             all_executed_tool_call_list.extend(executed_tool_call_list)
             if logger:
                 logger.log_tool_results(executed_tool_call_list, tool_results)
-            if provider == "gemini":
-                assistant_msg = {"role": "model", "parts": [{"text": content}]}
-                for tool_call in executed_tool_call_list:
-                    assistant_msg["parts"].append({
-                        "functionCall": {
-                            "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
-                            "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
-                        }
-                    })
-                messages.append(assistant_msg)
-                messages.append({"role": "user", "parts": format_gemini_results(executed_tool_call_list, tool_results)})
-            elif provider == "deepseek" or provider == "openai":
-                assistant_msg = {"role": "assistant", "content": content}
-                if reasoning_content:
-                    assistant_msg["reasoning_content"] = reasoning_content
-                assistant_msg["tool_calls"] = executed_tool_call_list
-                messages.append(assistant_msg)
-                messages.extend(tool_messages)
-            elif provider == "anthropic":
-                assistant_msg = {"role": "assistant", "content": []}
-                if content:
-                    assistant_msg["content"].append({"type": "text", "text": content})
-                for tool_call in executed_tool_call_list:
-                    assistant_msg["content"].append({
-                        "type": "tool_use",
-                        "id": tool_call.get("id"),
-                        "name": tool_call.get("name"),
-                        "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
-                    })
-                messages.append(assistant_msg)
-                messages.extend(tool_messages)
-            tool_calls = []
+        if provider == "gemini":
+            assistant_msg = {"role": "model", "parts": [{"text": content}]}
+            for tool_call in executed_tool_call_list:
+                part_dict = {}
+                if "gemini_raw" in tool_call:
+                    part_dict["functionCall"] = tool_call["gemini_raw"]
+                else:
+                    part_dict["functionCall"] = {
+                        "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
+                        "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                    }
+                
+                if "gemini_thought_signature" in tool_call:
+                    sig_key = tool_call.get("gemini_thought_signature_key") or "thoughtSignature"
+                    part_dict[sig_key] = tool_call["gemini_thought_signature"]
+
+                assistant_msg["parts"].append(part_dict)
+            messages.append(assistant_msg)
+            messages.append({"role": "user", "parts": format_gemini_results(executed_tool_call_list, tool_results)})
+        elif provider == "deepseek" or provider == "openai":
+            assistant_msg = {"role": "assistant", "content": content}
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
+            assistant_msg["tool_calls"] = executed_tool_call_list
+            messages.append(assistant_msg)
+            messages.extend(tool_messages)
+        elif provider == "anthropic":
+            assistant_msg = {"role": "assistant", "content": []}
+            if content:
+                assistant_msg["content"].append({"type": "text", "text": content})
+            for tool_call in executed_tool_call_list:
+                assistant_msg["content"].append({
+                    "type": "tool_use",
+                    "id": tool_call.get("id"),
+                    "name": tool_call.get("name"),
+                    "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                })
+            messages.append(assistant_msg)
+            messages.extend(tool_messages)
+        tool_calls = []
 
         cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
         if logger:
