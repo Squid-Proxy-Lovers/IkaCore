@@ -855,6 +855,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         base_prompt = self.system_prompt or self.description or self.prompt
         system_prompt = base_prompt
         current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+        cli = get_cli_output()
+        cli.set_step(self.name, 1)
         barebone_model = self.get_barebone(system_prompt, agent_tools, parent_hierarchy=current_hierarchy)
 
         first_msg = (self.message_history.get("first_input") or {}).get("message") or ""
@@ -865,21 +867,21 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
 
         current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
         tool_executors = self.build_tool_executors(self.tools, memory_access=self.memory_access, subagents=self.subagents, parent_hierarchy=current_hierarchy)
-        
-        cli = get_cli_output()
 
         from IkaModel.chat_interface import chat, async_chat
         import asyncio
 
         for step_num in range(self.maxsteps):
-            cli.set_step(self.name, step_num + 1)
-            cli.agent_init(
-                self.name,
-                current_hierarchy,
-                step=step_num + 1,
-                description=f"Step {step_num + 1}/{self.maxsteps}"
-            )
-            barebone_model._current_step = step_num + 1
+            current_step = step_num + 1
+            cli.set_step(self.name, current_step)
+            if step_num == 0:
+                cli.agent_init(
+                    self.name,
+                    current_hierarchy,
+                    step=current_step,
+                    description=f"Step {current_step}/{self.maxsteps}"
+                )
+            barebone_model._current_step = current_step
             self._enforce_rate_limit_model()
             step_start = time.time()
             if self.use_async:
@@ -927,7 +929,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                     self.name,
                     f"ERROR: {error_msg}",
                     current_hierarchy,
-                    step=step_num + 1,
+                    step=current_step,
                     is_final=False,
                 )
                 raise
@@ -945,7 +947,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                         self.name,
                         f"ERROR: {error_msg}",
                         current_hierarchy,
-                        step=step_num + 1,
+                        step=current_step,
                         is_final=False,
                     )
                     raise
@@ -954,7 +956,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                     self.name,
                     final_content,
                     current_hierarchy,
-                    step=step_num + 1,
+                    step=current_step,
                     is_final=True
                 )
                 if self.logger:
@@ -980,7 +982,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                     self.name,
                     last_content,
                     current_hierarchy,
-                    step=step_num + 1,
+                    step=current_step,
                     is_final=False
                 )
                 if self.logger:
@@ -1006,18 +1008,18 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                     cost=response.get("cost", {}),
                     elapsed=time.time() - step_start,
                 )
-            # Ensure maxsteps is an integer and step_num is an integer
             max_steps_val = int(self.maxsteps)
             current_step_val = int(step_num) if step_num is not None else 0
             remaining_after = max(0, max_steps_val - (current_step_val + 1))
             self._save_agent_checkpoint(remaining_after, last_content)
 
+        final_step = cli.get_step(self.name) or self.maxsteps
         final_response = last_agent_end_text if last_agent_end_text else last_content
         cli.agent_response(
             self.name,
             f"Reached max steps ({self.maxsteps}). Returning last content.\n\n{final_response}",
             current_hierarchy,
-            step=self.maxsteps,
+            step=final_step,
             is_final=True
         )
         return final_response, final_response

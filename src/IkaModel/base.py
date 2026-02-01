@@ -168,13 +168,15 @@ class BareBoneModel:
         if not suppress_init_output:
             cli = get_cli_output()
             hierarchy = self.agent_hierarchy or [self.agent_name or "Agent"]
+            agent_name = hierarchy[0] if hierarchy else "Agent"
+            step = cli.get_step(agent_name) if agent_name else 0
 
             if self.system_prompt:
                 cli.emit(
                     OutputType.AGENT_INIT,
                     f"System Prompt:\n{self.system_prompt}",
                     hierarchy,
-                    step=0
+                    step=step
                 )
 
             if self.content_prompt:
@@ -182,7 +184,7 @@ class BareBoneModel:
                     OutputType.AGENT_INIT,
                     f"Content Prompt:\n{self.content_prompt}",
                     hierarchy,
-                    step=0
+                    step=step
                 )
 
 
