@@ -27,7 +27,7 @@ from IkaModel.base import (
     init_global_long_term_memory,
     get_global_long_term_memory,
 )
-from IkaModel.chat_interface import chat, summarise_message_history, execute_tool_calls, get_provider
+from IkaModel.chat_interface import summarise_message_history
 
 from .agent_memory import AgentMemoryMixin
 from .agent_tools import AgentToolsMixin
@@ -166,6 +166,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         checkpoint_db_path: str = "checkpoints.db",
         summarize_final: bool = False,
         use_async: bool = False,
+        max_tool_rounds: Optional[int] = None,
     ):
         tools = tools or []
         Stages = Stages or []
@@ -228,6 +229,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         self.long_term_memory: Optional[LTMemory] = get_global_long_term_memory()
         self.summarize_final = summarize_final
         self.use_async = use_async
+        self.max_tool_rounds = max_tool_rounds if max_tool_rounds is not None else 5
         self.final_answer_checks = self._validate_final_answer_checks(final_answer_check)
         self._tool_call_counts: Dict[str, int] = {}
     
@@ -375,7 +377,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         if "claude" in model_id_lower:
             return "https://api.anthropic.com/v1/messages"
         if "gemini" in model_id_lower:
-            return "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+            model_name = model_id.split("/")[-1] if "/" in model_id else model_id
+            return f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
         return "https://api.openai.com/v1/chat/completions"
 
 
@@ -761,6 +764,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                         tool_executors=tool_executors,
                         logger=self.logger,
                         timeout=self.step_timeout,
+                        max_tool_rounds=self.max_tool_rounds,
                     )
                 )
             else:
@@ -771,6 +775,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                     tool_executors=tool_executors,
                     logger=self.logger,
                     timeout=self.step_timeout,
+                    max_tool_rounds=self.max_tool_rounds,
                 )
             self.message_history = response.get("message_history", self.message_history)
             last_content = response.get("content", "")
@@ -866,9 +871,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
         from IkaModel.chat_interface import chat, async_chat
         import asyncio
 
-        # Accumulate all executed tool calls across all steps to prevent duplicates
-        all_executed_tool_calls = []
-
         for step_num in range(self.maxsteps):
             cli.set_step(self.name, step_num + 1)
             cli.agent_init(
@@ -889,6 +891,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                         tool_executors=tool_executors,
                         logger=self.logger,
                         timeout=self.step_timeout,
+                        max_tool_rounds=self.max_tool_rounds,
                     )
                 )
             else:
@@ -899,6 +902,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                     tool_executors=tool_executors,
                     logger=self.logger,
                     timeout=self.step_timeout,
+                    max_tool_rounds=self.max_tool_rounds,
                 )
             self.message_history = response.get("message_history", self.message_history)
             last_content = response.get("content", "")
@@ -906,8 +910,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
             tool_calls = response.get("tool_calls", []) or []
             executed_tool_calls = response.get("executed_tool_calls", []) or []
 
-            # Add newly executed tools from this step to cumulative list
-            all_executed_tool_calls.extend(executed_tool_calls)
             if hasattr(barebone_model, '_tool_call_counts'):
                 self._tool_call_counts.update(barebone_model._tool_call_counts)
 
@@ -966,109 +968,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin):
                         elapsed=time.time() - step_start,
                     )
                 return final_content, final_content
-
-            # Handle tool calls from follow-up API response that weren't executed yet
-            # Filter out tool calls that were already executed to avoid duplicates
-            if tool_calls and not agent_end_called:
-                # Log what we're comparing against
-                if self.logger:
-                    self.logger.log_action(f"Deduplicating {len(tool_calls)} tool calls against {len(all_executed_tool_calls)} executed")
-
-                # Build set of executed tool call IDs and signatures from ALL steps to avoid duplicates
-                executed_ids = {
-                    call_id for call in all_executed_tool_calls
-                    if (call_id := (call.get("id") or call.get("function", {}).get("id")))
-                }
-
-                # Normalize arguments to canonical JSON format for reliable comparison
-                def normalize_args(args_str):
-                    try:
-                        import json
-                        parsed = json.loads(args_str) if isinstance(args_str, str) else args_str
-                        return json.dumps(parsed, sort_keys=True, separators=(',', ':'))
-                    except:
-                        return str(args_str)
-
-                executed_signatures = {
-                    (
-                        call.get("name") or call.get("function", {}).get("name", ""),
-                        normalize_args(call.get("function", {}).get("arguments", "") or str(call.get("arguments", "")))
-                    )
-                    for call in all_executed_tool_calls
-                }
-
-                # Filter to only pending (not yet executed) tool calls
-                pending_tool_calls = []
-                for call in tool_calls:
-                    call_id = call.get("id") or call.get("function", {}).get("id", "")
-                    call_name = call.get("name") or call.get("function", {}).get("name", "")
-                    call_args_raw = call.get("function", {}).get("arguments", "") or str(call.get("arguments", ""))
-                    call_args_normalized = normalize_args(call_args_raw)
-                    call_sig = (call_name, call_args_normalized)
-
-                    # Skip if already executed
-                    if call_id and call_id in executed_ids:
-                        continue
-                    if call_sig in executed_signatures:
-                        continue
-                    pending_tool_calls.append(call)
-
-                if self.logger:
-                    self.logger.log_action(f"Executing {len(pending_tool_calls)} pending tool calls (filtered {len(tool_calls) - len(pending_tool_calls)} duplicates)")
-
-                if pending_tool_calls:
-                    provider = get_provider(barebone_model.model_id)
-                    try:
-                        tool_msgs, tool_res = execute_tool_calls(
-                            pending_tool_calls, tool_executors, provider, self.step_timeout,
-                            agent_hierarchy=current_hierarchy, step=step_num + 1
-                        )
-                        if self.logger:
-                            self.logger.log_tool_results(pending_tool_calls, tool_res)
-                        messages.extend(tool_msgs)
-                        
-                        # Add newly executed tools to cumulative list to prevent re-execution
-                        all_executed_tool_calls.extend(pending_tool_calls)
-                        
-                        # Check again after tool execution if agent_end was called
-                        _, agent_end_called_after, agent_end_text_after = self.parse_control_calls(
-                            pending_tool_calls,
-                            None,
-                            response_content=content_before_tools,
-                        )
-                        if agent_end_called_after:
-                            try:
-                                final_content = self._fallback_final_content(
-                                    agent_end_text_after,
-                                    content_before_tools,
-                                    last_content,
-                                )
-                            except ValueError:
-                                    final_content = agent_end_text_after or "Agent completed."
-                            
-                            cli.agent_response(
-                                self.name,
-                                final_content,
-                                current_hierarchy,
-                                step=step_num + 1,
-                                is_final=True
-                            )
-                            if self.logger:
-                                self.logger.log_step(
-                                    stage_name="simple",
-                                    step_idx=step_num,
-                                    output=last_content,
-                                    tool_calls=pending_tool_calls,
-                                    usage=response.get("usage", {}),
-                                    cost=response.get("cost", {}),
-                                    elapsed=time.time() - step_start,
-                                )
-                            return final_content, final_content
-                    except ValueError as e:
-                        if "agent_end" in str(e).lower():
-                            raise
-                        tool_msgs = []
-                        tool_res = []
 
             # Do NOT reset messages to preserve context
             # messages = [{"role": "assistant", "content": last_content}]

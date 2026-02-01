@@ -11,7 +11,7 @@ from IkaCore.tools import IkaTools
 from IkaCore.workflow import IkaWorkflow
 
 API_KEY = os.getenv("API_KEY")
-MODEL_ID = "deepseek-chat"
+MODEL_ID = os.getenv("MODEL_ID", "deepseek-chat")
 if not API_KEY:
     raise ValueError("API_KEY is not set")
 if not MODEL_ID:

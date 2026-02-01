@@ -35,7 +35,7 @@ def get_summary_model(provider: str) -> tuple[str, str]:
         "deepseek": ("deepseek-chat", "https://api.deepseek.com/chat/completions"),
         "openai": ("gpt-4.1-mini-2025-04-14", "https://api.openai.com/v1/chat/completions"),
         "anthropic": ("claude-sonnet-4-20250514", "https://api.anthropic.com/v1/messages"),
-        "gemini": ("gemini-1.5-pro", "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent"),
+        "gemini": ("gemini-flash-latest", "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"),
     }
     return models.get(provider.lower(), (None, None))
 
@@ -757,9 +757,10 @@ def format_gemini_results(tool_calls: List[dict], tool_results: List[str]) -> Li
         tool_name = tool_call.get("name") or tool_call.get("function", {}).get("name", "")
         try:
             result_data = json.loads(tool_results[i]) if i < len(tool_results) else {"error": "No result"}
-        except:
+        except Exception:
             result_data = {"result": tool_results[i]} if i < len(tool_results) else {"error": "No result"}
-        
+        if not isinstance(result_data, dict):
+            result_data = {"result": result_data}
         function_responses.append({
             "functionResponse": {
                 "name": tool_name,
@@ -1037,7 +1038,8 @@ def chat(
     message_history: Optional[dict] = None,
     tool_executors: Optional[Dict[str, Callable]] = None,
     logger: Optional[Any] = None,
-    timeout: float = 900.0
+    timeout: float = 900.0,
+    max_tool_rounds: int = 5
 ) -> Dict[str, Any]:
     if not barebone_model:
         raise ValueError("barebone_model is required")
@@ -1143,8 +1145,9 @@ def chat(
                     }
                 })
     elif "gemini" in barebone_model.model_id.lower():
-        candidate = data["candidates"][0]["content"]
-        parts = candidate.get("parts", [])
+        candidate = (data.get("candidates") or [{}])[0]
+        candidate_content = candidate.get("content") or {}
+        parts = candidate_content.get("parts", [])
         for part in parts:
             if "text" in part:
                 content += part["text"]
@@ -1167,11 +1170,12 @@ def chat(
     
     cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
 
-    executed_tool_call_list = []
+    all_executed_tool_call_list: List[dict] = []
     content_before_tools = content
     tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
-    if tool_calls and tool_executors:
-        # Extract tool metadata from BareBoneModel
+    rounds = 0
+
+    while tool_calls and tool_executors and rounds < max_tool_rounds:
         tool_metadata = {}
         if hasattr(barebone_model, 'agent_tools'):
             for agent_tool in barebone_model.agent_tools:
@@ -1179,17 +1183,16 @@ def chat(
                     "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
                     "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
                 }
-        
-        # Get agent hierarchy from BareBoneModel
         agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
         step = getattr(barebone_model, '_current_step', 0)
 
         tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
         if hasattr(barebone_model, '_tool_call_counts'):
             barebone_model._tool_call_counts.update(updated_counts)
+        all_executed_tool_call_list.extend(executed_tool_call_list)
         if logger:
             logger.log_tool_results(executed_tool_call_list, tool_results)
-        
+
         if provider == "gemini":
             assistant_msg = {"role": "model", "parts": [{"text": content}]}
             for tool_call in executed_tool_call_list:
@@ -1203,7 +1206,6 @@ def chat(
             function_responses = format_gemini_results(executed_tool_call_list, tool_results)
             tool_response_msg = {"role": "user", "parts": function_responses}
             messages.append(tool_response_msg)
-            # Persist assistant/tool messages so follow-up payloads keep ordering
             msg_id = str(uuid.uuid4())
             message_history["messages"][msg_id] = {
                 "message": json.dumps(assistant_msg),
@@ -1264,7 +1266,11 @@ def chat(
                     "tokens": 0,
                     "type": "tool",
                 }
-        
+
+        rounds += 1
+        if rounds >= max_tool_rounds:
+            break
+
         if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
             def _build_follow():
                 _apply_tools_filter_for_payload(barebone_model)
@@ -1272,7 +1278,6 @@ def chat(
                 _restore_tools_after_payload(barebone_model)
                 return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
             response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout)
-
         elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
             def _build_follow():
                 _apply_tools_filter_for_payload(barebone_model)
@@ -1280,7 +1285,6 @@ def chat(
                 _restore_tools_after_payload(barebone_model)
                 return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
             response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout)
-
         elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
             def _build_follow():
                 _apply_tools_filter_for_payload(barebone_model)
@@ -1290,7 +1294,6 @@ def chat(
                     p["max_tokens"] = 4096
                 return (barebone_model.api_url, {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}, p)
             response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout)
-
         elif "gemini" in barebone_model.model_id.lower():
             def _build_follow():
                 _apply_tools_filter_for_payload(barebone_model)
@@ -1298,10 +1301,11 @@ def chat(
                 _restore_tools_after_payload(barebone_model)
                 return (f"{barebone_model.api_url}?key={barebone_model.api_key}", {"Content-Type": "application/json"}, p)
             response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout)
+        else:
+            break
 
         response.raise_for_status()
         data = response.json()
-        
         content = ""
         reasoning_content = None
         tokens = 0
@@ -1309,7 +1313,6 @@ def chat(
         usage_info = extract_usage(provider, data)
         if usage_info:
             tokens = usage_info.get("total_tokens", 0)
-
         if "deepseek" in barebone_model.model_id.lower() or "gpt" in barebone_model.model_id.lower() or "openai" in barebone_model.model_id.lower():
             message_obj = data["choices"][0]["message"]
             content = message_obj.get("content") or ""
@@ -1329,8 +1332,9 @@ def chat(
                         }
                     })
         elif "gemini" in barebone_model.model_id.lower():
-            candidate = data["candidates"][0]["content"]
-            parts = candidate.get("parts", [])
+            candidate = (data.get("candidates") or [{}])[0]
+            candidate_content = candidate.get("content") or {}
+            parts = candidate_content.get("parts", [])
             for part in parts:
                 if "text" in part:
                     content += part["text"]
@@ -1344,53 +1348,56 @@ def chat(
                         }
                     })
 
-        # Appending final response to messages list for state consistency
-        # For follow-up API responses, don't add tool_calls because we don't have results yet
+    if tool_calls and tool_executors:
+        tool_metadata = {}
+        if hasattr(barebone_model, 'agent_tools'):
+            for agent_tool in barebone_model.agent_tools:
+                tool_metadata[agent_tool.name] = {
+                    "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
+                    "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
+                }
+        agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
+        step = getattr(barebone_model, '_current_step', 0)
+        tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+        if hasattr(barebone_model, '_tool_call_counts'):
+            barebone_model._tool_call_counts.update(updated_counts)
+        all_executed_tool_call_list.extend(executed_tool_call_list)
+        if logger:
+            logger.log_tool_results(executed_tool_call_list, tool_results)
         if provider == "gemini":
-            if content or not tool_calls:
-                assistant_msg = {"role": "model", "parts": []}
-                if content:
-                    assistant_msg["parts"].append({"text": content})
-                # Only add tool calls if there's also content (initial response)
-                # Don't add them if this is a follow-up response with only tool calls
-                if tool_calls and content:
-                    for tool_call in tool_calls:
-                        assistant_msg["parts"].append({
-                            "functionCall": {
-                                "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
-                                "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
-                            }
-                        })
-                if assistant_msg["parts"]:
-                    messages.append(assistant_msg)
+            assistant_msg = {"role": "model", "parts": [{"text": content}]}
+            for tool_call in executed_tool_call_list:
+                assistant_msg["parts"].append({
+                    "functionCall": {
+                        "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
+                        "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                    }
+                })
+            messages.append(assistant_msg)
+            messages.append({"role": "user", "parts": format_gemini_results(executed_tool_call_list, tool_results)})
         elif provider == "deepseek" or provider == "openai":
-            # For follow-up API responses, don't add tool_calls to the assistant message
-            # because we don't have the tool results yet. Return them for the next iteration.
-            if not tool_calls:
-                assistant_msg = {"role": "assistant", "content": content}
-                if reasoning_content:
-                    assistant_msg["reasoning_content"] = reasoning_content
-                messages.append(assistant_msg)
+            assistant_msg = {"role": "assistant", "content": content}
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
+            assistant_msg["tool_calls"] = executed_tool_call_list
+            messages.append(assistant_msg)
+            messages.extend(tool_messages)
         elif provider == "anthropic":
-            # For follow-up API responses, don't add tool_use blocks without results
-            if content or not tool_calls:
-                assistant_msg = {"role": "assistant", "content": []}
-                if content:
-                    assistant_msg["content"].append({"type": "text", "text": content})
-                # Only add tool_use if there's also text content (initial response)
-                # Don't add them if this is a follow-up response with only tool calls
-                if tool_calls and content:
-                    for tool_call in tool_calls:
-                        assistant_msg["content"].append({
-                            "type": "tool_use",
-                            "id": tool_call.get("id"),
-                            "name": tool_call.get("name"),
-                            "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
-                        })
-                if assistant_msg["content"]:
-                    messages.append(assistant_msg)
+            assistant_msg = {"role": "assistant", "content": []}
+            if content:
+                assistant_msg["content"].append({"type": "text", "text": content})
+            for tool_call in executed_tool_call_list:
+                assistant_msg["content"].append({
+                    "type": "tool_use",
+                    "id": tool_call.get("id"),
+                    "name": tool_call.get("name"),
+                    "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                })
+            messages.append(assistant_msg)
+            messages.extend(tool_messages)
+        tool_calls = []
 
-        cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
+    cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
     if logger:
         logger.log_output(content, usage_info, cost_info, message_history)
 
@@ -1403,7 +1410,7 @@ def chat(
         "content": content,
         "reasoning_content": reasoning_content,
         "tool_calls": tool_calls,
-        "executed_tool_calls": executed_tool_call_list,
+        "executed_tool_calls": all_executed_tool_call_list,
         "content_before_tools": content_before_tools,
         "message_history": message_history,
         "usage": usage_info,
@@ -1468,7 +1475,8 @@ async def async_chat(
     tool_executors: Optional[Dict[str, Callable]] = None,
     logger: Optional[Any] = None,
     timeout: float = 900.0,
-    client: Optional[httpx.AsyncClient] = None
+    client: Optional[httpx.AsyncClient] = None,
+    max_tool_rounds: int = 5
 ) -> Dict[str, Any]:
     if not barebone_model:
         raise ValueError("barebone_model is required")
@@ -1580,8 +1588,9 @@ async def async_chat(
                         }
                     })
         elif "gemini" in barebone_model.model_id.lower():
-            candidate = data["candidates"][0]["content"]
-            parts = candidate.get("parts", [])
+            candidate = (data.get("candidates") or [{}])[0]
+            candidate_content = candidate.get("content") or {}
+            parts = candidate_content.get("parts", [])
             for part in parts:
                 if "text" in part:
                     content += part["text"]
@@ -1604,10 +1613,12 @@ async def async_chat(
 
         cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
 
-        executed_tool_call_list = []
+        all_executed_tool_call_list: List[dict] = []
         content_before_tools = content
         tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
-        if tool_calls and tool_executors:
+        rounds = 0
+
+        while tool_calls and tool_executors and rounds < max_tool_rounds:
             tool_metadata = {}
             if hasattr(barebone_model, 'agent_tools'):
                 for agent_tool in barebone_model.agent_tools:
@@ -1615,13 +1626,13 @@ async def async_chat(
                         "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
                         "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
                     }
-
             agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
             step = getattr(barebone_model, '_current_step', 0)
 
             tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
             if hasattr(barebone_model, '_tool_call_counts'):
                 barebone_model._tool_call_counts.update(updated_counts)
+            all_executed_tool_call_list.extend(executed_tool_call_list)
             if logger:
                 logger.log_tool_results(executed_tool_call_list, tool_results)
 
@@ -1635,8 +1646,7 @@ async def async_chat(
                         }
                     })
                 messages.append(assistant_msg)
-                function_responses = format_gemini_results(executed_tool_call_list, tool_results)
-                messages.append({"role": "user", "parts": function_responses})
+                messages.append({"role": "user", "parts": format_gemini_results(executed_tool_call_list, tool_results)})
             elif provider == "deepseek" or provider == "openai":
                 assistant_msg = {"role": "assistant", "content": content}
                 if reasoning_content:
@@ -1659,7 +1669,10 @@ async def async_chat(
                 messages.append(assistant_msg)
                 messages.extend(tool_messages)
 
-            # Make follow-up API call after tool execution
+            rounds += 1
+            if rounds >= max_tool_rounds:
+                break
+
             if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
                 def _build_follow():
                     _apply_tools_filter_for_payload(barebone_model)
@@ -1667,7 +1680,6 @@ async def async_chat(
                     _restore_tools_after_payload(barebone_model)
                     return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
                 response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client)
-
             elif barebone_model.model_id.lower().startswith("gpt") or "openai" in barebone_model.model_id.lower():
                 def _build_follow():
                     _apply_tools_filter_for_payload(barebone_model)
@@ -1675,7 +1687,6 @@ async def async_chat(
                     _restore_tools_after_payload(barebone_model)
                     return (barebone_model.api_url, {"Authorization": f"Bearer {barebone_model.api_key}", "Content-Type": "application/json"}, p)
                 response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client)
-
             elif "claude" in barebone_model.model_id.lower() or "anthropic" in barebone_model.model_id.lower():
                 def _build_follow():
                     _apply_tools_filter_for_payload(barebone_model)
@@ -1685,7 +1696,6 @@ async def async_chat(
                         p["max_tokens"] = 4096
                     return (barebone_model.api_url, {"x-api-key": barebone_model.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}, p)
                 response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client)
-
             elif "gemini" in barebone_model.model_id.lower():
                 def _build_follow():
                     _apply_tools_filter_for_payload(barebone_model)
@@ -1693,10 +1703,11 @@ async def async_chat(
                     _restore_tools_after_payload(barebone_model)
                     return (f"{barebone_model.api_url}?key={barebone_model.api_key}", {"Content-Type": "application/json"}, p)
                 response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client)
+            else:
+                break
 
             response.raise_for_status()
             data = response.json()
-
             content = ""
             reasoning_content = None
             tokens = 0
@@ -1704,7 +1715,6 @@ async def async_chat(
             usage_info = extract_usage(provider, data)
             if usage_info:
                 tokens = usage_info.get("total_tokens", 0)
-
             if "deepseek" in barebone_model.model_id.lower() or "gpt" in barebone_model.model_id.lower() or "openai" in barebone_model.model_id.lower():
                 message_obj = data["choices"][0]["message"]
                 content = message_obj.get("content") or ""
@@ -1724,8 +1734,9 @@ async def async_chat(
                             }
                         })
             elif "gemini" in barebone_model.model_id.lower():
-                candidate = data["candidates"][0]["content"]
-                parts = candidate.get("parts", [])
+                candidate = (data.get("candidates") or [{}])[0]
+                candidate_content = candidate.get("content") or {}
+                parts = candidate_content.get("parts", [])
                 for part in parts:
                     if "text" in part:
                         content += part["text"]
@@ -1739,32 +1750,45 @@ async def async_chat(
                             }
                         })
 
-            # Append final response to messages
+        if tool_calls and tool_executors:
+            tool_metadata = {}
+            if hasattr(barebone_model, 'agent_tools'):
+                for agent_tool in barebone_model.agent_tools:
+                    tool_metadata[agent_tool.name] = {
+                        "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
+                        "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
+                    }
+            agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
+            step = getattr(barebone_model, '_current_step', 0)
+            tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+            if hasattr(barebone_model, '_tool_call_counts'):
+                barebone_model._tool_call_counts.update(updated_counts)
+            all_executed_tool_call_list.extend(executed_tool_call_list)
+            if logger:
+                logger.log_tool_results(executed_tool_call_list, tool_results)
             if provider == "gemini":
-                assistant_msg = {"role": "model", "parts": []}
-                if content:
-                    assistant_msg["parts"].append({"text": content})
-                for tool_call in tool_calls:
+                assistant_msg = {"role": "model", "parts": [{"text": content}]}
+                for tool_call in executed_tool_call_list:
                     assistant_msg["parts"].append({
                         "functionCall": {
                             "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
                             "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
                         }
                     })
-                if assistant_msg["parts"]:
-                    messages.append(assistant_msg)
+                messages.append(assistant_msg)
+                messages.append({"role": "user", "parts": format_gemini_results(executed_tool_call_list, tool_results)})
             elif provider == "deepseek" or provider == "openai":
                 assistant_msg = {"role": "assistant", "content": content}
                 if reasoning_content:
                     assistant_msg["reasoning_content"] = reasoning_content
-                if tool_calls:
-                    assistant_msg["tool_calls"] = tool_calls
+                assistant_msg["tool_calls"] = executed_tool_call_list
                 messages.append(assistant_msg)
+                messages.extend(tool_messages)
             elif provider == "anthropic":
                 assistant_msg = {"role": "assistant", "content": []}
                 if content:
                     assistant_msg["content"].append({"type": "text", "text": content})
-                for tool_call in tool_calls:
+                for tool_call in executed_tool_call_list:
                     assistant_msg["content"].append({
                         "type": "tool_use",
                         "id": tool_call.get("id"),
@@ -1772,9 +1796,10 @@ async def async_chat(
                         "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
                     })
                 messages.append(assistant_msg)
+                messages.extend(tool_messages)
+            tool_calls = []
 
-            cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
-
+        cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
         if logger:
             logger.log_output(content, usage_info, cost_info, message_history)
 
@@ -1787,7 +1812,7 @@ async def async_chat(
             "content": content,
             "reasoning_content": reasoning_content,
             "tool_calls": tool_calls,
-            "executed_tool_calls": executed_tool_call_list,
+            "executed_tool_calls": all_executed_tool_call_list,
             "content_before_tools": content_before_tools,
             "message_history": message_history,
             "usage": usage_info,
