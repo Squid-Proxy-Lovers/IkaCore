@@ -124,11 +124,11 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
                             "required": required_list
                         }
                     elif "type" not in tool.args.properties:
-                        # Properties dict without type, wrap it properly
-                        required_list = tool.args.properties.pop("__required__", [])
+                        required_list = list(tool.args.properties.get("__required__", []))
+                        props = {k: v for k, v in tool.args.properties.items() if k != "__required__" and isinstance(v, dict)}
                         parameters = {
                             "type": "object",
-                            "properties": tool.args.properties,
+                            "properties": props,
                             "required": required_list
                         }
                     else:

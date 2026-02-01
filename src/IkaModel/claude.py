@@ -118,10 +118,11 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
                     "required": ["input"]
                 }
             elif tool.args.properties and len(tool.args.properties) > 0:
-                required_list = tool.args.properties.pop("__required__", [])
+                required_list = list(tool.args.properties.get("__required__", []))
+                props = {k: v for k, v in tool.args.properties.items() if k != "__required__" and isinstance(v, dict)}
                 input_schema = {
                     "type": "object",
-                    "properties": tool.args.properties,
+                    "properties": props,
                     "required": required_list
                 }
             else:

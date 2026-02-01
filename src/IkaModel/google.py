@@ -97,15 +97,18 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                     },
                     "required": ["input"]
                 }
-            # Handle tools with explicit properties
+            # Handle tools with explicit properties (skip __required__; each value must be a Schema object)
             elif tool.args.properties and len(tool.args.properties) > 0:
-                required_list = tool.args.properties.pop("__required__", [])
+                required_list = list(tool.args.properties.get("__required__", []))
                 properties = {}
                 for prop_name, prop_def in tool.args.properties.items():
-                    properties[prop_name] = {
-                        "type": prop_def.get("type", "string"),
-                        "description": prop_def.get("description", "")
-                    }
+                    if prop_name == "__required__":
+                        continue
+                    if isinstance(prop_def, dict):
+                        properties[prop_name] = {
+                            "type": prop_def.get("type", "string"),
+                            "description": prop_def.get("description", "")
+                        }
                 parameters = {
                     "type": "object",
                     "properties": properties,
