@@ -117,7 +117,6 @@ def chat(
         raise ValueError("messages is required and cannot be empty")
     if not isinstance(messages, list):
         raise ValueError("messages must be a list")
-    
     if not hasattr(barebone_model, 'model_id') or not barebone_model.model_id:
         raise ValueError("barebone_model.model_id is required")
     if not hasattr(barebone_model, 'api_key') or not barebone_model.api_key:
@@ -221,6 +220,14 @@ def chat(
         
         if logger:
             logger.log_tool_results(executed_tool_call_list, tool_results)
+        
+        agent_end_called = any(
+            (tc.get("function", {}).get("name") or tc.get("name", "")) in ("agent_end", "stage_end")
+            for tc in executed_tool_call_list
+        )
+        if agent_end_called:
+            tool_calls = []
+            break
         
         if max_tool_calls and barebone_model._current_step >= max_tool_calls:
             is_last_stage = (total_stages > 0 and current_stage_index is not None 
@@ -471,6 +478,14 @@ async def async_chat(
             
             if logger:
                 logger.log_tool_results(executed_tool_call_list, tool_results)
+            
+            agent_end_called = any(
+                (tc.get("function", {}).get("name") or tc.get("name", "")) in ("agent_end", "stage_end")
+                for tc in executed_tool_call_list
+            )
+            if agent_end_called:
+                tool_calls = []
+                break
             
             if max_tool_calls and barebone_model._current_step >= max_tool_calls:
                 is_last_stage = (total_stages > 0 and current_stage_index is not None 
