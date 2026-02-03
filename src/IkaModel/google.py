@@ -105,10 +105,13 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                     if prop_name == "__required__":
                         continue
                     if isinstance(prop_def, dict):
-                        properties[prop_name] = {
+                        p = {
                             "type": prop_def.get("type", "string"),
                             "description": prop_def.get("description", "")
                         }
+                        if p["type"] == "array":
+                            p["items"] = prop_def.get("items") if prop_def.get("items") else {"type": "string"}
+                        properties[prop_name] = p
                 parameters = {
                     "type": "object",
                     "properties": properties,

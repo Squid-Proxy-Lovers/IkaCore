@@ -26,14 +26,16 @@ class AgentToolsMixin(AgentParseMixin):
         agent_tools: List[AgentTool] = []
         source_subagents = subagents if subagents is not None else self.subagents
         for subagent in source_subagents:
+            subagent_name = getattr(subagent, 'name', 'subagent')
+            subagent_desc = getattr(subagent, "description", "Subagent")
             tool_args = ToolArgs(
                 type="input",
-                description=f"Task request to subagent {getattr(subagent, 'name', 'subagent')}",
+                description=f"The task or request to delegate to the {subagent_name} subagent. Provide a clear, detailed description of what you need the subagent to accomplish.",
             )
             agent_tool = AgentTool(
-                id=getattr(subagent, "name", "subagent"),
-                name=getattr(subagent, "name", "subagent"),
-                description=getattr(subagent, "description", "Subagent"),
+                id=subagent_name,
+                name=subagent_name,
+                description=subagent_desc,
                 args=tool_args,
                 required=True,
             )

@@ -805,6 +805,7 @@ def execute_tool_calls(
     
     parallel_calls = []
     sequential_calls = []
+    seen_tool_signatures = set()
     
     for idx, tool_call in enumerate(tool_calls):
         fn = tool_call.get("function", {})
@@ -817,6 +818,14 @@ def execute_tool_calls(
         except Exception as e:
             LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
             args = {}
+        
+        tool_signature = (tool_name, json.dumps(args, sort_keys=True))
+        if tool_signature in seen_tool_signatures:
+            LOG.warning(f"Duplicate tool call detected: {tool_name} with same arguments. Skipping duplicate.")
+            error_msg = json.dumps({"error": f"Duplicate tool call for '{tool_name}' detected. Only executing once."})
+            tool_call_id_to_result[tool_call_id] = error_msg
+            continue
+        seen_tool_signatures.add(tool_signature)
         
         metadata = tool_metadata.get(tool_name, {})
         limit_calls = metadata.get("limit_calls", 0)
@@ -836,6 +845,7 @@ def execute_tool_calls(
             sequential_calls.append((tool_name, args, tool_call_id))
     
     if parallel_calls:
+        print("we are executing parallel tool calls: ", parallel_calls)
         with ThreadPoolExecutor(max_workers=len(parallel_calls)) as executor:
             futures = {}
             for tool_name, args, tool_call_id in parallel_calls:
@@ -853,8 +863,9 @@ def execute_tool_calls(
                     LOG.error(error_msg)
                     tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
-
+    print(sequential_calls)
     for tool_name, args, tool_call_id in sequential_calls:
+        print("we are executing sequential tool calls: ", tool_name, "with args: ", args, "and tool call id: ", tool_call_id)
         result = execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
         tool_call_id_to_result[tool_call_id] = result
         tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
@@ -955,6 +966,7 @@ async def async_execute_tool_calls(
 
     parallel_calls = []
     sequential_calls = []
+    seen_tool_signatures = set()
 
     for idx, tool_call in enumerate(tool_calls):
         fn = tool_call.get("function", {})
@@ -967,6 +979,14 @@ async def async_execute_tool_calls(
         except Exception as e:
             LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
             args = {}
+
+        tool_signature = (tool_name, json.dumps(args, sort_keys=True))
+        if tool_signature in seen_tool_signatures:
+            LOG.warning(f"Duplicate tool call detected: {tool_name} with same arguments. Skipping duplicate.")
+            error_msg = json.dumps({"error": f"Duplicate tool call for '{tool_name}' detected. Only executing once."})
+            tool_call_id_to_result[tool_call_id] = error_msg
+            continue
+        seen_tool_signatures.add(tool_signature)
 
         metadata = tool_metadata.get(tool_name, {})
         limit_calls = metadata.get("limit_calls", 0)
@@ -1039,7 +1059,10 @@ def chat(
     tool_executors: Optional[Dict[str, Callable]] = None,
     logger: Optional[Any] = None,
     timeout: float = 900.0,
-    max_tool_rounds: int = 5
+    max_tool_rounds: int = 5,
+    max_tool_calls: Optional[int] = None,
+    current_stage_index: Optional[int] = None,
+    total_stages: int = 0
 ) -> Dict[str, Any]:
     if not barebone_model:
         raise ValueError("barebone_model is required")
@@ -1174,8 +1197,31 @@ def chat(
     content_before_tools = content
     tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
     rounds = 0
+    total_tool_calls_in_cycle = 0
+    recent_tool_calls = []
+    hijacked = False
+
+    if not hasattr(barebone_model, '_current_step'):
+        barebone_model._current_step = 0
+    
+    agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
 
     while tool_calls and tool_executors and rounds < max_tool_rounds:
+        for tool_call in tool_calls:
+            fn = tool_call.get("function", {})
+            tool_name = fn.get("name") or tool_call.get("name", "")
+            args_raw = fn.get("arguments") or "{}"
+            try:
+                args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+            except Exception:
+                args = {}
+            
+            signature = (tool_name, json.dumps(args, sort_keys=True))
+            recent_count = recent_tool_calls.count(signature)
+            
+            if recent_count >= 3:
+                LOG.warning(f"Tool '{tool_name}' has been called {recent_count} times recently with identical arguments. Consider calling agent_end or changing your approach.")
+        
         tool_metadata = {}
         if hasattr(barebone_model, 'agent_tools'):
             for agent_tool in barebone_model.agent_tools:
@@ -1183,15 +1229,52 @@ def chat(
                     "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
                     "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
                 }
-        agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
         step = getattr(barebone_model, '_current_step', 0)
-
         tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
         if hasattr(barebone_model, '_tool_call_counts'):
             barebone_model._tool_call_counts.update(updated_counts)
         all_executed_tool_call_list.extend(executed_tool_call_list)
+        
+        num_tools_executed = len(executed_tool_call_list)
+        total_tool_calls_in_cycle += num_tools_executed
+        if hasattr(barebone_model, '_current_step'):
+            barebone_model._current_step += num_tools_executed
+        
+        for tool_call in executed_tool_call_list:
+            fn = tool_call.get("function", {})
+            tool_name = fn.get("name") or tool_call.get("name", "")
+            args = fn.get("arguments", "{}")
+            signature = (tool_name, args)
+            recent_tool_calls.append(signature)
+            if len(recent_tool_calls) > 10:
+                recent_tool_calls.pop(0)
+        
         if logger:
             logger.log_tool_results(executed_tool_call_list, tool_results)
+        
+        if max_tool_calls and barebone_model._current_step >= max_tool_calls:
+            is_last_stage = (total_stages > 0 and current_stage_index is not None 
+                           and current_stage_index == total_stages - 1)
+            has_stages = total_stages > 0
+            
+            if has_stages and not is_last_stage:
+                control_tool = "stage_end"
+                hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call stage_end to advance to the next stage."
+            else:
+                control_tool = "agent_end"
+                hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call agent_end with your final answer."
+            
+            msg_id = str(uuid.uuid4())
+            message_history["messages"][msg_id] = {
+                "message": hijack_message,
+                "tokens": 0,
+                "type": "system_directive",
+            }
+            
+            LOG.warning(f"Max tool calls ({max_tool_calls}) reached. Injected {control_tool} directive.")
+            hijacked = True
+            tool_calls = []
+            break
 
         if provider == "gemini":
             assistant_msg = {"role": "model", "parts": [{"text": content}]}
@@ -1269,6 +1352,7 @@ def chat(
 
         rounds += 1
         if rounds >= max_tool_rounds:
+            tool_calls = []
             break
 
         if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
@@ -1406,6 +1490,17 @@ def chat(
     if reasoning_content:
         history_entry["reasoning_content"] = reasoning_content
     message_history["messages"][msg_id] = history_entry
+
+    print("content: ", content)
+    print("reasoning_content: ", reasoning_content)
+    print("tool_calls: ", tool_calls)
+    print("executed_tool_calls: ", all_executed_tool_call_list)
+    print("content_before_tools: ", content_before_tools)
+    print("message_history: ", message_history)
+    print("usage: ", usage_info)
+    print("cost: ", cost_info)
+    print("hijacked: ", hijacked)
+    
     return {
         "content": content,
         "reasoning_content": reasoning_content,
@@ -1415,6 +1510,7 @@ def chat(
         "message_history": message_history,
         "usage": usage_info,
         "cost": cost_info,
+        "hijacked": hijacked,
     }
 
 
@@ -1476,7 +1572,10 @@ async def async_chat(
     logger: Optional[Any] = None,
     timeout: float = 900.0,
     client: Optional[httpx.AsyncClient] = None,
-    max_tool_rounds: int = 5
+    max_tool_rounds: int = 5,
+    max_tool_calls: Optional[int] = None,
+    current_stage_index: Optional[int] = None,
+    total_stages: int = 0
 ) -> Dict[str, Any]:
     if not barebone_model:
         raise ValueError("barebone_model is required")
@@ -1617,8 +1716,31 @@ async def async_chat(
         content_before_tools = content
         tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
         rounds = 0
+        total_tool_calls_in_cycle = 0
+        recent_tool_calls = []
+        hijacked = False
+
+        if not hasattr(barebone_model, '_current_step'):
+            barebone_model._current_step = 0
+        
+        agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
 
         while tool_calls and tool_executors and rounds < max_tool_rounds:
+            for tool_call in tool_calls:
+                fn = tool_call.get("function", {})
+                tool_name = fn.get("name") or tool_call.get("name", "")
+                args_raw = fn.get("arguments") or "{}"
+                try:
+                    args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                except Exception:
+                    args = {}
+                
+                signature = (tool_name, json.dumps(args, sort_keys=True))
+                recent_count = recent_tool_calls.count(signature)
+                
+                if recent_count >= 3:
+                    LOG.warning(f"Tool '{tool_name}' has been called {recent_count} times recently with identical arguments. Consider calling agent_end or changing your approach.")
+            
             tool_metadata = {}
             if hasattr(barebone_model, 'agent_tools'):
                 for agent_tool in barebone_model.agent_tools:
@@ -1626,15 +1748,53 @@ async def async_chat(
                         "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
                         "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
                     }
-            agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
             step = getattr(barebone_model, '_current_step', 0)
 
             tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
             if hasattr(barebone_model, '_tool_call_counts'):
                 barebone_model._tool_call_counts.update(updated_counts)
             all_executed_tool_call_list.extend(executed_tool_call_list)
+            
+            num_tools_executed = len(executed_tool_call_list)
+            total_tool_calls_in_cycle += num_tools_executed
+            if hasattr(barebone_model, '_current_step'):
+                barebone_model._current_step += num_tools_executed
+            
+            for tool_call in executed_tool_call_list:
+                fn = tool_call.get("function", {})
+                tool_name = fn.get("name") or tool_call.get("name", "")
+                args = fn.get("arguments", "{}")
+                signature = (tool_name, args)
+                recent_tool_calls.append(signature)
+                if len(recent_tool_calls) > 10:
+                    recent_tool_calls.pop(0)
+            
             if logger:
                 logger.log_tool_results(executed_tool_call_list, tool_results)
+            
+            if max_tool_calls and barebone_model._current_step >= max_tool_calls:
+                is_last_stage = (total_stages > 0 and current_stage_index is not None 
+                               and current_stage_index == total_stages - 1)
+                has_stages = total_stages > 0
+                
+                if has_stages and not is_last_stage:
+                    control_tool = "stage_end"
+                    hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call stage_end to advance to the next stage."
+                else:
+                    control_tool = "agent_end"
+                    hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call agent_end with your final answer."
+                
+                msg_id = str(uuid.uuid4())
+                message_history["messages"][msg_id] = {
+                    "message": hijack_message,
+                    "tokens": 0,
+                    "type": "system_directive",
+                }
+                
+                LOG.warning(f"Max tool calls ({max_tool_calls}) reached. Injected {control_tool} directive.")
+                hijacked = True
+                tool_calls = []
+                break
 
             if provider == "gemini":
                 assistant_msg = {"role": "model", "parts": [{"text": content}]}
@@ -1671,6 +1831,7 @@ async def async_chat(
 
             rounds += 1
             if rounds >= max_tool_rounds:
+                tool_calls = []
                 break
 
             if barebone_model.model_id.lower().startswith("deepseek") or "deepseek" in barebone_model.model_id.lower():
@@ -1808,6 +1969,7 @@ async def async_chat(
         if reasoning_content:
             history_entry["reasoning_content"] = reasoning_content
         message_history["messages"][msg_id] = history_entry
+        
         return {
             "content": content,
             "reasoning_content": reasoning_content,
@@ -1817,6 +1979,7 @@ async def async_chat(
             "message_history": message_history,
             "usage": usage_info,
             "cost": cost_info,
+            "hijacked": hijacked,
         }
 
     finally:
