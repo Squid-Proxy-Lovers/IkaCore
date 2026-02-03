@@ -1181,7 +1181,8 @@ def chat(
                     "function": {
                         "name": func_call.get("name"),
                         "arguments": json.dumps(func_call.get("args", {}))
-                    }
+                    },
+                    "thoughtSignature": part.get("thoughtSignature"),
                 })
     else:
         content = ""
@@ -1207,6 +1208,7 @@ def chat(
     agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
 
     while tool_calls and tool_executors and rounds < max_tool_rounds:
+        repeated_tool_names: List[str] = []
         for tool_call in tool_calls:
             fn = tool_call.get("function", {})
             tool_name = fn.get("name") or tool_call.get("name", "")
@@ -1220,6 +1222,7 @@ def chat(
             recent_count = recent_tool_calls.count(signature)
             
             if recent_count >= 3:
+                repeated_tool_names.append(tool_name)
                 LOG.warning(f"Tool '{tool_name}' has been called {recent_count} times recently with identical arguments. Consider calling agent_end or changing your approach.")
         
         tool_metadata = {}
@@ -1276,19 +1279,32 @@ def chat(
             tool_calls = []
             break
 
+        repeated_warning_msg = ""
+        if repeated_tool_names:
+            seen = list(dict.fromkeys(repeated_tool_names))
+            repeated_warning_msg = (
+                "System note: You have already called the following tool(s) multiple times with the same arguments: "
+                + ", ".join(seen) + ". Do not repeat these calls. Proceed to the next step (e.g. use submit_discovery or other tools, then agent_end when done)."
+            )
+
         if provider == "gemini":
             assistant_msg = {"role": "model", "parts": [{"text": content}]}
             for tool_call in executed_tool_call_list:
-                assistant_msg["parts"].append({
+                fc_part = {
                     "functionCall": {
                         "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
                         "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
                     }
-                })
+                }
+                if tool_call.get("thoughtSignature"):
+                    fc_part["thoughtSignature"] = tool_call["thoughtSignature"]
+                assistant_msg["parts"].append(fc_part)
             messages.append(assistant_msg)
             function_responses = format_gemini_results(executed_tool_call_list, tool_results)
             tool_response_msg = {"role": "user", "parts": function_responses}
             messages.append(tool_response_msg)
+            if repeated_warning_msg:
+                messages.append({"role": "user", "parts": [{"text": repeated_warning_msg}]})
             msg_id = str(uuid.uuid4())
             message_history["messages"][msg_id] = {
                 "message": json.dumps(assistant_msg),
@@ -1309,6 +1325,8 @@ def chat(
                 assistant_msg["tool_calls"] = executed_tool_call_list
             messages.append(assistant_msg)
             messages.extend(tool_messages)
+            if repeated_warning_msg:
+                messages.append({"role": "user", "content": repeated_warning_msg})
             if executed_tool_call_list:
                 msg_id = str(uuid.uuid4())
                 message_history["messages"][msg_id] = {
@@ -1336,6 +1354,8 @@ def chat(
                 })
             messages.append(assistant_msg)
             messages.extend(tool_messages)
+            if repeated_warning_msg:
+                messages.append({"role": "user", "content": [{"type": "text", "text": repeated_warning_msg}]})
             msg_id = str(uuid.uuid4())
             message_history["messages"][msg_id] = {
                 "message": json.dumps(assistant_msg),
@@ -1429,7 +1449,8 @@ def chat(
                         "function": {
                             "name": func_call.get("name"),
                             "arguments": json.dumps(func_call.get("args", {}))
-                        }
+                        },
+                        "thoughtSignature": part.get("thoughtSignature"),
                     })
 
     if tool_calls and tool_executors:
@@ -1451,12 +1472,15 @@ def chat(
         if provider == "gemini":
             assistant_msg = {"role": "model", "parts": [{"text": content}]}
             for tool_call in executed_tool_call_list:
-                assistant_msg["parts"].append({
+                fc_part = {
                     "functionCall": {
                         "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
                         "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
                     }
-                })
+                }
+                if tool_call.get("thoughtSignature"):
+                    fc_part["thoughtSignature"] = tool_call["thoughtSignature"]
+                assistant_msg["parts"].append(fc_part)
             messages.append(assistant_msg)
             messages.append({"role": "user", "parts": format_gemini_results(executed_tool_call_list, tool_results)})
         elif provider == "deepseek" or provider == "openai":
@@ -1700,7 +1724,8 @@ async def async_chat(
                         "function": {
                             "name": func_call.get("name"),
                             "arguments": json.dumps(func_call.get("args", {}))
-                        }
+                        },
+                        "thoughtSignature": part.get("thoughtSignature"),
                     })
         else:
             content = ""
@@ -1726,6 +1751,7 @@ async def async_chat(
         agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
 
         while tool_calls and tool_executors and rounds < max_tool_rounds:
+            repeated_tool_names_async: List[str] = []
             for tool_call in tool_calls:
                 fn = tool_call.get("function", {})
                 tool_name = fn.get("name") or tool_call.get("name", "")
@@ -1739,8 +1765,17 @@ async def async_chat(
                 recent_count = recent_tool_calls.count(signature)
                 
                 if recent_count >= 3:
+                    repeated_tool_names_async.append(tool_name)
                     LOG.warning(f"Tool '{tool_name}' has been called {recent_count} times recently with identical arguments. Consider calling agent_end or changing your approach.")
             
+            repeated_warning_msg_async = ""
+            if repeated_tool_names_async:
+                seen_async = list(dict.fromkeys(repeated_tool_names_async))
+                repeated_warning_msg_async = (
+                    "System note: You have already called the following tool(s) multiple times with the same arguments: "
+                    + ", ".join(seen_async) + ". Do not repeat these calls. Proceed to the next step (e.g. use submit_discovery or other tools, then agent_end when done)."
+                )
+
             tool_metadata = {}
             if hasattr(barebone_model, 'agent_tools'):
                 for agent_tool in barebone_model.agent_tools:
@@ -1799,14 +1834,19 @@ async def async_chat(
             if provider == "gemini":
                 assistant_msg = {"role": "model", "parts": [{"text": content}]}
                 for tool_call in executed_tool_call_list:
-                    assistant_msg["parts"].append({
+                    fc_part = {
                         "functionCall": {
                             "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
                             "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
                         }
-                    })
+                    }
+                    if tool_call.get("thoughtSignature"):
+                        fc_part["thoughtSignature"] = tool_call["thoughtSignature"]
+                    assistant_msg["parts"].append(fc_part)
                 messages.append(assistant_msg)
                 messages.append({"role": "user", "parts": format_gemini_results(executed_tool_call_list, tool_results)})
+                if repeated_warning_msg_async:
+                    messages.append({"role": "user", "parts": [{"text": repeated_warning_msg_async}]})
             elif provider == "deepseek" or provider == "openai":
                 assistant_msg = {"role": "assistant", "content": content}
                 if reasoning_content:
@@ -1815,6 +1855,8 @@ async def async_chat(
                     assistant_msg["tool_calls"] = executed_tool_call_list
                 messages.append(assistant_msg)
                 messages.extend(tool_messages)
+                if repeated_warning_msg_async:
+                    messages.append({"role": "user", "content": repeated_warning_msg_async})
             elif provider == "anthropic":
                 assistant_msg = {"role": "assistant", "content": []}
                 if content:
@@ -1828,6 +1870,8 @@ async def async_chat(
                     })
                 messages.append(assistant_msg)
                 messages.extend(tool_messages)
+                if repeated_warning_msg_async:
+                    messages.append({"role": "user", "content": [{"type": "text", "text": repeated_warning_msg_async}]})
 
             rounds += 1
             if rounds >= max_tool_rounds:
@@ -1908,7 +1952,8 @@ async def async_chat(
                             "function": {
                                 "name": func_call.get("name"),
                                 "arguments": json.dumps(func_call.get("args", {}))
-                            }
+                            },
+                            "thoughtSignature": part.get("thoughtSignature"),
                         })
 
         if tool_calls and tool_executors:
@@ -1930,12 +1975,15 @@ async def async_chat(
             if provider == "gemini":
                 assistant_msg = {"role": "model", "parts": [{"text": content}]}
                 for tool_call in executed_tool_call_list:
-                    assistant_msg["parts"].append({
+                    fc_part = {
                         "functionCall": {
                             "name": tool_call.get("name") or tool_call.get("function", {}).get("name", ""),
                             "args": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
                         }
-                    })
+                    }
+                    if tool_call.get("thoughtSignature"):
+                        fc_part["thoughtSignature"] = tool_call["thoughtSignature"]
+                    assistant_msg["parts"].append(fc_part)
                 messages.append(assistant_msg)
                 messages.append({"role": "user", "parts": format_gemini_results(executed_tool_call_list, tool_results)})
             elif provider == "deepseek" or provider == "openai":

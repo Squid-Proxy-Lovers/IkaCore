@@ -21,6 +21,9 @@ from IkaModel.base import *
 
 from IkaModel.chat_interface import summarise_message_history
 
+MAX_STEP_EXTENSIONS = 5
+EXTEND_STEPS_BY = 10
+
 from IkaCore.agent_memory import AgentMemoryMixin
 from IkaCore.agent_tools import AgentToolsMixin
 from IkaCore.agent_execution import AgentExecutionMixin
@@ -128,6 +131,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         self.max_tool_rounds = max_tool_rounds if max_tool_rounds is not None else 5
         self.final_answer_checks = self._validate_final_answer_checks(final_answer_check)
         self._tool_call_counts: Dict[str, int] = {}
+        self.client = None
 
     def execute_stage(self, stage_index: int, remaining_steps: int) -> tuple[int, str, bool, Optional[str], int]:
 
@@ -290,21 +294,23 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         cli = get_cli_output()
         cli.set_step(self.name, 1)
 
-        # all of this is the init process 
-        barebone_model = self.get_barebone(system_prompt, dynamic_tools, parent_hierarchy=current_hierarchy)
-        
-        first_msg = (self.message_history.get("first_input") or {}).get("message") or ""    # this is for workflow systems that have a first input
+        first_msg = (self.message_history.get("first_input") or {}).get("message") or ""
         start_prompt = (first_msg or self.prompt or "") + "\n\n" + AGENT_END_INSTRUCTION
+        barebone_model = self.get_barebone(
+            system_prompt,
+            dynamic_tools,
+            parent_hierarchy=current_hierarchy,
+            content_prompt_override=start_prompt,
+        )
         messages: List[dict] = [{"role": "user", "content": start_prompt}]
         last_content = ""
         last_agent_end_text = None
         current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
         tool_executors = self.build_tool_executors(self.tools, memory_access=self.memory_access, subagents=self.subagents, parent_hierarchy=current_hierarchy)
+        step_num = 0
+        extension_count = 0
 
-
-
-        # Start execution loop
-        for step_num in range(self.maxsteps):
+        while step_num < self.maxsteps:
             current_step = step_num + 1
             cli.set_step(self.name, current_step)
             if step_num == 0:
@@ -336,9 +342,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             tool_calls = response.get("tool_calls", []) or []
             executed_tool_calls = response.get("executed_tool_calls", []) or []
 
-            # TODO: this needs to be changed
             if response.get("hijacked"):
-                break
+                pass
 
             if hasattr(barebone_model, '_tool_call_counts'):
                 self._tool_call_counts.update(barebone_model._tool_call_counts)
@@ -361,7 +366,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     is_final=False,
                 )
                 raise
-            
+
             if agent_end_called:
                 try:
                     final_content = self._fallback_final_content(
@@ -369,7 +374,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                         content_before_tools,
                         last_content,
                     )
-                    
                 except ValueError as e:
                     error_msg = str(e)
                     cli.agent_response(
@@ -380,7 +384,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                         is_final=False,
                     )
                     raise
-                
                 cli.agent_response(
                     self.name,
                     final_content,
@@ -388,7 +391,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     step=current_step,
                     is_final=True
                 )
-
                 if self.logger:
                     self.logger.log_step(
                         stage_name="simple",
@@ -401,12 +403,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     )
                 return final_content, final_content
 
-            # Do NOT reset messages to preserve context
-            # messages = [{"role": "assistant", "content": last_content}]
-
             if not tool_calls and last_content:
-                # If the agent is just thinking or talking, we let it continue unless it's the last step
-                # We append the message to history so it remembers what it said
                 messages.append({"role": "assistant", "content": last_content})
                 cli.agent_response(
                     self.name,
@@ -416,7 +413,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     is_final=False
                 )
                 if self.logger:
-                     self.logger.log_step(
+                    self.logger.log_step(
                         stage_name="simple",
                         step_idx=step_num,
                         output=last_content,
@@ -425,7 +422,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                         cost=response.get("cost", {}),
                         elapsed=time.time() - step_start,
                     )
-                # Continue to next step instead of returning
+                step_num += 1
                 continue
 
             if self.logger:
@@ -442,6 +439,34 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             current_step_val = int(step_num) if step_num is not None else 0
             remaining_after = max(0, max_steps_val - (current_step_val + 1))
             self._save_agent_checkpoint(remaining_after, last_content)
+            step_num += 1
+
+            if step_num >= self.maxsteps and extension_count < MAX_STEP_EXTENSIONS:
+                barebone_summary = self.get_barebone(
+                    system_prompt,
+                    [],
+                    parent_hierarchy=current_hierarchy,
+                    suppress_init_output=True,
+                )
+                summary = summarise_message_history(barebone_summary, self.message_history) or "(no summary)"
+                redirect = (
+                    "CRITICAL: You have used all allocated steps without completing the task. "
+                    "You MUST refer back to your original prompt and complete the original goal. "
+                    "Do NOT repeat the same tool calls. Summary of the conversation so far:\n\n"
+                    f"{summary}\n\n"
+                    "Complete the task now: use submit_discovery with your findings if you have not already, then call agent_end with your final answer. "
+                    f"You have {EXTEND_STEPS_BY} additional steps."
+                )
+                messages.append({"role": "user", "content": redirect})
+                self.maxsteps += EXTEND_STEPS_BY
+                extension_count += 1
+                cli.agent_response(
+                    self.name,
+                    f"Max steps reached. Injected redirect and extended by {EXTEND_STEPS_BY} steps. Complete the original goal.",
+                    current_hierarchy,
+                    step=current_step,
+                    is_final=False,
+                )
 
         final_step = cli.get_step(self.name) or self.maxsteps
         final_response = last_agent_end_text if last_agent_end_text else last_content

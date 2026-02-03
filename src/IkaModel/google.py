@@ -40,23 +40,27 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                 "parts": [{"text": raw if isinstance(raw, str) else str(raw)}]
             })
     
-    for msg in messages:
-        if isinstance(msg, dict):
-            if "content" in msg:
-                contents.append({
-                    "role": "user",
-                    "parts": [{"text": msg["content"]}]
-                })
-            else:
-                contents.append({
-                    "role": "user",
-                    "parts": [{"text": str(msg)}]
-                })
-        else:
-            contents.append({
-                "role": "user",
-                "parts": [{"text": str(msg)}]
-            })
+    first_input_text = (message_history.get("first_input") or {}).get("message") or ""
+    for i, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            text = str(msg)
+            if i == 0 and first_input_text and text.strip() == first_input_text.strip():
+                continue
+            contents.append({"role": "user", "parts": [{"text": text}]})
+            continue
+        if "parts" in msg and "role" in msg:
+            if i == 0 and msg.get("role") == "user" and first_input_text:
+                parts_text = " ".join(
+                    p.get("text", "") for p in msg.get("parts", []) if isinstance(p, dict) and "text" in p
+                ).strip()
+                if parts_text.strip() == first_input_text.strip():
+                    continue
+            contents.append(msg)
+            continue
+        text = msg.get("content", str(msg))
+        if i == 0 and first_input_text and text.strip() == first_input_text.strip():
+            continue
+        contents.append({"role": "user", "parts": [{"text": text}]})
     
     payload = {
         "contents": contents,
