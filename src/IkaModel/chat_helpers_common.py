@@ -4,6 +4,7 @@ from .chat_helpers_deepseek import build_deepseek_request, parse_deepseek_respon
 from .chat_helpers_openai import build_openai_request, parse_openai_response, append_openai_tool_messages
 from .chat_helpers_anthropic import build_anthropic_request, parse_anthropic_response, append_anthropic_tool_messages
 from .chat_helpers_gemini import build_gemini_request, parse_gemini_response, append_gemini_tool_messages
+from .chat_helpers_openrouter import build_openrouter_request, parse_openrouter_response, append_openrouter_tool_messages
 
 
 def build_provider_request(
@@ -20,6 +21,8 @@ def build_provider_request(
         return build_anthropic_request(barebone_model, messages, message_history)
     elif provider == "gemini":
         return build_gemini_request(barebone_model, messages, message_history)
+    elif provider == "openrouter":
+        return build_openrouter_request(barebone_model, messages, message_history)
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
@@ -37,6 +40,8 @@ def parse_provider_response(
         return parse_anthropic_response(data, model_id)
     elif provider == "gemini":
         return parse_gemini_response(data, model_id)
+    elif provider == "openrouter":
+        return parse_openrouter_response(data, model_id)
     else:
         return "", None, [], 0
 
@@ -74,4 +79,9 @@ def append_provider_tool_messages(
             messages, message_history, content, reasoning_content,
             executed_tool_call_list, tool_results, tokens, repeated_warning_msg,
             format_gemini_results_fn
+        )
+    elif provider == "openrouter":
+        append_openrouter_tool_messages(
+            messages, message_history, content, reasoning_content,
+            executed_tool_call_list, tool_messages, tokens, repeated_warning_msg
         )

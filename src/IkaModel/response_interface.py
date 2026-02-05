@@ -252,7 +252,7 @@ def execute_tool_calls(
         tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
         tool_results.append(tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})))
 
-    if provider == "deepseek" or provider == "openai":
+    if provider in ("deepseek", "openai", "openrouter"):
         formatted_messages = format_openai_results(tool_call_order, tool_results)
     elif provider == "anthropic":
         formatted_messages = format_anthropic_results(tool_call_order, tool_results)
@@ -410,7 +410,7 @@ async def async_execute_tool_calls(
         tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
         tool_results.append(tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})))
 
-    if provider == "deepseek" or provider == "openai":
+    if provider in ("deepseek", "openai", "openrouter"):
         formatted_messages = format_openai_results(tool_call_order, tool_results)
     elif provider == "anthropic":
         formatted_messages = format_anthropic_results(tool_call_order, tool_results)

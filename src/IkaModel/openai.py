@@ -28,27 +28,7 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
             "role": "assistant",
             "content": message_history["summary"]["message"]
         })
-    
-    for msg_id in message_history["messages"]:
-        msg = message_history["messages"][msg_id]
-        msg_type = msg.get("type", "assistant")
-        raw = msg.get("message", "")
-        if msg_type == "assistant_with_tools":
-            try:
-                api_messages.append(json.loads(raw))
-            except (json.JSONDecodeError, TypeError):
-                continue
-        elif msg_type == "tool":
-            try:
-                api_messages.append(json.loads(raw))
-            except (json.JSONDecodeError, TypeError):
-                continue
-        else:
-            api_messages.append({
-                "role": "assistant",
-                "content": raw if isinstance(raw, str) else str(raw)
-            })
-    
+
     for msg in messages:
         if isinstance(msg, dict):
             if "role" in msg and "content" in msg:

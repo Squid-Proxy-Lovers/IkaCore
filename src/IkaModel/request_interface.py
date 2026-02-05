@@ -22,6 +22,8 @@ def get_provider(model_id: str) -> str:
         return "anthropic"
     elif "gemini" in model_id_lower:
         return "gemini"
+    elif "/" in model_id_lower:  # OpenRouter models: "meta-llama/llama-3.1-70b-instruct"
+        return "openrouter"
     return "openai"
 
 
@@ -59,6 +61,10 @@ def get_max_tokens(model_id: str) -> int:
         return TOKENMAX_MAPPING.get("gemini-1.5-pro", 1000000)
     elif "deepseek" in model_id_lower:
         return TOKENMAX_MAPPING.get("deepseek-chat", 131072)
+    elif "llama" in model_id_lower:
+        return 131072  # Common Llama context window
+    elif "qwen" in model_id_lower:
+        return 131072
 
     return 128000
 

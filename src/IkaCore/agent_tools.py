@@ -51,15 +51,16 @@ class AgentToolsMixin(AgentParseMixin):
             if isinstance(tool, AgentTool):
                 converted.append(tool)
                 continue
-            
+
             properties = {}
             required_params = []
-            if tool.parameters:
-                if isinstance(tool.parameters, dict) and "properties" in tool.parameters:
-                    properties = tool.parameters.get("properties", {})
-                    required_params = tool.parameters.get("required", [])
+            params = getattr(tool, "parameters", None)
+            if params:
+                if isinstance(params, dict) and "properties" in params:
+                    properties = params.get("properties", {})
+                    required_params = params.get("required", [])
                 else:
-                    for param_name, param_value in tool.parameters.items():
+                    for param_name, param_value in params.items():
                         if isinstance(param_value, dict):
                             param_dict = {k: v for k, v in param_value.items() if k != "required"}
                             properties[param_name] = param_dict

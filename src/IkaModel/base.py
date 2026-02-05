@@ -58,6 +58,10 @@ TOKENMAX_MAPPING = {
     "deepseek-v3.2": 131072,              # ~131K tokens context window :contentReference[oaicite:18]{index=18}
     "deepseek-v3.2-speciale": 131072,     # similar ~131K context :contentReference[oaicite:19]{index=19}
     "deepseek-r1": 131072,                # ~131K context (preview/hosted) :contentReference[oaicite:20]{index=20}
+    # OpenRouter models (common defaults)
+    "llama-3.1-70b": 131072,
+    "llama-3.1-8b": 131072,
+    "qwen-2.5-72b": 131072,
 }
 
 
