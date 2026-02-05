@@ -12,8 +12,45 @@ from IkaCore.cli_output import get_cli_output, OutputType
 LOG = logging.getLogger(__name__)
 
 
-def get_provider(model_id: str) -> str:
+def get_provider(model_id: str, api_url: Optional[str] = None) -> str:
+    """
+    Determine the provider from model_id and optionally api_url.
+
+    IMPORTANT: API URL takes precedence over model_id to handle cases like
+    OpenRouter accessing Gemini models (e.g., "google/gemini-2.0-flash-exp").
+
+    Args:
+        model_id: The model identifier
+        api_url: Optional API URL to help determine provider
+
+    Returns:
+        Provider name: "openai", "anthropic", "gemini", "deepseek", "openrouter"
+    """
+    # PRIORITY 1: Check API URL if provided (most reliable)
+    if api_url:
+        api_url_lower = api_url.lower()
+        # Check OpenRouter FIRST before checking for "gemini" or "claude" in URL
+        if "openrouter.ai" in api_url_lower:
+            return "openrouter"
+        elif "generativelanguage.googleapis.com" in api_url_lower:
+            return "gemini"
+        elif "anthropic.com" in api_url_lower:
+            return "anthropic"
+        elif "deepseek.com" in api_url_lower:
+            return "deepseek"
+        elif "openai.com" in api_url_lower:
+            return "openai"
+
+    # PRIORITY 2: Fallback to model_id detection
     model_id_lower = model_id.lower()
+
+    # Check for OpenRouter format (has slash) BEFORE checking provider names
+    # This handles cases like "google/gemini-2.0-flash-exp" on OpenRouter
+    if "/" in model_id_lower:
+        # OpenRouter models: "meta-llama/llama-3.1-70b-instruct", "google/gemini-pro"
+        return "openrouter"
+
+    # Then check for specific provider names in model_id
     if "deepseek" in model_id_lower:
         return "deepseek"
     elif "gpt" in model_id_lower or "o1" in model_id_lower or "o3" in model_id_lower:
@@ -22,8 +59,8 @@ def get_provider(model_id: str) -> str:
         return "anthropic"
     elif "gemini" in model_id_lower:
         return "gemini"
-    elif "/" in model_id_lower:  # OpenRouter models: "meta-llama/llama-3.1-70b-instruct"
-        return "openrouter"
+
+    # Default to OpenAI-compatible
     return "openai"
 
 

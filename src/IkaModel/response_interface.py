@@ -13,7 +13,7 @@ def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "input_cached_tokens": 0}
     raw_usage = data.get("usage", {}) or {}
 
-    if provider in ["deepseek", "openai"]:
+    if provider in ["deepseek", "openai", "openrouter"]:
         usage["input_tokens"] = raw_usage.get("prompt_tokens", raw_usage.get("input_tokens", 0))
         usage["output_tokens"] = raw_usage.get("completion_tokens", raw_usage.get("output_tokens", 0))
         usage["total_tokens"] = raw_usage.get("total_tokens", usage["input_tokens"] + usage["output_tokens"])

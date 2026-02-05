@@ -28,7 +28,7 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
             "role": "assistant",
             "content": message_history["summary"]["message"]
         })
-    
+
     for msg_id in message_history["messages"]:
         msg = message_history["messages"][msg_id]
         msg_type = msg.get("type", "assistant")
@@ -52,8 +52,23 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
             if reasoning_text:
                 assistant_entry["reasoning_content"] = reasoning_text
             api_messages.append(assistant_entry)
-    
-    for msg in messages:
+
+    # Skip first message if it duplicates first_input to prevent duplicate user messages
+    first_input_content = message_history["first_input"]["message"]
+    skip_first = False
+    if first_input_content and messages:
+        first_msg = messages[0]
+        first_msg_content = ""
+        if isinstance(first_msg, dict):
+            first_msg_content = first_msg.get("content", str(first_msg))
+        else:
+            first_msg_content = str(first_msg)
+        if first_msg_content == first_input_content:
+            skip_first = True
+
+    for i, msg in enumerate(messages):
+        if skip_first and i == 0:
+            continue
         if isinstance(msg, dict):
             if "role" in msg and "content" in msg:
                 api_messages.append(msg)

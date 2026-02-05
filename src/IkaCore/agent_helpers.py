@@ -100,7 +100,20 @@ class AgentHelpersMixin:
 
     @staticmethod
     def geturl(model_id: str) -> str:
+        """
+        Get the API URL for a model.
+
+        IMPORTANT: Check for OpenRouter format (/) BEFORE checking provider names
+        to handle cases like "google/gemini-3-flash-preview" on OpenRouter.
+        """
         model_id_lower = model_id.lower()
+
+        # PRIORITY 1: Check for OpenRouter format (has slash) FIRST
+        # This catches "google/gemini-pro", "anthropic/claude-sonnet", etc.
+        if "/" in model_id_lower:
+            return "https://openrouter.ai/api/v1/chat/completions"
+
+        # PRIORITY 2: Then check for provider-specific patterns
         if "deepseek" in model_id_lower:
             return "https://api.deepseek.com/chat/completions"
         if "gpt" in model_id_lower or "o1" in model_id_lower or "o3" in model_id_lower:
@@ -108,8 +121,10 @@ class AgentHelpersMixin:
         if "claude" in model_id_lower:
             return "https://api.anthropic.com/v1/messages"
         if "gemini" in model_id_lower:
-            model_name = model_id.split("/")[-1] if "/" in model_id else model_id
-            return f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+            # Only reached if no slash (direct Google API)
+            return f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent"
+
+        # Default to OpenAI-compatible
         return "https://api.openai.com/v1/chat/completions"
 
     def _validate_final_answer_checks(

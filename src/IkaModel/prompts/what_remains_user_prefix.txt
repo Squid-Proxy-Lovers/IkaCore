@@ -1,0 +1,3 @@
+The agent run below hit its step limit before completing. Extract a DONE / REMAINING / NEXT brief as specified in your instructions. Output only the three-part brief.
+
+Agent run (conversation and tool use):

@@ -17,6 +17,7 @@ from .request_interface import (
 from .summarization import (
     summarise_message_history,
     async_summarise_message_history,
+    run_summarization,  # noqa: F401 re-export for callers
     get_summary_model,  # noqa: F401 re-export for callers
     create_summary_payload,  # noqa: F401 re-export for callers
 )
@@ -143,7 +144,7 @@ def chat(
         message_history["first_input"]["message"] = messages[0].get("content", str(messages[0]))
         message_history["first_input"]["tokens"] = 0
     
-    provider = get_provider(barebone_model.model_id)
+    provider = get_provider(barebone_model.model_id, barebone_model.api_url)
 
     def _build():
         return build_provider_request(provider, barebone_model, messages, message_history)
@@ -186,10 +187,48 @@ def chat(
             
             signature = (tool_name, json.dumps(args, sort_keys=True))
             recent_count = recent_tool_calls.count(signature)
-            
+
             if recent_count >= 3:
                 repeated_tool_names.append(tool_name)
-                LOG.warning(f"Tool '{tool_name}' has been called {recent_count} times recently with identical arguments. Consider calling agent_end or changing your approach.")
+                LOG.error(f"Tool '{tool_name}' has been called {recent_count} times with identical arguments. Agent may be stuck in a loop.")
+
+                # Force termination after 5 identical calls
+                if recent_count >= 5:
+                    LOG.error(f"Tool '{tool_name}' called {recent_count} times identically. Forcing agent termination with summarization.")
+
+                    # Use summarization to create a force_answer response
+                    from .summarization import run_summarization
+                    force_answer = run_summarization(
+                        barebone_model,
+                        message_history,
+                        prompt_kind="force_answer",
+                        write_to_history=False,
+                        use_same_model=True,
+                    )
+
+                    if not force_answer or not force_answer.strip():
+                        force_answer = (
+                            f"Agent stuck in loop after {recent_count} identical calls to '{tool_name}'. "
+                            f"Partial results:\n{content_before_tools}"
+                        )
+
+                    force_content = (
+                        f"CRITICAL: Agent stuck in loop. Tool '{tool_name}' called {recent_count} times with identical arguments. "
+                        "Auto-terminated and generated final response.\n\n"
+                        f"{force_answer}"
+                    )
+
+                    return {
+                        "content": force_content,
+                        "reasoning_content": None,
+                        "tool_calls": [],
+                        "executed_tool_calls": all_executed_tool_call_list,
+                        "content_before_tools": content_before_tools,
+                        "message_history": message_history,
+                        "usage": usage_info,
+                        "cost": cost_info,
+                        "hijacked": True,
+                    }
         
         tool_metadata = {}
         if hasattr(barebone_model, 'agent_tools'):
@@ -199,6 +238,7 @@ def chat(
                     "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
                 }
         step = getattr(barebone_model, '_current_step', 0)
+        print("tool_calls_from_llm:", tool_calls)
         tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
         if hasattr(barebone_model, '_tool_call_counts'):
             barebone_model._tool_call_counts.update(updated_counts)
@@ -294,6 +334,7 @@ def chat(
                 }
         agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
         step = getattr(barebone_model, '_current_step', 0)
+        print("tool_calls_from_llm:", tool_calls)
         tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
         if hasattr(barebone_model, '_tool_call_counts'):
             barebone_model._tool_call_counts.update(updated_counts)
@@ -318,16 +359,6 @@ def chat(
         history_entry["reasoning_content"] = reasoning_content
     message_history["messages"][msg_id] = history_entry
 
-    print("content: ", content)
-    print("reasoning_content: ", reasoning_content)
-    print("tool_calls: ", tool_calls)
-    print("executed_tool_calls: ", all_executed_tool_call_list)
-    print("content_before_tools: ", content_before_tools)
-    print("message_history: ", message_history)
-    print("usage: ", usage_info)
-    print("cost: ", cost_info)
-    print("hijacked: ", hijacked)
-    
     return {
         "content": content,
         "reasoning_content": reasoning_content,
@@ -387,7 +418,7 @@ async def async_chat(
         message_history["first_input"]["message"] = messages[0].get("content", str(messages[0]))
         message_history["first_input"]["tokens"] = 0
 
-    provider = get_provider(barebone_model.model_id)
+    provider = get_provider(barebone_model.model_id, barebone_model.api_url)
 
     # Create shared client if not provided
     should_close_client = client is None
@@ -435,10 +466,53 @@ async def async_chat(
                 
                 signature = (tool_name, json.dumps(args, sort_keys=True))
                 recent_count = recent_tool_calls.count(signature)
-                
+
                 if recent_count >= 3:
                     repeated_tool_names_async.append(tool_name)
-                    LOG.warning(f"Tool '{tool_name}' has been called {recent_count} times recently with identical arguments. Consider calling agent_end or changing your approach.")
+                    LOG.error(f"Tool '{tool_name}' has been called {recent_count} times with identical arguments. Agent may be stuck in a loop.")
+
+                    # Force termination after 5 identical calls
+                    if recent_count >= 5:
+                        LOG.error(f"Tool '{tool_name}' called {recent_count} times identically. Forcing agent termination with summarization.")
+
+                        # Use summarization to create a force_answer response
+                        from .summarization import async_summarise_message_history
+                        try:
+                            force_answer = await async_summarise_message_history(
+                                barebone_model,
+                                message_history,
+                                client=client,
+                                use_same_model=True,
+                                prompt_kind="force_answer",
+                                write_to_history=False,
+                            )
+                        except Exception as e:
+                            LOG.error(f"Failed to generate force_answer summary: {e}")
+                            force_answer = ""
+
+                        if not force_answer or not force_answer.strip():
+                            force_answer = (
+                                f"Agent stuck in loop after {recent_count} identical calls to '{tool_name}'. "
+                                f"Partial results:\n{content_before_tools}"
+                            )
+
+                        force_content = (
+                            f"CRITICAL: Agent stuck in loop. Tool '{tool_name}' called {recent_count} times with identical arguments. "
+                            "Auto-terminated and generated final response.\n\n"
+                            f"{force_answer}"
+                        )
+
+                        return {
+                            "content": force_content,
+                            "reasoning_content": None,
+                            "tool_calls": [],
+                            "executed_tool_calls": all_executed_tool_call_list,
+                            "content_before_tools": content_before_tools,
+                            "message_history": message_history,
+                            "usage": usage_info,
+                            "cost": cost_info,
+                            "hijacked": True,
+                        }
             
             repeated_warning_msg_async = ""
             if repeated_tool_names_async:
@@ -456,7 +530,7 @@ async def async_chat(
                         "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
                     }
             step = getattr(barebone_model, '_current_step', 0)
-
+            print("tool_calls_from_llm:", tool_calls)
             tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
             if hasattr(barebone_model, '_tool_call_counts'):
                 barebone_model._tool_call_counts.update(updated_counts)
@@ -544,6 +618,7 @@ async def async_chat(
                     }
             agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
             step = getattr(barebone_model, '_current_step', 0)
+            print("tool_calls_from_llm:", tool_calls)
             tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
             if hasattr(barebone_model, '_tool_call_counts'):
                 barebone_model._tool_call_counts.update(updated_counts)

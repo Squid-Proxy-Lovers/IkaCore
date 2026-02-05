@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import httpx
 
@@ -9,12 +9,53 @@ from .request_interface import get_provider, api_request_retry, async_api_reques
 
 _LOG = logging.getLogger(__name__)
 
-_SUMMARY_PROMPT_PATH = Path(__file__).parent / "summary_prompt"
-try:
-    with open(_SUMMARY_PROMPT_PATH, "r", encoding="utf-8") as f:
-        SUMMARY_PROMPT = f.read()
-except FileNotFoundError:
-    SUMMARY_PROMPT = "Please summarize the following conversation history concisely, preserving key information and context."
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+
+def _load_prompt(relative_path: str, fallback: str) -> str:
+    path = _PROMPTS_DIR / relative_path
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return fallback
+
+
+SUMMARY_PROMPT = _load_prompt(
+    "default_summary_system.txt",
+    "Please summarize the following conversation history concisely, preserving key information and context.",
+)
+DEFAULT_SUMMARY_USER_PREFIX = _load_prompt(
+    "default_summary_user_prefix.txt",
+    "Please summarize the following conversation history:\n\n",
+)
+FORCE_ANSWER_SYSTEM = _load_prompt(
+    "force_answer_system.txt",
+    "You are a summarization assistant. Given a conversation and the original task, produce a single final response "
+    "that directly answers the original prompt. Do not summarize loosely; answer as if the task had been completed. "
+    "Output only the final answer the agent would give, with no meta-commentary.",
+)
+FORCE_ANSWER_USER_PREFIX = _load_prompt(
+    "force_answer_user_prefix.txt",
+    "Original task and conversation:\n\n",
+)
+WHAT_REMAINS_SYSTEM = _load_prompt(
+    "what_remains_system.txt",
+    "You are a triage assistant for incomplete agent runs. Output a short actionable brief in three parts: "
+    "DONE, REMAINING, and NEXT. No preamble. Output only the three-part brief.",
+)
+WHAT_REMAINS_USER_PREFIX = _load_prompt(
+    "what_remains_user_prefix.txt",
+    "Below is the agent run that hit its step limit. Extract DONE / REMAINING / NEXT as specified.\n\n",
+)
+
+
+def _get_prompts_for_kind(prompt_kind: str) -> Tuple[str, str]:
+    if prompt_kind == "force_answer":
+        return FORCE_ANSWER_SYSTEM, FORCE_ANSWER_USER_PREFIX
+    if prompt_kind == "what_remains":
+        return WHAT_REMAINS_SYSTEM, WHAT_REMAINS_USER_PREFIX
+    return SUMMARY_PROMPT, DEFAULT_SUMMARY_USER_PREFIX
 
 
 def get_summary_model(provider: str) -> tuple[Optional[str], Optional[str]]:
@@ -23,12 +64,24 @@ def get_summary_model(provider: str) -> tuple[Optional[str], Optional[str]]:
         "openai": ("gpt-4.1-mini-2025-04-14", "https://api.openai.com/v1/chat/completions"),
         "anthropic": ("claude-sonnet-4-20250514", "https://api.anthropic.com/v1/messages"),
         "gemini": ("gemini-flash-latest", "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"),
+        "openrouter": ("openai/gpt-4o-mini", "https://openrouter.ai/api/v1/chat/completions"),
     }
     result = models.get(provider.lower())
     return result if result is not None else (None, None)
 
 
-def create_summary_payload(provider: str, model_name: str, api_key: str, conversation_text: str) -> tuple[dict, dict]:
+def create_summary_payload(
+    provider: str,
+    model_name: str,
+    api_key: str,
+    conversation_text: str,
+    system_prompt: Optional[str] = None,
+    user_prompt_prefix: Optional[str] = None,
+) -> tuple[dict, dict]:
+    sys_prompt = system_prompt if system_prompt is not None else SUMMARY_PROMPT
+    user_prefix = user_prompt_prefix if user_prompt_prefix is not None else DEFAULT_SUMMARY_USER_PREFIX
+    user_content = f"{user_prefix}{conversation_text}"
+
     headers = {
         "Content-Type": "application/json",
     }
@@ -38,20 +91,20 @@ def create_summary_payload(provider: str, model_name: str, api_key: str, convers
         payload = {
             "model": model_name,
             "messages": [
-                {"role": "system", "content": SUMMARY_PROMPT},
-                {"role": "user", "content": f"Please summarize the following conversation history:\n\n{conversation_text}"}
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_content}
             ],
             "temperature": 0.3,
             "max_tokens": 2000,
             "stream": False
         }
-    elif provider == "openai":
+    elif provider == "openai" or provider == "openrouter":
         headers["Authorization"] = f"Bearer {api_key}"
         payload = {
             "model": model_name,
             "messages": [
-                {"role": "system", "content": SUMMARY_PROMPT},
-                {"role": "user", "content": f"Please summarize the following conversation history:\n\n{conversation_text}"}
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_content}
             ],
             "temperature": 0.3,
             "max_tokens": 2000
@@ -62,9 +115,9 @@ def create_summary_payload(provider: str, model_name: str, api_key: str, convers
         payload = {
             "model": model_name,
             "max_tokens": 2000,
-            "system": SUMMARY_PROMPT,
+            "system": sys_prompt,
             "messages": [
-                {"role": "user", "content": f"Please summarize the following conversation history:\n\n{conversation_text}"}
+                {"role": "user", "content": user_content}
             ],
             "temperature": 0.3
         }
@@ -73,7 +126,7 @@ def create_summary_payload(provider: str, model_name: str, api_key: str, convers
         payload = {
             "contents": [{
                 "parts": [{
-                    "text": f"{SUMMARY_PROMPT}\n\nPlease summarize the following conversation history:\n\n{conversation_text}"
+                    "text": f"{sys_prompt}\n\n{user_content}"
                 }]
             }],
             "generationConfig": {
@@ -90,7 +143,7 @@ def create_summary_payload(provider: str, model_name: str, api_key: str, convers
 def parse_summary_response(provider: str, response: httpx.Response) -> str:
     data = response.json()
 
-    if provider == "deepseek" or provider == "openai":
+    if provider in ("deepseek", "openai", "openrouter"):
         return data["choices"][0]["message"]["content"]
     elif provider == "anthropic":
         content_blocks = data.get("content", [])
@@ -113,20 +166,39 @@ def get_conversation_text(message_history: dict) -> str:
     return "\n".join(parts)
 
 
-def summarise_message_history(barebone_model: BareBoneModel, message_history: dict) -> str:
+def run_summarization(
+    barebone_model: BareBoneModel,
+    message_history: dict,
+    prompt_kind: str = "default",
+    write_to_history: bool = True,
+    use_same_model: bool = True,
+) -> str:
     if not message_history["first_input"]["message"] and not message_history["messages"]:
         return ""
 
     conversation_text = get_conversation_text(message_history)
+    system_prompt, user_prompt_prefix = _get_prompts_for_kind(prompt_kind)
 
-    provider = get_provider(barebone_model.model_id)
-    model_name, api_url = get_summary_model(provider)
+    provider = get_provider(barebone_model.model_id, barebone_model.api_url)
 
-    if not model_name or not api_url:
-        _LOG.warning(f"Could not determine low-end model for provider: {provider}")
-        return ""
+    # Use the same model as the agent if requested (default), otherwise use a cheaper model
+    if use_same_model:
+        model_name = barebone_model.model_id
+        api_url = barebone_model.api_url
+    else:
+        model_name, api_url = get_summary_model(provider)
+        if not model_name or not api_url:
+            _LOG.warning(f"Could not determine low-end model for provider: {provider}")
+            return ""
 
-    payload, headers = create_summary_payload(provider, model_name, barebone_model.api_key, conversation_text)
+    payload, headers = create_summary_payload(
+        provider,
+        model_name,
+        barebone_model.api_key,
+        conversation_text,
+        system_prompt=system_prompt,
+        user_prompt_prefix=user_prompt_prefix,
+    )
 
     try:
         response = api_request_retry(api_url, headers, payload, max_retries=3, wait_seconds=10)
@@ -135,7 +207,7 @@ def summarise_message_history(barebone_model: BareBoneModel, message_history: di
         summary = parse_summary_response(provider, response)
 
         summary_tokens = 0
-        if provider == "deepseek" or provider == "openai":
+        if provider in ("deepseek", "openai", "openrouter"):
             usage = data.get("usage", {})
             summary_tokens = usage.get("total_tokens", 0)
         elif provider == "anthropic":
@@ -145,11 +217,12 @@ def summarise_message_history(barebone_model: BareBoneModel, message_history: di
             usage = data.get("usageMetadata", {})
             summary_tokens = usage.get("totalTokenCount", 0)
 
-        message_history["summary"]["message"] = f"[SUMMARY]\n{summary}"
-        message_history["summary"]["tokens"] = summary_tokens
-        message_history["messages"] = {}
+        if write_to_history:
+            message_history["summary"]["message"] = f"[SUMMARY]\n{summary}"
+            message_history["summary"]["tokens"] = summary_tokens
+            message_history["messages"] = {}
+            _LOG.info("Message history summarized. Kept: system prompt, first input, and summary. Cleared all other messages.")
 
-        _LOG.info("Message history summarized. Kept: system prompt, first input, and summary. Cleared all other messages.")
         return summary
     except httpx.HTTPError as e:
         _LOG.error(f"Failed to summarize message history: {e}")
@@ -159,24 +232,44 @@ def summarise_message_history(barebone_model: BareBoneModel, message_history: di
         return ""
 
 
+def summarise_message_history(barebone_model: BareBoneModel, message_history: dict) -> str:
+    return run_summarization(barebone_model, message_history, prompt_kind="default", write_to_history=True)
+
+
 async def async_summarise_message_history(
     barebone_model: BareBoneModel,
     message_history: dict,
-    client: Optional[httpx.AsyncClient] = None
+    client: Optional[httpx.AsyncClient] = None,
+    use_same_model: bool = True,
+    prompt_kind: str = "default",
+    write_to_history: bool = True,
 ) -> str:
     if not message_history["first_input"]["message"] and not message_history["messages"]:
         return ""
 
     conversation_text = get_conversation_text(message_history)
+    system_prompt, user_prompt_prefix = _get_prompts_for_kind(prompt_kind)
 
-    provider = get_provider(barebone_model.model_id)
-    model_name, api_url = get_summary_model(provider)
+    provider = get_provider(barebone_model.model_id, barebone_model.api_url)
 
-    if not model_name or not api_url:
-        _LOG.warning(f"Could not determine low-end model for provider: {provider}")
-        return ""
+    # Use the same model as the agent if requested (default), otherwise use a cheaper model
+    if use_same_model:
+        model_name = barebone_model.model_id
+        api_url = barebone_model.api_url
+    else:
+        model_name, api_url = get_summary_model(provider)
+        if not model_name or not api_url:
+            _LOG.warning(f"Could not determine low-end model for provider: {provider}")
+            return ""
 
-    payload, headers = create_summary_payload(provider, model_name, barebone_model.api_key, conversation_text)
+    payload, headers = create_summary_payload(
+        provider,
+        model_name,
+        barebone_model.api_key,
+        conversation_text,
+        system_prompt=system_prompt,
+        user_prompt_prefix=user_prompt_prefix,
+    )
 
     try:
         response = await async_api_request_retry(api_url, headers, payload, max_retries=3, wait_seconds=10, client=client)
@@ -185,7 +278,7 @@ async def async_summarise_message_history(
         summary = parse_summary_response(provider, response)
 
         summary_tokens = 0
-        if provider == "deepseek" or provider == "openai":
+        if provider in ("deepseek", "openai", "openrouter"):
             usage = data.get("usage", {})
             summary_tokens = usage.get("total_tokens", 0)
         elif provider == "anthropic":
@@ -195,11 +288,12 @@ async def async_summarise_message_history(
             usage = data.get("usageMetadata", {})
             summary_tokens = usage.get("totalTokenCount", 0)
 
-        message_history["summary"]["message"] = f"[SUMMARY]\n{summary}"
-        message_history["summary"]["tokens"] = summary_tokens
-        message_history["messages"] = {}
+        if write_to_history:
+            message_history["summary"]["message"] = f"[SUMMARY]\n{summary}"
+            message_history["summary"]["tokens"] = summary_tokens
+            message_history["messages"] = {}
+            _LOG.info("Message history summarized. Kept: system prompt, first input, and summary. Cleared all other messages.")
 
-        _LOG.info("Message history summarized. Kept: system prompt, first input, and summary. Cleared all other messages.")
         return summary
     except httpx.HTTPError as e:
         _LOG.error(f"Failed to summarize message history: {e}")
