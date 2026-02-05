@@ -62,18 +62,19 @@ def append_anthropic_tool_messages(
     tokens: int,
     repeated_warning_msg: str = ""
 ) -> None:
-    assistant_msg = {"role": "assistant", "content": []}
+    content_blocks: List[dict] = []
     if content:
-        assistant_msg["content"].append({"type": "text", "text": content})
-    
+        content_blocks.append({"type": "text", "text": content})
+    else:
+        content_blocks.append({"type": "text", "text": " "})
     for tool_call in executed_tool_call_list:
-        assistant_msg["content"].append({
+        content_blocks.append({
             "type": "tool_use",
             "id": tool_call.get("id"),
             "name": tool_call.get("name"),
             "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
         })
-    
+    assistant_msg = {"role": "assistant", "content": content_blocks}
     messages.append(assistant_msg)
     messages.extend(tool_messages)
     

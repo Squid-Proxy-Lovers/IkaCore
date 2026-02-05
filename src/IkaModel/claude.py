@@ -2,6 +2,19 @@ import json
 from typing import Any, Dict, List, Optional
 
 
+def _ensure_anthropic_assistant_content(msg: Dict[str, Any]) -> Dict[str, Any]:
+    if msg.get("role") != "assistant":
+        return msg
+    content = msg.get("content")
+    if isinstance(content, list) and content:
+        has_text = any(block.get("type") == "text" for block in content)
+        if not has_text:
+            msg = {**msg, "content": [{"type": "text", "text": " "}] + content}
+    elif isinstance(content, list) and not content:
+        msg = {**msg, "content": [{"type": "text", "text": " "}]}
+    return msg
+
+
 def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_history: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     message_history = message_history or {
         "system": {"message": "", "tokens": 0},
@@ -30,7 +43,7 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
         raw = msg.get("message", "")
         if msg_type == "assistant_with_tools":
             try:
-                api_messages.append(json.loads(raw))
+                api_messages.append(_ensure_anthropic_assistant_content(json.loads(raw)))
             except (json.JSONDecodeError, TypeError):
                 continue
         elif msg_type == "tool":
@@ -53,10 +66,10 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
                         "content": msg["content"]
                     })
                 elif msg["role"] == "assistant":
-                    api_messages.append({
+                    api_messages.append(_ensure_anthropic_assistant_content({
                         "role": "assistant",
                         "content": msg["content"]
-                    })
+                    }))
             elif "content" in msg:
                 api_messages.append({"role": "user", "content": msg["content"]})
             else:

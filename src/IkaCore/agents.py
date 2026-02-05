@@ -43,7 +43,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         model_id: str = "",
         api_key: str = "",
         api_url: Optional[str] = None,
-        max_tokens: int = 20000,
+        max_tokens: int = 50000,
         temperature: float = 0.0,
         checkpoint: bool = False,
         Batch: bool = False,

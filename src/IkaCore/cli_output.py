@@ -60,6 +60,7 @@ class OutputContext:
     instance_id: int
     content: str
     timestamp: float = field(default_factory=time.time)
+    elapsed_seconds: Optional[float] = None
 
     @property
     def hierarchy_string(self) -> str:
@@ -158,7 +159,8 @@ class BoxRenderer:
 
         # Build header line
         type_label = self.TYPE_LABELS[ctx.output_type]
-        header = f"[{type_label}] Step {ctx.step_number} | Thread:{ctx.thread_id} Instance:{ctx.instance_id}"
+        timing = f" | +{ctx.elapsed_seconds:.1f}s" if ctx.elapsed_seconds is not None else ""
+        header = f"[{type_label}] Step {ctx.step_number}{timing} | Thread:{ctx.thread_id} Instance:{ctx.instance_id}"
 
         # Build hierarchy line
         hierarchy_line = f"Chain: {ctx.hierarchy_string}"
@@ -318,6 +320,7 @@ class CLIOutput:
         self._buffer = OutputBuffer(self._renderer)
         self._thread_local = local()
         self._step_counters: Dict[str, int] = {}
+        self._agent_start_times: Dict[str, float] = {}
         self._lock = Lock()
         self._initialized = True
 
@@ -350,6 +353,8 @@ class CLIOutput:
     def set_step(self, agent_name: str, step: int):
         with self._lock:
             self._step_counters[agent_name] = step
+            if step == 1 and agent_name not in self._agent_start_times:
+                self._agent_start_times[agent_name] = time.time()
 
     def increment_step(self, agent_name: str) -> int:
         with self._lock:
@@ -360,6 +365,7 @@ class CLIOutput:
     def reset_steps(self):
         with self._lock:
             self._step_counters.clear()
+            self._agent_start_times.clear()
 
     def emit(
         self,
@@ -370,14 +376,21 @@ class CLIOutput:
         instance_id: Optional[int] = None
     ):
         agent_name = hierarchy[0] if hierarchy else "unknown"
+        step_number = step if step is not None else self.get_step(agent_name)
+        with self._lock:
+            if agent_name not in self._agent_start_times:
+                self._agent_start_times[agent_name] = time.time()
+            start = self._agent_start_times.get(agent_name)
+        elapsed = time.time() - start if start else None
 
         ctx = OutputContext(
             output_type=output_type,
-            step_number=step if step is not None else self.get_step(agent_name),
+            step_number=step_number,
             hierarchy_chain=hierarchy,
             thread_id=self._get_thread_id(),
             instance_id=instance_id if instance_id is not None else self._get_instance_id(),
-            content=content
+            content=content,
+            elapsed_seconds=elapsed
         )
 
         self._buffer.add(ctx)
