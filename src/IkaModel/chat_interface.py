@@ -134,8 +134,8 @@ def chat(
         logger.log_input(messages)
     
     token_count = get_total_tokens(message_history)
-    max_tokens = get_max_tokens(barebone_model.model_id)
-    
+    max_tokens = getattr(barebone_model, 'context_budget', None) or get_max_tokens(barebone_model.model_id)
+
     if token_count > max_tokens * 0.8:
         #LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
         summarise_message_history(barebone_model, message_history)
@@ -158,8 +158,16 @@ def chat(
     usage_info = extract_usage(provider, data)
     if usage_info:
         tokens = usage_info.get("total_tokens", tokens)
-    
-    cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
+
+    # Accumulate usage across all API rounds in this chat call
+    total_usage = {
+        "input_tokens": (usage_info or {}).get("input_tokens", 0) or 0,
+        "output_tokens": (usage_info or {}).get("output_tokens", 0) or 0,
+        "total_tokens": (usage_info or {}).get("total_tokens", 0) or 0,
+        "input_cached_tokens": (usage_info or {}).get("input_cached_tokens", 0) or 0,
+    }
+
+    cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
 
     all_executed_tool_call_list: List[dict] = []
     content_before_tools = content
@@ -218,6 +226,7 @@ def chat(
                         f"{force_answer}"
                     )
 
+                    cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
                     return {
                         "content": force_content,
                         "reasoning_content": None,
@@ -225,11 +234,11 @@ def chat(
                         "executed_tool_calls": all_executed_tool_call_list,
                         "content_before_tools": content_before_tools,
                         "message_history": message_history,
-                        "usage": usage_info,
+                        "usage": total_usage,
                         "cost": cost_info,
                         "hijacked": True,
                     }
-        
+
         tool_metadata = {}
         if hasattr(barebone_model, 'agent_tools'):
             for agent_tool in barebone_model.agent_tools:
@@ -261,6 +270,7 @@ def chat(
         if logger:
             logger.log_tool_results(executed_tool_call_list, tool_results)
         
+        LOG.debug("[TRACE] chat: Checking agent_end")
         agent_end_called = any(
             (tc.get("function", {}).get("name") or tc.get("name", "")) in ("agent_end", "stage_end")
             for tc in executed_tool_call_list
@@ -270,6 +280,7 @@ def chat(
             break
         
         if max_tool_calls and barebone_model._current_step >= max_tool_calls:
+            LOG.debug("[TRACE] chat: Max tool calls reached")
             is_last_stage = (total_stages > 0 and current_stage_index is not None 
                            and current_stage_index == total_stages - 1)
             has_stages = total_stages > 0
@@ -301,6 +312,7 @@ def chat(
                 + ", ".join(seen) + ". Do not repeat these calls. Proceed to the next step (e.g. use submit_discovery or other tools, then agent_end when done)."
             )
 
+        LOG.debug("[TRACE] chat: Appending tool messages")
         append_provider_tool_messages(
             provider, messages, message_history, content, reasoning_content,
             executed_tool_call_list, tool_messages, tool_results, tokens,
@@ -309,13 +321,17 @@ def chat(
 
         rounds += 1
         if rounds >= max_tool_rounds:
+            LOG.debug("[TRACE] chat: Max tool rounds reached")
             tool_calls = []
             break
 
         def _build_follow():
+            LOG.debug("[TRACE] chat: Building provider request")
             return build_provider_request(provider, barebone_model, messages, message_history)
         
+        LOG.debug("[TRACE] chat: Sending follow-up API request")
         response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout)
+        LOG.debug("[TRACE] chat: API request returned")
         response.raise_for_status()
         data = response.json()
         
@@ -323,6 +339,9 @@ def chat(
         usage_info = extract_usage(provider, data)
         if usage_info:
             tokens = usage_info.get("total_tokens", 0)
+            # Accumulate into total_usage
+            for key in ("input_tokens", "output_tokens", "total_tokens", "input_cached_tokens"):
+                total_usage[key] = total_usage.get(key, 0) + ((usage_info.get(key, 0)) or 0)
 
     if tool_calls and tool_executors:
         tool_metadata = {}
@@ -349,9 +368,9 @@ def chat(
         )
         tool_calls = []
 
-    cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
+    cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
     if logger:
-        logger.log_output(content, usage_info, cost_info, message_history)
+        logger.log_output(content, total_usage, cost_info, message_history)
 
     msg_id = str(uuid.uuid4())
     history_entry = {"message": content, "tokens": tokens}
@@ -366,7 +385,7 @@ def chat(
         "executed_tool_calls": all_executed_tool_call_list,
         "content_before_tools": content_before_tools,
         "message_history": message_history,
-        "usage": usage_info,
+        "usage": total_usage,
         "cost": cost_info,
         "hijacked": hijacked,
     }
@@ -408,7 +427,7 @@ async def async_chat(
         logger.log_input(messages)
 
     token_count = get_total_tokens(message_history)
-    max_tokens = get_max_tokens(barebone_model.model_id)
+    max_tokens = getattr(barebone_model, 'context_budget', None) or get_max_tokens(barebone_model.model_id)
 
     if token_count > max_tokens * 0.8:
         LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
@@ -438,7 +457,15 @@ async def async_chat(
         if usage_info:
             tokens = usage_info.get("total_tokens", tokens)
 
-        cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
+        # Accumulate usage across all API rounds in this chat call
+        total_usage = {
+            "input_tokens": (usage_info or {}).get("input_tokens", 0) or 0,
+            "output_tokens": (usage_info or {}).get("output_tokens", 0) or 0,
+            "total_tokens": (usage_info or {}).get("total_tokens", 0) or 0,
+            "input_cached_tokens": (usage_info or {}).get("input_cached_tokens", 0) or 0,
+        }
+
+        cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
 
         all_executed_tool_call_list: List[dict] = []
         content_before_tools = content
@@ -502,6 +529,7 @@ async def async_chat(
                             f"{force_answer}"
                         )
 
+                        cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
                         return {
                             "content": force_content,
                             "reasoning_content": None,
@@ -509,11 +537,11 @@ async def async_chat(
                             "executed_tool_calls": all_executed_tool_call_list,
                             "content_before_tools": content_before_tools,
                             "message_history": message_history,
-                            "usage": usage_info,
+                            "usage": total_usage,
                             "cost": cost_info,
                             "hijacked": True,
                         }
-            
+
             repeated_warning_msg_async = ""
             if repeated_tool_names_async:
                 seen_async = list(dict.fromkeys(repeated_tool_names_async))
@@ -553,15 +581,31 @@ async def async_chat(
             if logger:
                 logger.log_tool_results(executed_tool_call_list, tool_results)
             
+            LOG.debug("[TRACE] async_chat: Checking agent_end")
             agent_end_called = any(
                 (tc.get("function", {}).get("name") or tc.get("name", "")) in ("agent_end", "stage_end")
                 for tc in executed_tool_call_list
             )
             if agent_end_called:
                 tool_calls = []
-                break
+                # Find the agent_end text to pass in exception
+                final_text = ""
+                for tc in executed_tool_call_list:
+                    name = (tc.get("function", {}).get("name") or tc.get("name", ""))
+                    if name in ("agent_end", "stage_end"):
+                        args_raw = tc.get("function", {}).get("arguments") or "{}"
+                        try:
+                            args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                            final_text = args.get("input", "")
+                        except:
+                            pass
+                        break
+                
+                from IkaModel.base import AgentEndException
+                raise AgentEndException(final_text)
             
             if max_tool_calls and barebone_model._current_step >= max_tool_calls:
+                LOG.debug("[TRACE] async_chat: Max tool calls reached")
                 is_last_stage = (total_stages > 0 and current_stage_index is not None 
                                and current_stage_index == total_stages - 1)
                 has_stages = total_stages > 0
@@ -585,6 +629,7 @@ async def async_chat(
                 tool_calls = []
                 break
 
+            LOG.debug("[TRACE] async_chat: Appending tool messages")
             append_provider_tool_messages(
                 provider, messages, message_history, content, reasoning_content,
                 executed_tool_call_list, tool_messages, tool_results, tokens,
@@ -593,13 +638,17 @@ async def async_chat(
 
             rounds += 1
             if rounds >= max_tool_rounds:
+                LOG.debug("[TRACE] async_chat: Max tool rounds reached")
                 tool_calls = []
                 break
 
             def _build_follow():
+                LOG.debug("[TRACE] async_chat: Building provider request")
                 return build_provider_request(provider, barebone_model, messages, message_history)
             
+            LOG.debug("[TRACE] async_chat: Sending follow-up API request")
             response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client)
+            LOG.debug("[TRACE] async_chat: API request returned")
             response.raise_for_status()
             data = response.json()
             
@@ -607,6 +656,9 @@ async def async_chat(
             usage_info = extract_usage(provider, data)
             if usage_info:
                 tokens = usage_info.get("total_tokens", 0)
+                # Accumulate into total_usage
+                for key in ("input_tokens", "output_tokens", "total_tokens", "input_cached_tokens"):
+                    total_usage[key] = total_usage.get(key, 0) + ((usage_info.get(key, 0)) or 0)
 
         if tool_calls and tool_executors:
             tool_metadata = {}
@@ -633,16 +685,16 @@ async def async_chat(
             )
             tool_calls = []
 
-        cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
+        cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
         if logger:
-            logger.log_output(content, usage_info, cost_info, message_history)
+            logger.log_output(content, total_usage, cost_info, message_history)
 
         msg_id = str(uuid.uuid4())
         history_entry = {"message": content, "tokens": tokens}
         if reasoning_content:
             history_entry["reasoning_content"] = reasoning_content
         message_history["messages"][msg_id] = history_entry
-        
+
         return {
             "content": content,
             "reasoning_content": reasoning_content,
@@ -650,7 +702,7 @@ async def async_chat(
             "executed_tool_calls": all_executed_tool_call_list,
             "content_before_tools": content_before_tools,
             "message_history": message_history,
-            "usage": usage_info,
+            "usage": total_usage,
             "cost": cost_info,
             "hijacked": hijacked,
         }

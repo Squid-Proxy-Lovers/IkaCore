@@ -114,7 +114,12 @@ class IkaLogger:
             return
         self._shutdown.set()
         self._queue.put(None)  # Signal writer to exit
-        self._writer_thread.join(timeout=5.0)
+        if self._writer_thread.is_alive() and self._writer_thread != threading.current_thread():
+            self._writer_thread.join(timeout=1.0)
+        try:
+            atexit.unregister(self.shutdown)
+        except (AttributeError, ValueError):
+            pass
 
     def __deepcopy__(self, memo: Dict[int, Any]) -> "IkaLogger":
         """Return self on deepcopy - all copies share the same writer thread."""
@@ -233,7 +238,11 @@ class IkaLogger:
             "claude-3-haiku": (0.250, 0.250, 1.250),
             "claude-sonnet-4": (3.00, 3.00, 15.00),
             "deepseek-chat": (0.140, 0.140, 0.280),
+            "deepseek-reasoner": (0.550, 0.140, 2.190),
             "gemini-1.5-pro": (3.50, 3.50, 10.50),
+            "gemini-2.0-flash": (0.10, 0.025, 0.40),
+            "gemini-2.5-flash-preview-05-20": (0.15, 0.0375, 0.60),
+            "gemini-3-flash-preview": (0.50, 0.50, 3.00),
         }
         return cost_map.get(model_id.lower(), None)
 

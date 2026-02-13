@@ -15,6 +15,12 @@ from IkaCore.cli_output import get_cli_output, OutputType
 
 _LOG = logging.getLogger(__name__)
 
+class AgentEndException(Exception):
+    """Raised when agent_end is called to immediately stop execution."""
+    def __init__(self, final_text: str):
+        self.final_text = final_text
+        super().__init__(final_text)
+
 _GLOBAL_LONG_TERM_MEMORY: Optional["LTMemory"] = None 
 
 

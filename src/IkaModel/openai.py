@@ -91,6 +91,8 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
     
     if is_reasoning_model:
         payload["max_completion_tokens"] = max_tokens_value
+        if "temperature" in payload:
+            del payload["temperature"] # O1 models don't support temperature
     else:
         payload["max_tokens"] = max_tokens_value
     
@@ -101,24 +103,24 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
             # Ensure we always have a valid JSON schema
             # tool.args.properties can be None, empty dict {}, or a dict with properties
             # For agent_end and subagent tools with type="input", always use input parameter
-            if tool.name == "agent_end" and tool.args.type == "input":
+            if tool.name == "agent_end" and getattr(tool.args, "type", "") == "input":
                 parameters = {
                     "type": "object",
                     "properties": {
                         "input": {
                             "type": "string",
-                            "description": tool.args.description or "Final response content. This is REQUIRED - provide your complete final answer here."
+                            "description": getattr(tool.args, "description", None) or "Final response content. This is REQUIRED - provide your complete final answer here."
                         }
                     },
                     "required": ["input"]
                 }
-            elif tool.args.type == "input":
+            elif getattr(tool.args, "type", "") == "input":
                 parameters = {
                     "type": "object",
                     "properties": {
                         "input": {
                             "type": "string",
-                            "description": tool.args.description or f"Input for {tool.name}"
+                            "description": getattr(tool.args, "description", None) or f"Input for {tool.name}"
                         }
                     },
                     "required": ["input"]
@@ -153,7 +155,7 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                     }
             else:
                 # No properties or properties is None - create schema from tool.args.type
-                arg_name = tool.args.type
+                arg_name = getattr(tool.args, "type", "string")
                 json_type = "string"
                 if arg_name in ["stage_index"]:
                     json_type = "integer"
@@ -162,7 +164,7 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                         "properties": {
                             arg_name: {
                                 "type": json_type,
-                                "description": tool.args.description or f"Parameter for {tool.name}"
+                                "description": getattr(tool.args, "description", None) or f"Parameter for {tool.name}"
                             }
                         },
                         "required": []
@@ -173,7 +175,7 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                         "properties": {
                             "input": {
                                 "type": "string",
-                                "description": tool.args.description or "Final response content."
+                                "description": getattr(tool.args, "description", None) or "Final response content."
                             }
                         },
                         "required": ["input"]
@@ -191,7 +193,7 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
                         "properties": {
                             arg_name: {
                                 "type": json_type,
-                                "description": tool.args.description or f"Parameter for {tool.name}"
+                                "description": getattr(tool.args, "description", None) or f"Parameter for {tool.name}"
                             }
                         },
                         "required": []
