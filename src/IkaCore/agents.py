@@ -67,6 +67,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         extend_steps_by: int = 3,
         max_stage_extensions: int = 2,
         extend_stage_steps_by: int = 3,
+        reasoning_effort: Optional[str] = None,
     ):
         tools = tools or []
         Stages = Stages or []
@@ -94,6 +95,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         self.api_url = api_url if api_url else self.geturl(model_id)
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.reasoning_effort = reasoning_effort
         self.checkpoint = checkpoint
         self.Batch = Batch
         self.BatchMax = BatchMax

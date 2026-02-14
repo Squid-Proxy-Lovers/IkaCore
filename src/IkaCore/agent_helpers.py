@@ -440,6 +440,7 @@ class AgentHelpersMixin:
         api_url = o["api_url"] if "api_url" in o and o["api_url"] is not None else self.api_url
         max_tokens = o["max_tokens"] if "max_tokens" in o and o["max_tokens"] is not None else self.max_tokens
         temperature = o["temperature"] if "temperature" in o and o["temperature"] is not None else self.temperature
+        reasoning_effort = o.get("reasoning_effort") or getattr(self, "reasoning_effort", None)
 
         parallel_tool_calls = True
         for tool in agent_tools:
@@ -462,6 +463,7 @@ class AgentHelpersMixin:
             agent_name=self.name,
             agent_hierarchy=agent_hierarchy,
             suppress_init_output=suppress_init_output,
+            reasoning_effort=reasoning_effort,
         )
         model.agent_tools = agent_tools
         model._current_step = 0

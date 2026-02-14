@@ -148,7 +148,8 @@ class BareBoneModel:
         parallel_tool_calls: bool = False,
         agent_name: Optional[str] = None,
         agent_hierarchy: Optional[List[str]] = None,
-        suppress_init_output: bool = False
+        suppress_init_output: bool = False,
+        reasoning_effort: Optional[str] = None,
         ):
 
         # User MUST provide the following:
@@ -173,6 +174,7 @@ class BareBoneModel:
         self.parallel_tool_calls = parallel_tool_calls
         self.agent_name = agent_name
         self.agent_hierarchy = agent_hierarchy or []
+        self.reasoning_effort = reasoning_effort
         
         # Display prompts using CLI output (unless suppressed)
         if not suppress_init_output:

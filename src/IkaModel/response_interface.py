@@ -198,7 +198,15 @@ def execute_tool_calls(
             args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
         except Exception as e:
             LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
-            args = {}
+            # Skip execution — return an explicit error so the model knows exactly
+            # what went wrong instead of running the tool with empty args (which
+            # produces a confusing validation error and causes GPT to spiral).
+            error_msg = json.dumps({
+                "error": f"Malformed JSON in arguments for tool '{tool_name}': {e}. "
+                         f"Fix the JSON syntax and retry. Raw arguments were: {args_raw[:200]}"
+            })
+            tool_call_id_to_result[tool_call_id] = error_msg
+            continue
 
         tool_signature = (tool_name, json.dumps(args, sort_keys=True))
         if tool_signature in seen_tool_signatures:
@@ -358,7 +366,15 @@ async def async_execute_tool_calls(
             args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
         except Exception as e:
             LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
-            args = {}
+            # Skip execution — return an explicit error so the model knows exactly
+            # what went wrong instead of running the tool with empty args (which
+            # produces a confusing validation error and causes GPT to spiral).
+            error_msg = json.dumps({
+                "error": f"Malformed JSON in arguments for tool '{tool_name}': {e}. "
+                         f"Fix the JSON syntax and retry. Raw arguments were: {args_raw[:200]}"
+            })
+            tool_call_id_to_result[tool_call_id] = error_msg
+            continue
 
         tool_signature = (tool_name, json.dumps(args, sort_keys=True))
         if tool_signature in seen_tool_signatures:
