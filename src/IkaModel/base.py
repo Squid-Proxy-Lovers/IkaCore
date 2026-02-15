@@ -18,6 +18,14 @@ _LOG = logging.getLogger(__name__)
 _GLOBAL_LONG_TERM_MEMORY: Optional["LTMemory"] = None 
 
 
+class AgentEndException(RuntimeError):
+    """Raised when agent_end (or equivalent) signals immediate completion."""
+
+    def __init__(self, response: Optional[dict] = None):
+        super().__init__("agent_end requested termination")
+        self.response = response or {}
+
+
 def load_gemini_payload():
     """
     Dynamically load gemini payload function.

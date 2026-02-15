@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, List, Callable
 
 import httpx
 
-from .base import BareBoneModel
+from .base import BareBoneModel, AgentEndException
 from IkaCore.cli_output import get_cli_output, OutputType
 from .request_interface import (
     get_provider,
@@ -35,6 +35,38 @@ from .chat_helpers_common import (
 )
 
 LOG = logging.getLogger(__name__)
+
+
+def _record_model_message(message_history: dict, content: str, tokens: int, reasoning_content: Optional[str] = None) -> None:
+    msg_id = str(uuid.uuid4())
+    history_entry = {"message": content, "tokens": tokens}
+    if reasoning_content:
+        history_entry["reasoning_content"] = reasoning_content
+    message_history["messages"][msg_id] = history_entry
+
+
+def _build_chat_response(
+    content: str,
+    reasoning_content: Optional[str],
+    tool_calls: List[dict],
+    executed_tool_calls: List[dict],
+    content_before_tools: str,
+    message_history: dict,
+    usage_info: Optional[dict],
+    cost_info: Optional[dict],
+    hijacked: bool,
+) -> Dict[str, Any]:
+    return {
+        "content": content,
+        "reasoning_content": reasoning_content,
+        "tool_calls": tool_calls,
+        "executed_tool_calls": executed_tool_calls,
+        "content_before_tools": content_before_tools,
+        "message_history": message_history,
+        "usage": usage_info,
+        "cost": cost_info,
+        "hijacked": hijacked,
+    }
 
 
 def init_message_history() -> dict:
@@ -261,11 +293,31 @@ def chat(
         if logger:
             logger.log_tool_results(executed_tool_call_list, tool_results)
         
-        agent_end_called = any(
-            (tc.get("function", {}).get("name") or tc.get("name", "")) in ("agent_end", "stage_end")
-            for tc in executed_tool_call_list
-        )
+        agent_end_called = False
+        stage_end_called = False
+        for tc in executed_tool_call_list:
+            name = tc.get("function", {}).get("name") or tc.get("name", "")
+            if name == "agent_end":
+                agent_end_called = True
+            elif name == "stage_end":
+                stage_end_called = True
         if agent_end_called:
+            if logger:
+                logger.log_output(content, usage_info, cost_info, message_history)
+            _record_model_message(message_history, content, tokens, reasoning_content)
+            response_payload = _build_chat_response(
+                content,
+                reasoning_content,
+                [],
+                all_executed_tool_call_list,
+                content_before_tools,
+                message_history,
+                usage_info,
+                cost_info,
+                hijacked,
+            )
+            raise AgentEndException(response_payload)
+        if stage_end_called:
             tool_calls = []
             break
         
@@ -342,34 +394,60 @@ def chat(
         if logger:
             logger.log_tool_results(executed_tool_call_list, tool_results)
         
-        append_provider_tool_messages(
-            provider, messages, message_history, content, reasoning_content,
-            executed_tool_call_list, tool_messages, tool_results, tokens,
-            "", format_gemini_results
-        )
+        agent_end_called = False
+        stage_end_called = False
+        for tc in executed_tool_call_list:
+            name = tc.get("function", {}).get("name") or tc.get("name", "")
+            if name == "agent_end":
+                agent_end_called = True
+            elif name == "stage_end":
+                stage_end_called = True
+
+        if agent_end_called:
+            if logger:
+                logger.log_output(content, usage_info, cost_info, message_history)
+            _record_model_message(message_history, content, tokens, reasoning_content)
+            response_payload = _build_chat_response(
+                content,
+                reasoning_content,
+                [],
+                all_executed_tool_call_list,
+                content_before_tools,
+                message_history,
+                usage_info,
+                cost_info,
+                hijacked,
+            )
+            raise AgentEndException(response_payload)
+
+        if not stage_end_called:
+            append_provider_tool_messages(
+                provider, messages, message_history, content, reasoning_content,
+                executed_tool_call_list, tool_messages, tool_results, tokens,
+                "", format_gemini_results
+            )
+        else:
+            tool_calls = []
+
         tool_calls = []
 
     cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
     if logger:
         logger.log_output(content, usage_info, cost_info, message_history)
 
-    msg_id = str(uuid.uuid4())
-    history_entry = {"message": content, "tokens": tokens}
-    if reasoning_content:
-        history_entry["reasoning_content"] = reasoning_content
-    message_history["messages"][msg_id] = history_entry
+    _record_model_message(message_history, content, tokens, reasoning_content)
 
-    return {
-        "content": content,
-        "reasoning_content": reasoning_content,
-        "tool_calls": tool_calls,
-        "executed_tool_calls": all_executed_tool_call_list,
-        "content_before_tools": content_before_tools,
-        "message_history": message_history,
-        "usage": usage_info,
-        "cost": cost_info,
-        "hijacked": hijacked,
-    }
+    return _build_chat_response(
+        content,
+        reasoning_content,
+        tool_calls,
+        all_executed_tool_call_list,
+        content_before_tools,
+        message_history,
+        usage_info,
+        cost_info,
+        hijacked,
+    )
 
 
 async def async_chat(
@@ -553,11 +631,33 @@ async def async_chat(
             if logger:
                 logger.log_tool_results(executed_tool_call_list, tool_results)
             
-            agent_end_called = any(
-                (tc.get("function", {}).get("name") or tc.get("name", "")) in ("agent_end", "stage_end")
-                for tc in executed_tool_call_list
-            )
+            agent_end_called = False
+            stage_end_called = False
+            for tc in executed_tool_call_list:
+                name = tc.get("function", {}).get("name") or tc.get("name", "")
+                if name == "agent_end":
+                    agent_end_called = True
+                elif name == "stage_end":
+                    stage_end_called = True
+
             if agent_end_called:
+                if logger:
+                    logger.log_output(content, usage_info, cost_info, message_history)
+                _record_model_message(message_history, content, tokens, reasoning_content)
+                response_payload = _build_chat_response(
+                    content,
+                    reasoning_content,
+                    [],
+                    all_executed_tool_call_list,
+                    content_before_tools,
+                    message_history,
+                    usage_info,
+                    cost_info,
+                    hijacked,
+                )
+                raise AgentEndException(response_payload)
+
+            if stage_end_called:
                 tool_calls = []
                 break
             
@@ -626,34 +726,60 @@ async def async_chat(
             if logger:
                 logger.log_tool_results(executed_tool_call_list, tool_results)
             
-            append_provider_tool_messages(
-                provider, messages, message_history, content, reasoning_content,
-                executed_tool_call_list, tool_messages, tool_results, tokens,
-                "", format_gemini_results
-            )
+            agent_end_called = False
+            stage_end_called = False
+            for tc in executed_tool_call_list:
+                name = tc.get("function", {}).get("name") or tc.get("name", "")
+                if name == "agent_end":
+                    agent_end_called = True
+                elif name == "stage_end":
+                    stage_end_called = True
+
+            if agent_end_called:
+                if logger:
+                    logger.log_output(content, usage_info, cost_info, message_history)
+                _record_model_message(message_history, content, tokens, reasoning_content)
+                response_payload = _build_chat_response(
+                    content,
+                    reasoning_content,
+                    [],
+                    all_executed_tool_call_list,
+                    content_before_tools,
+                    message_history,
+                    usage_info,
+                    cost_info,
+                    hijacked,
+                )
+                raise AgentEndException(response_payload)
+
+            if not stage_end_called:
+                append_provider_tool_messages(
+                    provider, messages, message_history, content, reasoning_content,
+                    executed_tool_call_list, tool_messages, tool_results, tokens,
+                    "", format_gemini_results
+                )
+            else:
+                tool_calls = []
+
             tool_calls = []
 
         cost_info = logger.compute_cost(barebone_model.model_id, usage_info) if logger else None
         if logger:
             logger.log_output(content, usage_info, cost_info, message_history)
 
-        msg_id = str(uuid.uuid4())
-        history_entry = {"message": content, "tokens": tokens}
-        if reasoning_content:
-            history_entry["reasoning_content"] = reasoning_content
-        message_history["messages"][msg_id] = history_entry
+        _record_model_message(message_history, content, tokens, reasoning_content)
         
-        return {
-            "content": content,
-            "reasoning_content": reasoning_content,
-            "tool_calls": tool_calls,
-            "executed_tool_calls": all_executed_tool_call_list,
-            "content_before_tools": content_before_tools,
-            "message_history": message_history,
-            "usage": usage_info,
-            "cost": cost_info,
-            "hijacked": hijacked,
-        }
+        return _build_chat_response(
+            content,
+            reasoning_content,
+            tool_calls,
+            all_executed_tool_call_list,
+            content_before_tools,
+            message_history,
+            usage_info,
+            cost_info,
+            hijacked,
+        )
 
     finally:
         if should_close_client:

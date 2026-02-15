@@ -222,18 +222,23 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             self._enforce_rate_limit_model()
             step_start = time.time()
 
-            response = self.chat_wrapper(
-                barebone_model,
-                messages,
-                tool_executors=tool_executors,
-                logger=self.logger,
-                timeout=self.step_timeout,
-                max_tool_rounds=self.max_tool_rounds,
-                max_tool_calls=self.maxsteps,
-                current_stage_index=stage_index,
-                total_stages=len(self.Stages) if self.Stages else 0,
-                client=self.client,
-            )
+            agent_end_exception = False
+            try:
+                response = self.chat_wrapper(
+                    barebone_model,
+                    messages,
+                    tool_executors=tool_executors,
+                    logger=self.logger,
+                    timeout=self.step_timeout,
+                    max_tool_rounds=self.max_tool_rounds,
+                    max_tool_calls=self.maxsteps,
+                    current_stage_index=stage_index,
+                    total_stages=len(self.Stages) if self.Stages else 0,
+                    client=self.client,
+                )
+            except AgentEndException as exc:
+                response = exc.response or {}
+                agent_end_exception = True
 
             self.message_history = response.get("message_history", self.message_history)
             last_content = response.get("content", "")
@@ -257,6 +262,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     self.logger.log_action(f"ERROR in agent_end: {error_msg}")
                 raise
 
+            if agent_end_exception:
+                agent_end_called = True
             if agent_end_called:
                 try:
                     final_content = self._fallback_final_content(
@@ -361,18 +368,23 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             self._enforce_rate_limit_model()
             step_start = time.time()
 
-            response = self.chat_wrapper(
-                barebone_model,
-                messages,
-                tool_executors=tool_executors,
-                logger=self.logger,
-                timeout=self.step_timeout,
-                max_tool_rounds=self.max_tool_rounds,
-                max_tool_calls=self.maxsteps,
-                current_stage_index=None,
-                total_stages=0,
-                client=self.client,
-            )
+            agent_end_exception = False
+            try:
+                response = self.chat_wrapper(
+                    barebone_model,
+                    messages,
+                    tool_executors=tool_executors,
+                    logger=self.logger,
+                    timeout=self.step_timeout,
+                    max_tool_rounds=self.max_tool_rounds,
+                    max_tool_calls=self.maxsteps,
+                    current_stage_index=None,
+                    total_stages=0,
+                    client=self.client,
+                )
+            except AgentEndException as exc:
+                response = exc.response or {}
+                agent_end_exception = True
 
             self.message_history = response.get("message_history", self.message_history)
             last_content = response.get("content", "")
@@ -405,6 +417,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                 )
                 raise
 
+            if agent_end_exception:
+                agent_end_called = True
             if agent_end_called:
                 try:
                     final_content = self._fallback_final_content(
