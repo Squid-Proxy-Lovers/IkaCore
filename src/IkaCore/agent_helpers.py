@@ -440,6 +440,7 @@ class AgentHelpersMixin:
         api_url = o["api_url"] if "api_url" in o and o["api_url"] is not None else self.api_url
         max_tokens = o["max_tokens"] if "max_tokens" in o and o["max_tokens"] is not None else self.max_tokens
         temperature = o["temperature"] if "temperature" in o and o["temperature"] is not None else self.temperature
+        reasoning_effort = o.get("reasoning_effort") or getattr(self, "reasoning_effort", None)
 
         parallel_tool_calls = True
         for tool in agent_tools:
@@ -462,6 +463,7 @@ class AgentHelpersMixin:
             agent_name=self.name,
             agent_hierarchy=agent_hierarchy,
             suppress_init_output=suppress_init_output,
+            reasoning_effort=reasoning_effort,
         )
         model.agent_tools = agent_tools
         model._current_step = 0
@@ -616,7 +618,7 @@ class AgentHelpersMixin:
     ) -> Dict[str, Any]:
         message_history = self.message_history
         if self.use_async:
-            return asyncio.run(
+            result = asyncio.run(
                 async_chat(
                     barebone_model,
                     messages,
@@ -631,20 +633,31 @@ class AgentHelpersMixin:
                     total_stages=total_stages,
                 )
             )
-        return chat(
-            barebone_model,
-            messages,
-            message_history,
-            tool_executors=tool_executors,
-            logger=logger,
-            timeout=timeout,
-            max_tool_rounds=max_tool_rounds,
-            max_tool_calls=max_tool_calls,
-            current_stage_index=current_stage_index,
-            total_stages=total_stages,
-        )
+        else:
+            result = chat(
+                barebone_model,
+                messages,
+                message_history,
+                tool_executors=tool_executors,
+                logger=logger,
+                timeout=timeout,
+                max_tool_rounds=max_tool_rounds,
+                max_tool_calls=max_tool_calls,
+                current_stage_index=current_stage_index,
+                total_stages=total_stages,
+            )
 
-    def _build_final_output(self, final_message: str, barebone_model: BareBoneModel) -> Dict[str, str]:
+        # Accumulate usage/cost from this chat round onto the agent totals
+        resp_usage = result.get("usage") or {}
+        for key in ("input_tokens", "output_tokens", "total_tokens", "input_cached_tokens"):
+            self._total_usage[key] = self._total_usage.get(key, 0) + ((resp_usage.get(key, 0)) or 0)
+        resp_cost = result.get("cost") or {}
+        for key in ("input_cost", "output_cost", "total_cost"):
+            self._total_cost[key] = self._total_cost.get(key, 0.0) + ((resp_cost.get(key, 0.0)) or 0.0)
+
+        return result
+
+    def _build_final_output(self, final_message: str, barebone_model: BareBoneModel) -> Dict[str, Any]:
         summary = ""
         if self.summarize_final:
             summary = summarise_message_history(barebone_model, self.message_history) or self.message_history.get("summary", {}).get("message", "")
@@ -662,4 +675,10 @@ class AgentHelpersMixin:
         if not final_message or final_message.strip() == "":
             final_message = summary
 
-        return {"final_message": final_message, "summary": summary}
+        return {
+            "final_message": final_message,
+            "summary": summary,
+            "usage": getattr(self, "_total_usage", {}),
+            "cost": getattr(self, "_total_cost", {}),
+            "model_id": barebone_model.model_id,
+        }

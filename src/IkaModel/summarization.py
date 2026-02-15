@@ -100,15 +100,22 @@ def create_summary_payload(
         }
     elif provider == "openai" or provider == "openrouter":
         headers["Authorization"] = f"Bearer {api_key}"
+        # gpt-4.1+ and gpt-5+ require max_completion_tokens instead of max_tokens
+        _model_lower = model_name.lower()
+        _use_mct = any(x in _model_lower for x in ["gpt-4.1", "gpt-5", "o1", "o3"])
+        _token_key = "max_completion_tokens" if _use_mct else "max_tokens"
+        # GPT-5 family only supports default temperature (1)
+        _skip_temp = any(x in _model_lower for x in ["gpt-5", "o1", "o3"])
         payload = {
             "model": model_name,
             "messages": [
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": user_content}
             ],
-            "temperature": 0.3,
-            "max_tokens": 2000
+            _token_key: 2000
         }
+        if not _skip_temp:
+            payload["temperature"] = 0.3
     elif provider == "anthropic":
         headers["x-api-key"] = api_key
         headers["anthropic-version"] = "2023-06-01"

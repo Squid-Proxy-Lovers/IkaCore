@@ -49,7 +49,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         subagents: Optional[List["IkaBaseAgent"]] = None,
         next_agent: Optional["IkaBaseAgent"] = None,
         feedback_agent: Optional["IkaBaseAgent"] = None,
-        maxsteps: int = 10,
+        maxsteps: int = 100,
         step_timeout: int = 900,
         rate_limit_per_min: Optional[float] = None,
         per_tool_rate_limit: Optional[Dict[str, float]] = None,
@@ -67,6 +67,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         extend_steps_by: int = 3,
         max_stage_extensions: int = 2,
         extend_stage_steps_by: int = 3,
+        reasoning_effort: Optional[str] = None,
     ):
         tools = tools or []
         Stages = Stages or []
@@ -94,6 +95,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         self.api_url = api_url if api_url else self.geturl(model_id)
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.reasoning_effort = reasoning_effort
         self.checkpoint = checkpoint
         self.Batch = Batch
         self.BatchMax = BatchMax
@@ -132,11 +134,17 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         self.max_tool_rounds = max_tool_rounds if max_tool_rounds is not None else 5
         self.final_answer_checks = self._validate_final_answer_checks(final_answer_check)
         self._tool_call_counts: Dict[str, int] = {}
+        self._total_usage: Dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "input_cached_tokens": 0}
+        self._total_cost: Dict[str, float] = {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
         self.client = None
         self.max_step_extensions = max_step_extensions
         self.extend_steps_by = extend_steps_by
         self.max_stage_extensions = max_stage_extensions
         self.extend_stage_steps_by = extend_stage_steps_by
+
+    def shutdown(self) -> None:
+        if self.logger:
+            self.logger.shutdown()
 
     def execute_stage(self, stage_index: int, remaining_steps: int) -> tuple[int, str, bool, Optional[str], int]:
 
@@ -188,6 +196,9 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         barebone_model = self.get_barebone(system_prompt, agent_tools, parent_hierarchy=current_hierarchy, suppress_init_output=suppress_init_output, model_overrides=model_overrides if model_overrides else None, content_prompt_override=content_prompt)
         # Give each stage its own fresh tool call counter (don't share across stages)
         barebone_model._tool_call_counts = {}
+        # Propagate context_budget so chat() can trigger summarization earlier
+        if getattr(self, 'context_budget', None):
+            barebone_model.context_budget = self.context_budget
 
         messages: List[dict] = [{"role": "user", "content": content_prompt}]
         last_content = ""
@@ -237,6 +248,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     client=self.client,
                 )
             except AgentEndException as exc:
+                if self.logger:
+                    self.logger.log_action(f"Caught AgentEndException in execute_stage: {exc}")
                 response = exc.response or {}
                 agent_end_exception = True
 
@@ -347,6 +360,9 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         )
         # Give each agent its own fresh tool call counter (don't share with parent)
         barebone_model._tool_call_counts = {}
+        # Propagate context_budget so chat() can trigger summarization earlier
+        if getattr(self, 'context_budget', None):
+            barebone_model.context_budget = self.context_budget
         messages: List[dict] = [{"role": "user", "content": start_prompt}]
         last_content = ""
         last_agent_end_text = None
@@ -383,6 +399,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     client=self.client,
                 )
             except AgentEndException as exc:
+                if self.logger:
+                    self.logger.log_action(f"Caught AgentEndException in run_simple: {exc}")
                 response = exc.response or {}
                 agent_end_exception = True
 
@@ -398,12 +416,28 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             if hasattr(barebone_model, '_tool_call_counts'):
                 self._tool_call_counts.update(barebone_model._tool_call_counts)
 
+            if self.logger:
+                self.logger.log_action(f"DEBUG run_simple: step={step_num} tools={len(tool_calls)} exec={len(executed_tool_calls)} content='{last_content}'")
+                if executed_tool_calls:
+                     names = [tc.get('function', {}).get('name') or tc.get('name') for tc in executed_tool_calls]
+                     self.logger.log_action(f"DEBUG run_simple: executed tool names: {names}")
+
+            # Safety break for infinite loop
+            if not tool_calls and not last_content and not executed_tool_calls and step_num > 0:
+                 if self.logger:
+                      self.logger.log_action("CRITICAL: Infinite loop detected (no tools, no content). Breaking.")
+                 break
+
             try:
                 _, agent_end_called, agent_end_text = self.parse_control_calls(
                     executed_tool_calls if executed_tool_calls else tool_calls,
                     None,
                     response_content=content_before_tools,
                 )
+                
+                if self.logger and agent_end_called:
+                    self.logger.log_action(f"DEBUG run_simple: agent_end detected with text: {agent_end_text}")
+
                 if agent_end_called and agent_end_text:
                     last_agent_end_text = agent_end_text
             except ValueError as e:

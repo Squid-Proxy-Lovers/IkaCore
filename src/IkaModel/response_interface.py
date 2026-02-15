@@ -23,9 +23,10 @@ def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
         usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
     elif provider == "gemini":
         meta = data.get("usageMetadata", {}) or raw_usage
-        total = meta.get("totalTokenCount", 0)
-        usage["total_tokens"] = total
-        usage["output_tokens"] = total
+        usage["input_tokens"] = meta.get("promptTokenCount", 0)
+        usage["output_tokens"] = meta.get("candidatesTokenCount", meta.get("totalTokenCount", 0))
+        usage["total_tokens"] = meta.get("totalTokenCount", usage["input_tokens"] + usage["output_tokens"])
+        usage["input_cached_tokens"] = meta.get("cachedContentTokenCount", 0)
     else:
         usage["total_tokens"] = raw_usage.get("total_tokens", 0)
 
@@ -72,6 +73,7 @@ def validate_tool_args(tool_name: str, tool_args: dict, max_size: int = 10000, m
 
 
 def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Callable], timeout: float = 900.0, agent_hierarchy: Optional[List[str]] = None, step: int = 0) -> str:
+    LOG.debug(f"[TOOL START] Executing tool '{tool_name}'")
     cli = get_cli_output()
     hierarchy = list(agent_hierarchy or []) + [tool_name]
 
@@ -100,6 +102,7 @@ def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Call
             result_str = result if isinstance(result, str) else json.dumps(result)
             cli.tool_result(tool_name, result_str, hierarchy, step)
 
+        LOG.debug(f"[TOOL END] Finished tool '{tool_name}'")
         if isinstance(result, str):
             return result
         return json.dumps(result)
@@ -195,7 +198,15 @@ def execute_tool_calls(
             args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
         except Exception as e:
             LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
-            args = {}
+            # Skip execution — return an explicit error so the model knows exactly
+            # what went wrong instead of running the tool with empty args (which
+            # produces a confusing validation error and causes GPT to spiral).
+            error_msg = json.dumps({
+                "error": f"Malformed JSON in arguments for tool '{tool_name}': {e}. "
+                         f"Fix the JSON syntax and retry. Raw arguments were: {args_raw[:200]}"
+            })
+            tool_call_id_to_result[tool_call_id] = error_msg
+            continue
 
         tool_signature = (tool_name, json.dumps(args, sort_keys=True))
         if tool_signature in seen_tool_signatures:
@@ -223,6 +234,7 @@ def execute_tool_calls(
             sequential_calls.append((tool_name, args, tool_call_id))
 
     if parallel_calls:
+        LOG.debug(f"[TOOL PARALLEL] Starting {len(parallel_calls)} parallel tools: {[t[0] for t in parallel_calls]}")
         with ThreadPoolExecutor(max_workers=len(parallel_calls)) as executor_pool:
             futures = {}
             for tool_name, args, tool_call_id in parallel_calls:
@@ -272,6 +284,7 @@ async def async_execute_tool(
     agent_hierarchy: Optional[List[str]] = None,
     step: int = 0
 ) -> str:
+    LOG.debug(f"[TOOL START] Executing tool '{tool_name}' (async)")
     cli = get_cli_output()
     hierarchy = list(agent_hierarchy or []) + [tool_name]
 
@@ -305,6 +318,7 @@ async def async_execute_tool(
         result_str = result if isinstance(result, str) else json.dumps(result)
         cli.tool_result(tool_name, result_str, hierarchy, step)
 
+        LOG.debug(f"[TOOL END] Finished tool '{tool_name}' (async)")
         if isinstance(result, str):
             return result
         return json.dumps(result)
@@ -352,7 +366,15 @@ async def async_execute_tool_calls(
             args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
         except Exception as e:
             LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
-            args = {}
+            # Skip execution — return an explicit error so the model knows exactly
+            # what went wrong instead of running the tool with empty args (which
+            # produces a confusing validation error and causes GPT to spiral).
+            error_msg = json.dumps({
+                "error": f"Malformed JSON in arguments for tool '{tool_name}': {e}. "
+                         f"Fix the JSON syntax and retry. Raw arguments were: {args_raw[:200]}"
+            })
+            tool_call_id_to_result[tool_call_id] = error_msg
+            continue
 
         tool_signature = (tool_name, json.dumps(args, sort_keys=True))
         if tool_signature in seen_tool_signatures:
