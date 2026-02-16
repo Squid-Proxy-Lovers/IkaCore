@@ -17,7 +17,7 @@ from IkaCore.cli_output import get_cli_output, OutputType
 from IkaCore.prompts import *
 
 from IkaModel.base import BareBoneModel, AgentTool, ToolArgs
-from IkaModel.chat_interface import chat, async_chat, summarise_message_history
+from IkaModel.chat_interface.chat_interface import chat, async_chat, summarise_message_history
 
 if TYPE_CHECKING:
     from IkaCore.agents import IkaBaseAgent

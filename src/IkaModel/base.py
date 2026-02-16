@@ -38,7 +38,7 @@ def load_gemini_payload():
     This is to avoid circular import issues.
     """
     try:
-        from IkaModel.google import gemini_fill_payload
+        from IkaModel.gemini.google import gemini_fill_payload
         return gemini_fill_payload
     except ImportError as e:
         _LOG.error(f"Failed to import gemini_fill_payload: {e}")
@@ -58,6 +58,10 @@ TOKENMAX_MAPPING = {
     "gpt-4.1": 1000000,                  # 1M tokens context window :contentReference[oaicite:3]{index=3}
     "gpt-4.1-mini": 1000000,             # same 1M tokens context :contentReference[oaicite:4]{index=4}
     "gpt-4.1-nano": 1000000,             # same 1M tokens context :contentReference[oaicite:5]{index=5}
+    "gpt-5": 1000000,                    # GPT-5 family
+    "gpt-5-mini": 1000000,               # GPT-5 mini
+    "o4": 200000,                        # o4 reasoning model family
+    "o4-mini": 200000,                   # o4-mini reasoning model
     "claude-2": 100000,                  # ~100K context (historical) :contentReference[oaicite:6]{index=6}
     "claude-2.1": 200000,                # ~200K context (expanded) :contentReference[oaicite:7]{index=7}
     "claude-3-haiku": 200000,            # typical 200K context :contentReference[oaicite:8]{index=8}
@@ -158,6 +162,7 @@ class BareBoneModel:
         agent_hierarchy: Optional[List[str]] = None,
         suppress_init_output: bool = False,
         reasoning_effort: Optional[str] = None,
+        use_responses_api: bool = True,
         ):
 
         # User MUST provide the following:
@@ -183,7 +188,8 @@ class BareBoneModel:
         self.agent_name = agent_name
         self.agent_hierarchy = agent_hierarchy or []
         self.reasoning_effort = reasoning_effort
-        
+        self.use_responses_api = use_responses_api
+
         # Display prompts using CLI output (unless suppressed)
         if not suppress_init_output:
             cli = get_cli_output()

@@ -12,7 +12,7 @@ from IkaCore.cli_output import get_cli_output, OutputType
 LOG = logging.getLogger(__name__)
 
 
-def get_provider(model_id: str, api_url: Optional[str] = None) -> str:
+def get_provider(model_id: str, api_url: Optional[str] = None, use_responses_api: bool = True) -> str:
     """
     Determine the provider from model_id and optionally api_url.
 
@@ -22,13 +22,21 @@ def get_provider(model_id: str, api_url: Optional[str] = None) -> str:
     Args:
         model_id: The model identifier
         api_url: Optional API URL to help determine provider
+        use_responses_api: OpenAI models default to the Responses API (True). Pass
+            False to explicitly opt back in to Chat Completions.
 
     Returns:
-        Provider name: "openai", "anthropic", "gemini", "deepseek", "openrouter"
+        Provider name: "openai", "openai_responses", "anthropic", "gemini", "deepseek", "openrouter"
     """
     # PRIORITY 1: Check API URL if provided (most reliable)
     if api_url:
         api_url_lower = api_url.lower()
+        # Explicit Responses API endpoint → always use it
+        if api_url_lower.rstrip("/").endswith("/v1/responses"):
+            return "openai_responses"
+        # Explicit Chat Completions endpoint → opt-out of Responses API
+        if api_url_lower.rstrip("/").endswith("/v1/chat/completions") and not use_responses_api:
+            return "openai"
         # Check OpenRouter FIRST before checking for "gemini" or "claude" in URL
         if "openrouter.ai" in api_url_lower:
             return "openrouter"
@@ -39,6 +47,8 @@ def get_provider(model_id: str, api_url: Optional[str] = None) -> str:
         elif "deepseek.com" in api_url_lower:
             return "deepseek"
         elif "openai.com" in api_url_lower:
+            if use_responses_api:
+                return "openai_responses"
             return "openai"
 
     # PRIORITY 2: Fallback to model_id detection
@@ -53,7 +63,9 @@ def get_provider(model_id: str, api_url: Optional[str] = None) -> str:
     # Then check for specific provider names in model_id
     if "deepseek" in model_id_lower:
         return "deepseek"
-    elif "gpt" in model_id_lower or "o1" in model_id_lower or "o3" in model_id_lower:
+    elif "gpt" in model_id_lower or "o1" in model_id_lower or "o3" in model_id_lower or "o4" in model_id_lower:
+        if use_responses_api:
+            return "openai_responses"
         return "openai"
     elif "claude" in model_id_lower:
         return "anthropic"
@@ -61,6 +73,8 @@ def get_provider(model_id: str, api_url: Optional[str] = None) -> str:
         return "gemini"
 
     # Default to OpenAI-compatible
+    if use_responses_api:
+        return "openai_responses"
     return "openai"
 
 

@@ -4,7 +4,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from .openrouter import openrouter_fill_payload
-from .request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
+from ..request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
 
 LOG = logging.getLogger(__name__)
 

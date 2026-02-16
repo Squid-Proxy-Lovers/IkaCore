@@ -2,17 +2,17 @@ import json
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-from .openai import openai_fill_payload
-from .request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
+from .deepseek import deepseek_fill_payload
+from ..request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
 
 
-def build_openai_request(
+def build_deepseek_request(
     barebone_model: Any,
     messages: List[dict],
     message_history: dict
 ) -> Tuple[str, Dict[str, str], dict]:
     _apply_tools_filter_for_payload(barebone_model)
-    payload = openai_fill_payload(barebone_model, messages, message_history)
+    payload = deepseek_fill_payload(barebone_model, messages, message_history)
     _restore_tools_after_payload(barebone_model)
     
     api_url = barebone_model.api_url
@@ -24,17 +24,17 @@ def build_openai_request(
     return api_url, headers, payload
 
 
-def parse_openai_response(data: dict, model_id: str) -> Tuple[str, Optional[str], List[dict], int]:
+def parse_deepseek_response(data: dict, model_id: str) -> Tuple[str, Optional[str], List[dict], int]:
     message_obj = data["choices"][0]["message"]
     content = message_obj.get("content") or ""
     tool_calls = message_obj.get("tool_calls", []) or []
     tokens = data.get("usage", {}).get("total_tokens", 0)
-    reasoning_content = None
+    reasoning_content = message_obj.get("reasoning_content")
     
     return content, reasoning_content, tool_calls, tokens
 
 
-def append_openai_tool_messages(
+def append_deepseek_tool_messages(
     messages: List[dict],
     message_history: dict,
     content: str,

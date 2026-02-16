@@ -20,7 +20,7 @@ from IkaCore.tools import IkaTools
 from IkaCore.stages import IkaStage
 from IkaModel.base import AgentTool, ToolArgs, BareBoneModel
 from IkaModel.chat_helpers_common import build_provider_request
-from IkaModel.openai import openai_fill_payload
+from IkaModel.openai.openai import openai_fill_payload
 
 
 def _minimal_agent(**kwargs):

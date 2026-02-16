@@ -17,6 +17,10 @@ def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
         usage["input_tokens"] = raw_usage.get("prompt_tokens", raw_usage.get("input_tokens", 0))
         usage["output_tokens"] = raw_usage.get("completion_tokens", raw_usage.get("output_tokens", 0))
         usage["total_tokens"] = raw_usage.get("total_tokens", usage["input_tokens"] + usage["output_tokens"])
+    elif provider == "openai_responses":
+        usage["input_tokens"] = raw_usage.get("input_tokens", 0)
+        usage["output_tokens"] = raw_usage.get("output_tokens", 0)
+        usage["total_tokens"] = raw_usage.get("total_tokens", usage["input_tokens"] + usage["output_tokens"])
     elif provider == "anthropic":
         usage["input_tokens"] = raw_usage.get("input_tokens", 0)
         usage["output_tokens"] = raw_usage.get("output_tokens", 0)
@@ -116,6 +120,23 @@ def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Call
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
         LOG.error(error_msg, exc_info=True)
         return json.dumps({"error": error_msg})
+
+
+def format_openai_responses_results(tool_calls: List[dict], tool_results: List[str]) -> List[dict]:
+    """Format tool results for the Responses API (role='tool' with tool_call_id).
+
+    The openai_responses payload builder converts these to function_call_output
+    items automatically when it processes the messages list.
+    """
+    tool_messages = []
+    for i, tool_call in enumerate(tool_calls):
+        tool_call_id = tool_call.get("id", f"call_{i}")
+        tool_messages.append({
+            "role": "tool",
+            "content": tool_results[i] if i < len(tool_results) else json.dumps({"error": "No result"}),
+            "tool_call_id": tool_call_id
+        })
+    return tool_messages
 
 
 def format_openai_results(tool_calls: List[dict], tool_results: List[str]) -> List[dict]:
@@ -266,6 +287,8 @@ def execute_tool_calls(
 
     if provider in ("deepseek", "openai", "openrouter"):
         formatted_messages = format_openai_results(tool_call_order, tool_results)
+    elif provider == "openai_responses":
+        formatted_messages = format_openai_responses_results(tool_call_order, tool_results)
     elif provider == "anthropic":
         formatted_messages = format_anthropic_results(tool_call_order, tool_results)
     elif provider == "gemini":
@@ -434,6 +457,8 @@ async def async_execute_tool_calls(
 
     if provider in ("deepseek", "openai", "openrouter"):
         formatted_messages = format_openai_results(tool_call_order, tool_results)
+    elif provider == "openai_responses":
+        formatted_messages = format_openai_responses_results(tool_call_order, tool_results)
     elif provider == "anthropic":
         formatted_messages = format_anthropic_results(tool_call_order, tool_results)
     elif provider == "gemini":

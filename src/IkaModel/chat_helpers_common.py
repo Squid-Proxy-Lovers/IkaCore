@@ -1,10 +1,33 @@
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from .chat_helpers_deepseek import build_deepseek_request, parse_deepseek_response, append_deepseek_tool_messages
-from .chat_helpers_openai import build_openai_request, parse_openai_response, append_openai_tool_messages
-from .chat_helpers_anthropic import build_anthropic_request, parse_anthropic_response, append_anthropic_tool_messages
-from .chat_helpers_gemini import build_gemini_request, parse_gemini_response, append_gemini_tool_messages
-from .chat_helpers_openrouter import build_openrouter_request, parse_openrouter_response, append_openrouter_tool_messages
+from .deepseek.chat_helpers_deepseek import (
+    build_deepseek_request,
+    parse_deepseek_response,
+    append_deepseek_tool_messages,
+)
+from .openai.chat_helpers_openai import (
+    build_openai_request,
+    parse_openai_response,
+    append_openai_tool_messages,
+    build_openai_responses_request,
+    parse_openai_responses_response,
+    append_openai_responses_tool_messages,
+)
+from .anthropic.chat_helpers_anthropic import (
+    build_anthropic_request,
+    parse_anthropic_response,
+    append_anthropic_tool_messages,
+)
+from .gemini.chat_helpers_gemini import (
+    build_gemini_request,
+    parse_gemini_response,
+    append_gemini_tool_messages,
+)
+from .openrouter.chat_helpers_openrouter import (
+    build_openrouter_request,
+    parse_openrouter_response,
+    append_openrouter_tool_messages,
+)
 
 
 def build_provider_request(
@@ -17,6 +40,8 @@ def build_provider_request(
         return build_deepseek_request(barebone_model, messages, message_history)
     elif provider == "openai":
         return build_openai_request(barebone_model, messages, message_history)
+    elif provider == "openai_responses":
+        return build_openai_responses_request(barebone_model, messages, message_history)
     elif provider == "anthropic":
         return build_anthropic_request(barebone_model, messages, message_history)
     elif provider == "gemini":
@@ -36,6 +61,8 @@ def parse_provider_response(
         return parse_deepseek_response(data, model_id)
     elif provider == "openai":
         return parse_openai_response(data, model_id)
+    elif provider == "openai_responses":
+        return parse_openai_responses_response(data, model_id)
     elif provider == "anthropic":
         return parse_anthropic_response(data, model_id)
     elif provider == "gemini":
@@ -66,6 +93,11 @@ def append_provider_tool_messages(
         )
     elif provider == "openai":
         append_openai_tool_messages(
+            messages, message_history, content, reasoning_content,
+            executed_tool_call_list, tool_messages, tokens, repeated_warning_msg
+        )
+    elif provider == "openai_responses":
+        append_openai_responses_tool_messages(
             messages, message_history, content, reasoning_content,
             executed_tool_call_list, tool_messages, tokens, repeated_warning_msg
         )

@@ -8,8 +8,8 @@ src_dir = Path(__file__).parent.parent
 if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
-from IkaModel.deepseek import deepseek_fill_payload
-from IkaModel.chat_interface import chat
+from IkaModel.deepseek.deepseek import deepseek_fill_payload
+from IkaModel.chat_interface.chat_interface import chat
 
 
 def test_deepseek_reasoning_content_in_message_history():
@@ -154,7 +154,7 @@ def test_chat_interface_extracts_reasoning_content():
     mock_response.json.return_value = mock_response_data
     mock_response.raise_for_status = MagicMock()
     
-    with patch('IkaModel.chat_interface.api_request_retry', return_value=mock_response):
+    with patch('IkaModel.chat_interface.chat_interface.api_request_retry', return_value=mock_response):
         response = chat(model, messages, message_history, timeout=1.0)
         assert "reasoning_content" in response
         assert response["reasoning_content"] == "Internal reasoning"
@@ -196,7 +196,7 @@ def test_chat_interface_stores_reasoning_content_in_history():
     mock_response.json.return_value = mock_response_data
     mock_response.raise_for_status = MagicMock()
     
-    with patch('IkaModel.chat_interface.api_request_retry', return_value=mock_response):
+    with patch('IkaModel.chat_interface.chat_interface.api_request_retry', return_value=mock_response):
         response = chat(model, messages, message_history, timeout=1.0)
         
         msg_ids = list(message_history["messages"].keys())
@@ -242,7 +242,7 @@ def test_chat_interface_returns_reasoning_content():
     mock_response.json.return_value = mock_response_data
     mock_response.raise_for_status = MagicMock()
     
-    with patch('IkaModel.chat_interface.api_request_retry', return_value=mock_response):
+    with patch('IkaModel.chat_interface.chat_interface.api_request_retry', return_value=mock_response):
         response = chat(model, messages, message_history, timeout=1.0)
         assert "reasoning_content" in response
         assert response["reasoning_content"] == "Internal reasoning"

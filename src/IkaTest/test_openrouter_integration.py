@@ -10,8 +10,8 @@ if str(src) not in sys.path:
 
 from IkaModel.base import BareBoneModel, AgentTool, ToolArgs
 from IkaModel.request_interface import get_provider
-from IkaModel.openrouter import openrouter_fill_payload
-from IkaModel.chat_helpers_openrouter import (
+from IkaModel.openrouter.openrouter import openrouter_fill_payload
+from IkaModel.openrouter.chat_helpers_openrouter import (
     build_openrouter_request,
     parse_openrouter_response,
     append_openrouter_tool_messages

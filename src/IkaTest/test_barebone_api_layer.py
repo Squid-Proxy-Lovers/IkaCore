@@ -14,7 +14,7 @@ if str(src) not in sys.path:
 
 from IkaModel.base import BareBoneModel, AgentTool, ToolArgs
 from IkaModel.request_interface import get_provider, get_max_tokens
-from IkaModel.chat_interface import (
+from IkaModel.chat_interface.chat_interface import (
     init_message_history,
     get_total_tokens,
     chat,
@@ -24,7 +24,7 @@ from IkaModel.chat_helpers_common import (
     parse_provider_response,
     append_provider_tool_messages,
 )
-from IkaModel.response_interface import extract_usage, format_gemini_results
+from IkaModel.chat_interface.response_interface import extract_usage, format_gemini_results
 
 
 PROVIDERS = ("openai", "deepseek", "anthropic", "gemini", "openrouter")
@@ -367,7 +367,7 @@ class TestChatReturnShape:
             "choices": [{"message": {"content": "Hi", "tool_calls": []}}],
             "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
         }
-        with patch("IkaModel.chat_interface.api_request_retry", return_value=resp):
+        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=resp):
             out = chat(model, messages, message_history=history)
         assert "content" in out
         assert out["content"] == "Hi"
@@ -393,7 +393,7 @@ class TestChatReturnShape:
             "choices": [{"message": {"content": "Answer here", "tool_calls": []}}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
         }
-        with patch("IkaModel.chat_interface.api_request_retry", return_value=resp):
+        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=resp):
             out = chat(model, messages, message_history=history)
         assert out["message_history"] is history
         assert history["first_input"]["message"] == "Reply"
@@ -417,7 +417,7 @@ class TestChatReturnShape:
             "choices": [{"message": {"content": "Hi", "tool_calls": []}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
-        with patch("IkaModel.chat_interface.api_request_retry", return_value=resp):
+        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=resp):
             out = chat(model, messages, message_history=history, logger=logger)
         assert out["usage"]["total_tokens"] == 15
         assert out["cost"] == {"input_cost": 0.01, "output_cost": 0.02, "total_cost": 0.03}
@@ -444,7 +444,7 @@ class TestChatWithToolCallsFlow:
             }],
             "usage": {"total_tokens": 25},
         }
-        with patch("IkaModel.chat_interface.api_request_retry", return_value=first_resp):
+        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=first_resp):
             out = chat(model, messages, message_history=history, tool_executors=tool_executors)
         assert out["content_before_tools"] == ""
         assert len(out["executed_tool_calls"]) == 1

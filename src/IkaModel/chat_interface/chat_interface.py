@@ -5,16 +5,16 @@ from typing import Any, Dict, Optional, List, Callable
 
 import httpx
 
-from .base import BareBoneModel, AgentEndException
+from ..base import BareBoneModel, AgentEndException
 from IkaCore.cli_output import get_cli_output, OutputType
-from .request_interface import (
+from ..request_interface import (
     get_provider,
     get_max_tokens,
     api_request_retry,
     async_api_request_retry,
     _is_context_length_error,
 )
-from .summarization import (
+from ..summarization import (
     summarise_message_history,
     async_summarise_message_history,
     run_summarization,  # noqa: F401 re-export for callers
@@ -28,7 +28,7 @@ from .response_interface import (
     async_execute_tool,  # noqa: F401 re-export for callers
     format_gemini_results,
 )
-from .chat_helpers_common import (
+from ..chat_helpers_common import (
     build_provider_request,
     parse_provider_response,
     append_provider_tool_messages,
@@ -132,6 +132,7 @@ async def _api_request_with_context_fallback_async(
         get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
         await async_summarise_message_history(barebone_model, message_history, client=client)
         api_url, headers, payload = build_payload_fn()
+
 def chat(
     barebone_model: BareBoneModel,
     messages: list[dict],
@@ -176,7 +177,8 @@ def chat(
         message_history["first_input"]["message"] = messages[0].get("content", str(messages[0]))
         message_history["first_input"]["tokens"] = 0
     
-    provider = get_provider(barebone_model.model_id, barebone_model.api_url)
+    use_responses_api = getattr(barebone_model, "use_responses_api", False)
+    provider = get_provider(barebone_model.model_id, barebone_model.api_url, use_responses_api)
 
     def _build():
         return build_provider_request(provider, barebone_model, messages, message_history)
@@ -519,7 +521,8 @@ async def async_chat(
         message_history["first_input"]["message"] = messages[0].get("content", str(messages[0]))
         message_history["first_input"]["tokens"] = 0
 
-    provider = get_provider(barebone_model.model_id, barebone_model.api_url)
+    use_responses_api = getattr(barebone_model, "use_responses_api", False)
+    provider = get_provider(barebone_model.model_id, barebone_model.api_url, use_responses_api)
 
     # Create shared client if not provided
     should_close_client = client is None

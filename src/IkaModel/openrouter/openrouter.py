@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Optional
-from .openai import openai_fill_payload
+from ..openai.openai import openai_fill_payload
 
 
 def openrouter_fill_payload(

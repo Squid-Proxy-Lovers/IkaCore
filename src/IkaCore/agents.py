@@ -19,7 +19,7 @@ from IkaMem import STMemory, LTMemory  # type: ignore
 from IkaModel.base import *
 
 
-from IkaModel.chat_interface import run_summarization, summarise_message_history
+from IkaModel.chat_interface.chat_interface import run_summarization, summarise_message_history
 
 from IkaCore.agent_memory import AgentMemoryMixin
 from IkaCore.agent_tools import AgentToolsMixin
@@ -121,7 +121,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         if logging_level == 3:
             import logging
             logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            logging.getLogger("IkaModel.chat_interface").setLevel(logging.DEBUG)
+            logging.getLogger("IkaModel.chat_interface.chat_interface").setLevel(logging.DEBUG)
         self.rate_limit_per_min = rate_limit_per_min
         self.per_tool_rate_limit = per_tool_rate_limit or {}
         self._last_api_call_ts: float = 0.0

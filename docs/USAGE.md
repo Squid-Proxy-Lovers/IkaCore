@@ -16,8 +16,8 @@ IkaCore is an agent framework built around `IkaBaseAgent` plus modular mixins fo
 
 - **Models (`src/IkaModel`)**
   - `BareBoneModel` in `base.py` is the minimal model descriptor.
-  - Provider specific payload builders: `deepseek.py`, `openai.py`, `claude.py`, `google.py`.
-  - `chat_interface.py` provides:
+  - Provider specific payload builders now live in subfolders, e.g. `anthropic/claude.py`, `openai/openai.py`, `deepseek/deepseek.py`, `gemini/google.py`, `openrouter/openrouter.py`.
+  - `chat_interface/chat_interface.py` provides:
     - `chat(...)`, `execute_tool_calls(...)` (sync)
     - `async_chat(...)`, `async_execute_tool_calls(...)` (async)
     - `summarise_message_history(...)` and `async_summarise_message_history(...)`.
@@ -451,4 +451,3 @@ recon_agent = IkaBaseAgent(
 7. Call `recon_agent.execution()` and consume `final_message` plus any JSON/network artifacts written by the tools.
 
 This pattern can be copied to build other specialized agents with stages, tools, and memory. 
-
