@@ -120,7 +120,7 @@ class AgentToolsMixin(AgentParseMixin):
                 # Store parent hierarchy in subagent for use in get_barebone
                 subagent._parent_hierarchy = parent_hierarchy or []
                 
-                base = getattr(subagent, "_base_prompt", "")
+                base = getattr(subagent, "_base_prompt", None) or getattr(subagent, "prompt", "")
                 full = (base + "\n\n" + task_input).strip() if base else task_input
                 subagent.message_history["first_input"]["message"] = full
                 subagent.prompt = full
