@@ -238,7 +238,7 @@ def openai_responses_fill_payload(
 
     # reasoning_effort
     if getattr(model, "reasoning_effort", None):
-        payload["reasoning_effort"] = model.reasoning_effort
+        payload["reasoning"] = {"effort": model.reasoning_effort}
 
     # Tools — flatter schema: no nested "function" key
     if model.agent_tools:
