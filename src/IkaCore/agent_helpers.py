@@ -16,7 +16,7 @@ from IkaCore.checkpoint import CheckpointStore
 from IkaCore.cli_output import get_cli_output, OutputType
 from IkaCore.prompts import *
 
-from IkaModel.base import BareBoneModel, AgentTool, ToolArgs
+from IkaModel.base import BareBoneModel, AgentTool, ToolArgs, AgentEndException
 from IkaModel.chat_interface.chat_interface import chat, async_chat, summarise_message_history
 
 if TYPE_CHECKING:
@@ -617,35 +617,47 @@ class AgentHelpersMixin:
         client: Optional[Any] = None,
     ) -> Dict[str, Any]:
         message_history = self.message_history
-        if self.use_async:
-            result = asyncio.run(
-                async_chat(
+        try:
+            if self.use_async:
+                result = asyncio.run(
+                    async_chat(
+                        barebone_model,
+                        messages,
+                        message_history,
+                        tool_executors=tool_executors,
+                        logger=logger,
+                        timeout=timeout,
+                        client=client,
+                        max_tool_rounds=max_tool_rounds,
+                        max_tool_calls=max_tool_calls,
+                        current_stage_index=current_stage_index,
+                        total_stages=total_stages,
+                    )
+                )
+            else:
+                result = chat(
                     barebone_model,
                     messages,
                     message_history,
                     tool_executors=tool_executors,
                     logger=logger,
                     timeout=timeout,
-                    client=client,
                     max_tool_rounds=max_tool_rounds,
                     max_tool_calls=max_tool_calls,
                     current_stage_index=current_stage_index,
                     total_stages=total_stages,
                 )
-            )
-        else:
-            result = chat(
-                barebone_model,
-                messages,
-                message_history,
-                tool_executors=tool_executors,
-                logger=logger,
-                timeout=timeout,
-                max_tool_rounds=max_tool_rounds,
-                max_tool_calls=max_tool_calls,
-                current_stage_index=current_stage_index,
-                total_stages=total_stages,
-            )
+        except AgentEndException as exc:
+            # AgentEndException carries usage/cost in .response — accumulate
+            # before re-raising so _total_usage/_total_cost are accurate.
+            resp = exc.response or {}
+            resp_usage = resp.get("usage") or {}
+            for key in ("input_tokens", "output_tokens", "total_tokens", "input_cached_tokens"):
+                self._total_usage[key] = self._total_usage.get(key, 0) + ((resp_usage.get(key, 0)) or 0)
+            resp_cost = resp.get("cost") or {}
+            for key in ("input_cost", "output_cost", "total_cost"):
+                self._total_cost[key] = self._total_cost.get(key, 0.0) + ((resp_cost.get(key, 0.0)) or 0.0)
+            raise
 
         # Accumulate usage/cost from this chat round onto the agent totals
         resp_usage = result.get("usage") or {}

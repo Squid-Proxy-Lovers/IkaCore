@@ -228,23 +228,40 @@ class IkaLogger:
 
     @staticmethod
     def get_model_cost(model_id: str) -> Optional[tuple[float, float, float]]:
+        # (input_cost_per_M, cached_input_cost_per_M, output_cost_per_M)
         cost_map = {
-            "gpt-4o": (5.00, 5.00, 15.00),
-            "gpt-4.1": (5.00, 5.00, 15.00),
-            "gpt-4.1-mini": (0.150, 0.150, 0.600),
-            "gpt-4.1-nano": (0.050, 0.050, 0.400),
+            "gpt-4o": (2.50, 1.25, 10.00),
+            "gpt-4.1": (2.00, 0.50, 8.00),
+            "gpt-4.1-mini": (0.40, 0.10, 1.60),
+            "gpt-4.1-nano": (0.10, 0.025, 0.40),
+            "gpt-5.2": (1.75, 0.175, 14.00),
             "claude-3-opus": (15.00, 15.00, 75.00),
             "claude-3-sonnet": (3.00, 3.00, 15.00),
             "claude-3-haiku": (0.250, 0.250, 1.250),
             "claude-sonnet-4": (3.00, 3.00, 15.00),
+            "claude-sonnet-4-5": (3.00, 3.00, 15.00),
+            "claude-opus-4": (15.00, 15.00, 75.00),
+            "claude-opus-4-5": (15.00, 15.00, 75.00),
+            "claude-haiku-4": (0.80, 0.80, 4.00),
             "deepseek-chat": (0.140, 0.140, 0.280),
             "deepseek-reasoner": (0.550, 0.140, 2.190),
             "gemini-1.5-pro": (3.50, 3.50, 10.50),
             "gemini-2.0-flash": (0.10, 0.025, 0.40),
             "gemini-2.5-flash-preview-05-20": (0.15, 0.0375, 0.60),
-            "gemini-3-flash-preview": (0.50, 0.50, 3.00),
+            "gemini-3-flash": (0.50, 0.05, 3.00),
+            "gemini-3-flash-preview": (0.50, 0.05, 3.00),
+            "gemini-3-pro": (2.00, 0.20, 12.00),
+            "gemini-3.1-pro": (2.00, 0.20, 12.00),
         }
-        return cost_map.get(model_id.lower(), None)
+        mid = model_id.lower()
+        result = cost_map.get(mid)
+        if result:
+            return result
+        # Try prefix matching for versioned model IDs (e.g. "gemini-2.5-flash-preview-05-20" variants)
+        for key in cost_map:
+            if mid.startswith(key):
+                return cost_map[key]
+        return None
 
     def compute_cost(self, model_id: str, usage: Dict[str, Any]) -> Dict[str, float]:
         model_cost = self.get_model_cost(model_id)
