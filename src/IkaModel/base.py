@@ -60,6 +60,7 @@ TOKENMAX_MAPPING = {
     "gpt-4.1-nano": 1000000,             # same 1M tokens context :contentReference[oaicite:5]{index=5}
     "gpt-5": 1000000,                    # GPT-5 family
     "gpt-5-mini": 1000000,               # GPT-5 mini
+    "gpt-5.3-codex": 400000,             # GPT-5.3 Codex (400K context)
     "o4": 200000,                        # o4 reasoning model family
     "o4-mini": 200000,                   # o4-mini reasoning model
     "claude-2": 100000,                  # ~100K context (historical) :contentReference[oaicite:6]{index=6}
