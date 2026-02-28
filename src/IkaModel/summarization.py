@@ -58,7 +58,19 @@ def _get_prompts_for_kind(prompt_kind: str) -> Tuple[str, str]:
     return SUMMARY_PROMPT, DEFAULT_SUMMARY_USER_PREFIX
 
 
+def _normalize_provider_for_summary(provider: str) -> str:
+    """Normalize provider for summarization (which always uses Chat Completions).
+
+    The Responses API provider is only relevant for the main agent loop;
+    summarization always uses a standard chat/completions call.
+    """
+    if provider == "openai_responses":
+        return "openai"
+    return provider
+
+
 def get_summary_model(provider: str) -> tuple[Optional[str], Optional[str]]:
+    provider = _normalize_provider_for_summary(provider)
     models: Dict[str, tuple[str, str]] = {
         "deepseek": ("deepseek-chat", "https://api.deepseek.com/chat/completions"),
         "openai": ("gpt-4.1-mini-2025-04-14", "https://api.openai.com/v1/chat/completions"),
@@ -186,12 +198,17 @@ def run_summarization(
     conversation_text = get_conversation_text(message_history)
     system_prompt, user_prompt_prefix = _get_prompts_for_kind(prompt_kind)
 
-    provider = get_provider(barebone_model.model_id, barebone_model.api_url)
+    provider = _normalize_provider_for_summary(
+        get_provider(barebone_model.model_id, barebone_model.api_url)
+    )
 
     # Use the same model as the agent if requested (default), otherwise use a cheaper model
     if use_same_model:
         model_name = barebone_model.model_id
         api_url = barebone_model.api_url
+        # openai_responses models need Chat Completions URL for summarization
+        if not api_url or "responses" in (api_url or ""):
+            api_url = "https://api.openai.com/v1/chat/completions"
     else:
         model_name, api_url = get_summary_model(provider)
         if not model_name or not api_url:
@@ -257,12 +274,16 @@ async def async_summarise_message_history(
     conversation_text = get_conversation_text(message_history)
     system_prompt, user_prompt_prefix = _get_prompts_for_kind(prompt_kind)
 
-    provider = get_provider(barebone_model.model_id, barebone_model.api_url)
+    provider = _normalize_provider_for_summary(
+        get_provider(barebone_model.model_id, barebone_model.api_url)
+    )
 
     # Use the same model as the agent if requested (default), otherwise use a cheaper model
     if use_same_model:
         model_name = barebone_model.model_id
         api_url = barebone_model.api_url
+        if not api_url or "responses" in (api_url or ""):
+            api_url = "https://api.openai.com/v1/chat/completions"
     else:
         model_name, api_url = get_summary_model(provider)
         if not model_name or not api_url:
