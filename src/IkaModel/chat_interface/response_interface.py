@@ -8,6 +8,7 @@ from IkaCore.cli_output import get_cli_output
 
 LOG = logging.getLogger(__name__)
 
+_TOOL_EXECUTOR_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool-exec")
 
 def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "input_cached_tokens": 0}
@@ -99,12 +100,11 @@ def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Call
     cli.tool_call(tool_name, tool_args, hierarchy, step)
 
     try:
-        with ThreadPoolExecutor(max_workers=1) as executor_pool:
-            future = executor_pool.submit(executor_fn, validated_args)
-            result = future.result(timeout=timeout)
+        future = _TOOL_EXECUTOR_POOL.submit(executor_fn, validated_args)
+        result = future.result(timeout=timeout)
 
-            result_str = result if isinstance(result, str) else json.dumps(result)
-            cli.tool_result(tool_name, result_str, hierarchy, step)
+        result_str = result if isinstance(result, str) else json.dumps(result)
+        cli.tool_result(tool_name, result_str, hierarchy, step)
 
         LOG.debug(f"[TOOL END] Finished tool '{tool_name}'")
         if isinstance(result, str):
