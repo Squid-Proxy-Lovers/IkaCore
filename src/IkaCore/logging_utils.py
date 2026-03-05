@@ -255,6 +255,7 @@ class IkaLogger:
             "gemini-3.1-pro": (2.00, 0.20, 12.00),
         }
         mid = model_id.lower()
+        
         result = cost_map.get(mid)
         if result:
             return result
@@ -263,6 +264,11 @@ class IkaLogger:
             if mid.startswith(key):
                 return cost_map[key]
         return None
+
+        # Strip OpenRouter-style provider prefix (e.g. "google/gemini-3-flash-preview")
+        if "/" in mid:
+            mid = mid.split("/", 1)[1]
+        return cost_map.get(mid, None)
 
     def compute_cost(self, model_id: str, usage: Dict[str, Any]) -> Dict[str, float]:
         model_cost = self.get_model_cost(model_id)
