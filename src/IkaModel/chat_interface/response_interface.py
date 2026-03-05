@@ -187,6 +187,36 @@ def format_gemini_results(tool_calls: List[dict], tool_results: List[str]) -> Li
     return function_responses
 
 
+def _build_empty_args_error(tool_name: str, tool_metadata: dict, tool_executors: dict) -> Optional[str]:
+    """If a tool has required params, return an error message with schema hints.
+    Returns None if the tool has no required params (empty args are OK)."""
+    _schema = tool_metadata.get(tool_name, {}).get("parameters") or {}
+    _required = _schema.get("required", [])
+    _props = _schema.get("properties", {})
+    # Fallback: check __tool_schema__ on executor
+    if not _required and not _props:
+        _exec = tool_executors.get(tool_name)
+        if _exec and hasattr(_exec, "__tool_schema__"):
+            _schema = _exec.__tool_schema__
+            _required = _schema.get("required", [])
+            _props = _schema.get("properties", {})
+    if not _required and not _props:
+        return None  # No schema info — let the tool handle it
+    param_hints = []
+    for pname, pdef in _props.items():
+        if pname == "__required__":
+            continue
+        req_marker = " (REQUIRED)" if pname in _required else ""
+        ptype = pdef.get("type", "string") if isinstance(pdef, dict) else "string"
+        pdesc = pdef.get("description", "") if isinstance(pdef, dict) else ""
+        param_hints.append(f'  "{pname}": <{ptype}>{req_marker} — {pdesc}')
+    schema_hint = "\n".join(param_hints)
+    return json.dumps({
+        "error": f"Tool '{tool_name}' was called with empty arguments {{}}. "
+                 f"You MUST provide the required parameters. Expected schema:\n{schema_hint}"
+    })
+
+
 def execute_tool_calls(
     tool_calls: List[dict],
     tool_executors: Dict[str, Callable],
@@ -219,15 +249,22 @@ def execute_tool_calls(
             args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
         except Exception as e:
             LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
-            # Skip execution — return an explicit error so the model knows exactly
-            # what went wrong instead of running the tool with empty args (which
-            # produces a confusing validation error and causes GPT to spiral).
             error_msg = json.dumps({
                 "error": f"Malformed JSON in arguments for tool '{tool_name}': {e}. "
                          f"Fix the JSON syntax and retry. Raw arguments were: {args_raw[:200]}"
             })
             tool_call_id_to_result[tool_call_id] = error_msg
             continue
+
+        # Detect empty args when tool has required parameters — give the model
+        # a clear schema hint so it knows what to provide on retry.
+        if (not args or args == {}) and tool_name != "agent_end":
+            empty_err = _build_empty_args_error(tool_name, tool_metadata, tool_executors)
+            if empty_err:
+                LOG.warning(f"Empty args for tool '{tool_name}', returning schema hint")
+                tool_call_id_to_result[tool_call_id] = empty_err
+                tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+                continue
 
         tool_signature = (tool_name, json.dumps(args, sort_keys=True))
         if tool_signature in seen_tool_signatures:
