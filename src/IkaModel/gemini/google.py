@@ -66,7 +66,10 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
         "contents": contents,
         "generationConfig": {
             "temperature": model.temperature,
-            "maxOutputTokens": model.max_tokens if model.max_tokens and model.max_tokens > 0 else 100
+            "maxOutputTokens": model.max_tokens if model.max_tokens and model.max_tokens > 0 else 100,
+            "thinkingConfig": {
+                "thinkingBudget": 0,
+            },
         }
     }
 

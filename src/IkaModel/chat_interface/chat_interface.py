@@ -276,9 +276,17 @@ def chat(
         tool_metadata = {}
         if hasattr(barebone_model, 'agent_tools'):
             for agent_tool in barebone_model.agent_tools:
+                _tool_params = {}
+                if hasattr(agent_tool, 'args') and agent_tool.args:
+                    _ta = agent_tool.args
+                    if hasattr(_ta, 'properties') and _ta.properties:
+                        _req = list(_ta.properties.get("__required__", []))
+                        _props = {k: v for k, v in _ta.properties.items() if k != "__required__" and isinstance(v, dict)}
+                        _tool_params = {"properties": _props, "required": _req}
                 tool_metadata[agent_tool.name] = {
                     "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
-                    "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
+                    "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0,
+                    "parameters": _tool_params,
                 }
         step = getattr(barebone_model, '_current_step', 0)
         print("tool_calls_from_llm:", tool_calls)
@@ -404,9 +412,17 @@ def chat(
         tool_metadata = {}
         if hasattr(barebone_model, 'agent_tools'):
             for agent_tool in barebone_model.agent_tools:
+                _tool_params = {}
+                if hasattr(agent_tool, 'args') and agent_tool.args:
+                    _ta = agent_tool.args
+                    if hasattr(_ta, 'properties') and _ta.properties:
+                        _req = list(_ta.properties.get("__required__", []))
+                        _props = {k: v for k, v in _ta.properties.items() if k != "__required__" and isinstance(v, dict)}
+                        _tool_params = {"properties": _props, "required": _req}
                 tool_metadata[agent_tool.name] = {
                     "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
-                    "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
+                    "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0,
+                    "parameters": _tool_params,
                 }
         agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
         step = getattr(barebone_model, '_current_step', 0)
