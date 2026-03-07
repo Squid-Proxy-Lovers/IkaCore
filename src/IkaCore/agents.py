@@ -540,12 +540,19 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     prompt_kind="what_remains",
                     write_to_history=False,
                 ) or "(no summary)"
+                # Build a list of available tool names so the redirect references real tools
+                tool_names = [t.name for t in (self.tools or []) if hasattr(t, 'name') and t.name not in ("agent_end",)]
+                submit_tools = [n for n in tool_names if "submit" in n.lower()]
+                if submit_tools:
+                    tool_hint = f"use {' or '.join(submit_tools)} with your findings if you have not already, then call agent_end."
+                else:
+                    tool_hint = "call agent_end with your final answer."
                 redirect = (
                     "CRITICAL: You have used all allocated steps without completing the task. "
                     "You MUST refer back to your original prompt and complete the original goal. "
                     "Do NOT repeat the same tool calls. Summary of the conversation so far:\n\n"
                     f"{summary}\n\n"
-                    "Complete the task now: use submit_discovery with your findings if you have not already, then call agent_end with your final answer. "
+                    f"Complete the task now: {tool_hint} "
                     f"You have {self.extend_steps_by} additional steps."
                 )
                 messages.append({"role": "user", "content": redirect})
@@ -628,6 +635,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                 "first_input": {"message": f"Previous agent summary:\n{summary}", "tokens": 0},
                 "summary": {"message": "", "tokens": 0},
                 "messages": {},
+                "compaction_count": 0,
+                "_context_warning_issued": None,
             }
             return self.next_agent.execution()
 

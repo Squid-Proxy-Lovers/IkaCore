@@ -305,6 +305,8 @@ class IkaWorkflow:
                 "first_input": {"message": merged, "tokens": 0},
                 "summary": {"message": "", "tokens": 0},
                 "messages": {},
+                "compaction_count": 0,
+                "_context_warning_issued": None,
             }
             summary = summarise_message_history(barebone, history)
             return summary or merged

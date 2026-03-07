@@ -20,6 +20,7 @@ from ..summarization import (
     run_summarization,  # noqa: F401 re-export for callers
     get_summary_model,  # noqa: F401 re-export for callers
     create_summary_payload,  # noqa: F401 re-export for callers
+    get_context_usage,  # noqa: F401 re-export for callers
 )
 from .response_interface import (
     extract_usage,
@@ -66,6 +67,7 @@ def _build_chat_response(
         "usage": usage_info,
         "cost": cost_info,
         "hijacked": hijacked,
+        "compaction_count": message_history.get("compaction_count", 0),
     }
 
 
@@ -75,6 +77,8 @@ def init_message_history() -> dict:
         "first_input": {"message": "", "tokens": 0},
         "summary": {"message": "", "tokens": 0},
         "messages": {},
+        "compaction_count": 0,
+        "_context_warning_issued": None,  # tracks last warning level emitted: "warning" or "critical"
     }
 
 
@@ -94,6 +98,110 @@ def get_total_tokens(message_history: dict) -> int:
         t = msg.get("tokens", 0) or 0
         total += t if t > 0 else _estimate_tokens(msg.get("message", ""))
     return total
+
+
+def _check_context_and_compact(
+    barebone_model: BareBoneModel,
+    message_history: dict,
+    messages: list,
+    force: bool = False,
+) -> bool:
+    """Check context usage, emit warnings, and auto-compact if needed.
+
+    Returns True if compaction was performed.
+    """
+    context_budget = getattr(barebone_model, 'context_budget', None)
+    usage = get_context_usage(message_history, barebone_model.model_id, context_budget)
+    ratio = usage["usage_ratio"]
+    warning_level = usage["warning_level"]
+    last_warning = message_history.get("_context_warning_issued")
+
+    cli = get_cli_output()
+    hierarchy = getattr(barebone_model, 'agent_hierarchy', None) or []
+
+    # Emit context usage warnings (only escalate, don't repeat same level)
+    if warning_level == "warning" and last_warning is None:
+        LOG.info(
+            "Context usage at %.0f%% (%d/%d tokens). Consider wrapping up or expect auto-compaction soon.",
+            ratio * 100, usage["token_count"], usage["max_tokens"],
+        )
+        cli.emit(
+            OutputType.AGENT_RESPONSE,
+            f"Context usage: {ratio*100:.0f}% ({usage['token_count']}/{usage['max_tokens']} tokens). Auto-compaction will trigger at 80%.",
+            hierarchy,
+            step=0,
+        )
+        message_history["_context_warning_issued"] = "warning"
+
+    if warning_level == "critical" or force:
+        if last_warning != "critical":
+            LOG.info(
+                "Context usage at %.0f%% (%d/%d tokens). Triggering auto-compaction.",
+                ratio * 100, usage["token_count"], usage["max_tokens"],
+            )
+            cli.emit(
+                OutputType.SUMMARIZATION,
+                f"Auto-compacting conversation (context at {ratio*100:.0f}%, compaction #{message_history.get('compaction_count', 0) + 1})...",
+                hierarchy,
+                step=0,
+            )
+        message_history["_context_warning_issued"] = "critical"
+        summarise_message_history(barebone_model, message_history)
+        # Reset warning state after compaction so warnings can fire again
+        message_history["_context_warning_issued"] = None
+        return True
+
+    return False
+
+
+async def _async_check_context_and_compact(
+    barebone_model: BareBoneModel,
+    message_history: dict,
+    messages: list,
+    client=None,
+    force: bool = False,
+) -> bool:
+    """Async version: check context usage, emit warnings, and auto-compact if needed."""
+    context_budget = getattr(barebone_model, 'context_budget', None)
+    usage = get_context_usage(message_history, barebone_model.model_id, context_budget)
+    ratio = usage["usage_ratio"]
+    warning_level = usage["warning_level"]
+    last_warning = message_history.get("_context_warning_issued")
+
+    cli = get_cli_output()
+    hierarchy = getattr(barebone_model, 'agent_hierarchy', None) or []
+
+    if warning_level == "warning" and last_warning is None:
+        LOG.info(
+            "Context usage at %.0f%% (%d/%d tokens). Consider wrapping up or expect auto-compaction soon.",
+            ratio * 100, usage["token_count"], usage["max_tokens"],
+        )
+        cli.emit(
+            OutputType.AGENT_RESPONSE,
+            f"Context usage: {ratio*100:.0f}% ({usage['token_count']}/{usage['max_tokens']} tokens). Auto-compaction will trigger at 80%.",
+            hierarchy,
+            step=0,
+        )
+        message_history["_context_warning_issued"] = "warning"
+
+    if warning_level == "critical" or force:
+        if last_warning != "critical":
+            LOG.info(
+                "Context usage at %.0f%% (%d/%d tokens). Triggering auto-compaction.",
+                ratio * 100, usage["token_count"], usage["max_tokens"],
+            )
+            cli.emit(
+                OutputType.SUMMARIZATION,
+                f"Auto-compacting conversation (context at {ratio*100:.0f}%, compaction #{message_history.get('compaction_count', 0) + 1})...",
+                hierarchy,
+                step=0,
+            )
+        message_history["_context_warning_issued"] = "critical"
+        await async_summarise_message_history(barebone_model, message_history, client)
+        message_history["_context_warning_issued"] = None
+        return True
+
+    return False
 
 
 def _api_request_with_context_fallback(
@@ -162,17 +270,15 @@ def chat(
         raise ValueError("tool_executors must be a dictionary if provided")
     
     message_history = message_history or init_message_history()
+    # Ensure compaction tracking fields exist (for histories created before this change)
+    message_history.setdefault("compaction_count", 0)
+    message_history.setdefault("_context_warning_issued", None)
     tool_executors = tool_executors or {}
     if logger:
         logger.log_input(messages)
-    
-    token_count = get_total_tokens(message_history)
-    max_tokens = getattr(barebone_model, 'context_budget', None) or get_max_tokens(barebone_model.model_id)
 
-    if token_count > max_tokens * 0.8:
-        #LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
-        summarise_message_history(barebone_model, message_history)
-    
+    _check_context_and_compact(barebone_model, message_history, messages)
+
     if not message_history["first_input"]["message"] and messages:
         message_history["first_input"]["message"] = messages[0].get("content", str(messages[0]))
         message_history["first_input"]["tokens"] = 0
@@ -271,6 +377,7 @@ def chat(
                         "usage": total_usage,
                         "cost": cost_info,
                         "hijacked": True,
+                        "compaction_count": message_history.get("compaction_count", 0),
                     }
 
         tool_metadata = {}
@@ -383,6 +490,9 @@ def chat(
             executed_tool_call_list, tool_messages, tool_results, tokens,
             repeated_warning_msg, format_gemini_results
         )
+
+        # Mid-tool-round compaction check
+        _check_context_and_compact(barebone_model, message_history, messages)
 
         rounds += 1
         if rounds >= max_tool_rounds:
@@ -522,16 +632,13 @@ async def async_chat(
         raise ValueError("tool_executors must be a dictionary if provided")
 
     message_history = message_history or init_message_history()
+    message_history.setdefault("compaction_count", 0)
+    message_history.setdefault("_context_warning_issued", None)
     tool_executors = tool_executors or {}
     if logger:
         logger.log_input(messages)
 
-    token_count = get_total_tokens(message_history)
-    max_tokens = getattr(barebone_model, 'context_budget', None) or get_max_tokens(barebone_model.model_id)
-
-    if token_count > max_tokens * 0.8:
-        LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
-        await async_summarise_message_history(barebone_model, message_history, client)
+    await _async_check_context_and_compact(barebone_model, message_history, messages, client)
 
     if not message_history["first_input"]["message"] and messages:
         message_history["first_input"]["message"] = messages[0].get("content", str(messages[0]))
@@ -641,6 +748,7 @@ async def async_chat(
                             "usage": total_usage,
                             "cost": cost_info,
                             "hijacked": True,
+                            "compaction_count": message_history.get("compaction_count", 0),
                         }
 
             repeated_warning_msg_async = ""
@@ -746,6 +854,9 @@ async def async_chat(
                 repeated_warning_msg_async, format_gemini_results
             )
 
+            # Mid-tool-round compaction check
+            await _async_check_context_and_compact(barebone_model, message_history, messages, client)
+
             rounds += 1
             if rounds >= max_tool_rounds:
                 LOG.debug("[TRACE] async_chat: Max tool rounds reached")
@@ -831,7 +942,7 @@ async def async_chat(
             logger.log_output(content, total_usage, cost_info, message_history)
 
         _record_model_message(message_history, content, tokens, reasoning_content)
-        
+
         return _build_chat_response(
             content,
             reasoning_content,
