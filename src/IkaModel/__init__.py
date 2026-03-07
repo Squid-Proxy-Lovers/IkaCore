@@ -10,6 +10,7 @@ from .chat_interface.chat_interface import (
     summarise_message_history,
     execute_tool_calls,
     get_provider,
+    get_context_usage,
     # Async functions
     async_chat,
     async_summarise_message_history,
@@ -29,6 +30,7 @@ __all__ = [
     "summarise_message_history",
     "execute_tool_calls",
     "get_provider",
+    "get_context_usage",
     # Async functions
     "async_chat",
     "async_summarise_message_history",

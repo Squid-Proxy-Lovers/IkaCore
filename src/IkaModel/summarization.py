@@ -11,6 +11,8 @@ _LOG = logging.getLogger(__name__)
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
+COMPACT_BOUNDARY = "\n--- [COMPACT_BOUNDARY] ---\n"
+
 
 def _load_prompt(relative_path: str, fallback: str) -> str:
     path = _PROMPTS_DIR / relative_path
@@ -182,7 +184,44 @@ def get_conversation_text(message_history: dict) -> str:
         parts.append(message_history["summary"]["message"])
     for msg_id in message_history["messages"]:
         parts.append(message_history["messages"][msg_id]["message"])
-    return "\n".join(parts)
+    full_text = "\n".join(parts)
+
+    # Compact boundary: only summarize content after the last boundary
+    if COMPACT_BOUNDARY.strip() in full_text:
+        boundary_idx = full_text.rfind(COMPACT_BOUNDARY.strip())
+        # Keep a short reference to the prior summary, then only the new content
+        prior_context = full_text[:boundary_idx].strip()
+        new_content = full_text[boundary_idx + len(COMPACT_BOUNDARY.strip()):].strip()
+        if new_content:
+            return f"[Prior compact summary exists — preserved above boundary]\n\n{new_content}"
+        # If no new content after boundary, summarize everything (edge case)
+        return full_text
+
+    return full_text
+
+
+def get_context_usage(message_history: dict, model_id: str, context_budget: Optional[int] = None) -> dict:
+    """Return context usage stats: token_count, max_tokens, usage_ratio, warning_level."""
+    from .request_interface import get_max_tokens
+    from .chat_interface import get_total_tokens
+
+    token_count = get_total_tokens(message_history)
+    max_tokens = context_budget or get_max_tokens(model_id)
+    ratio = token_count / max_tokens if max_tokens > 0 else 0.0
+
+    if ratio >= 0.8:
+        warning_level = "critical"
+    elif ratio >= 0.6:
+        warning_level = "warning"
+    else:
+        warning_level = None
+
+    return {
+        "token_count": token_count,
+        "max_tokens": max_tokens,
+        "usage_ratio": ratio,
+        "warning_level": warning_level,
+    }
 
 
 def run_summarization(
@@ -242,10 +281,15 @@ def run_summarization(
             summary_tokens = usage.get("totalTokenCount", 0)
 
         if write_to_history:
-            message_history["summary"]["message"] = f"[SUMMARY]\n{summary}"
+            message_history["summary"]["message"] = f"[SUMMARY]\n{summary}{COMPACT_BOUNDARY}"
             message_history["summary"]["tokens"] = summary_tokens
             message_history["messages"] = {}
-            _LOG.info("Message history summarized. Kept: system prompt, first input, and summary. Cleared all other messages.")
+            message_history.setdefault("compaction_count", 0)
+            message_history["compaction_count"] += 1
+            _LOG.info(
+                "Message history compacted (compaction #%d). Kept: system prompt, first input, and summary. Cleared all other messages.",
+                message_history["compaction_count"],
+            )
 
         return summary
     except httpx.HTTPError as e:
@@ -317,10 +361,15 @@ async def async_summarise_message_history(
             summary_tokens = usage.get("totalTokenCount", 0)
 
         if write_to_history:
-            message_history["summary"]["message"] = f"[SUMMARY]\n{summary}"
+            message_history["summary"]["message"] = f"[SUMMARY]\n{summary}{COMPACT_BOUNDARY}"
             message_history["summary"]["tokens"] = summary_tokens
             message_history["messages"] = {}
-            _LOG.info("Message history summarized. Kept: system prompt, first input, and summary. Cleared all other messages.")
+            message_history.setdefault("compaction_count", 0)
+            message_history["compaction_count"] += 1
+            _LOG.info(
+                "Message history compacted (compaction #%d). Kept: system prompt, first input, and summary. Cleared all other messages.",
+                message_history["compaction_count"],
+            )
 
         return summary
     except httpx.HTTPError as e:

@@ -96,6 +96,8 @@ class AgentHelpersMixin:
             "first_input": {"message": "", "tokens": 0},
             "summary": {"message": "", "tokens": 0},
             "messages": {},
+            "compaction_count": 0,
+            "_context_warning_issued": None,
         }
 
     @staticmethod
