@@ -1,4 +1,5 @@
 import asyncio
+import atexit
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -9,6 +10,17 @@ from IkaCore.cli_output import get_cli_output
 LOG = logging.getLogger(__name__)
 
 _TOOL_EXECUTOR_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool-exec")
+
+
+def _shutdown_tool_executor_pool() -> None:
+    """Best-effort shutdown to avoid interpreter hang on active worker threads."""
+    try:
+        _TOOL_EXECUTOR_POOL.shutdown(wait=False, cancel_futures=True)
+    except Exception:
+        pass
+
+
+atexit.register(_shutdown_tool_executor_pool)
 
 def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "input_cached_tokens": 0}
@@ -99,6 +111,7 @@ def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Call
     executor_fn = tool_executors[tool_name]
     cli.tool_call(tool_name, tool_args, hierarchy, step)
 
+    future = None
     try:
         future = _TOOL_EXECUTOR_POOL.submit(executor_fn, validated_args)
         result = future.result(timeout=timeout)
@@ -111,6 +124,8 @@ def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Call
             return result
         return json.dumps(result)
     except FutureTimeoutError:
+        if future is not None:
+            future.cancel()
         timeout_msg = f"Tool '{tool_name}' execution timed out after {timeout}s"
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
         LOG.warning(timeout_msg)
@@ -293,7 +308,8 @@ def execute_tool_calls(
 
     if parallel_calls:
         LOG.debug(f"[TOOL PARALLEL] Starting {len(parallel_calls)} parallel tools: {[t[0] for t in parallel_calls]}")
-        with ThreadPoolExecutor(max_workers=len(parallel_calls)) as executor_pool:
+        executor_pool = ThreadPoolExecutor(max_workers=len(parallel_calls))
+        try:
             futures = {}
             for tool_name, args, tool_call_id in parallel_calls:
                 future = executor_pool.submit(execute_tool, tool_name, args, tool_executors, timeout, agent_hierarchy, step)
@@ -302,14 +318,23 @@ def execute_tool_calls(
             for future in futures:
                 tool_name, tool_call_id = futures[future]
                 try:
-                    result = future.result()
+                    # Guard against wrapper-level hangs as well.
+                    result = future.result(timeout=timeout + 5.0)
                     tool_call_id_to_result[tool_call_id] = result
+                    tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+                except FutureTimeoutError:
+                    future.cancel()
+                    error_msg = f"Parallel tool execution timed out after {timeout + 5.0}s for '{tool_name}'"
+                    LOG.warning(error_msg)
+                    tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
                 except Exception as e:
                     error_msg = f"Parallel tool execution error: {str(e)}"
                     LOG.error(error_msg)
                     tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+        finally:
+            executor_pool.shutdown(wait=False, cancel_futures=True)
 
     for tool_name, args, tool_call_id in sequential_calls:
         result = execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
