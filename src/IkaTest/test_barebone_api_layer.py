@@ -18,13 +18,14 @@ from IkaModel.chat_interface.chat_interface import (
     init_message_history,
     get_total_tokens,
     chat,
+    _control_call_succeeded,
 )
 from IkaModel.chat_helpers_common import (
     build_provider_request,
     parse_provider_response,
     append_provider_tool_messages,
 )
-from IkaModel.chat_interface.response_interface import extract_usage, format_gemini_results
+from IkaModel.chat_interface.response_interface import extract_usage, format_gemini_results, execute_tool_calls
 
 
 PROVIDERS = ("openai", "deepseek", "anthropic", "gemini", "openrouter")
@@ -452,6 +453,37 @@ class TestChatWithToolCallsFlow:
         assert out["tool_calls"] == []
         assert out["content"] == ""
         assert len(history["messages"]) >= 1
+
+
+class TestBatchedAgentEndGuard:
+    def test_execute_tool_calls_rejects_mixed_agent_end_batch(self):
+        regular_tool = MagicMock(return_value="regular tool ran")
+        agent_end_tool = MagicMock(return_value="Agent execution ended successfully.")
+        tool_calls = [
+            {"id": "c1", "function": {"name": "lookup", "arguments": '{"query": "x"}'}},
+            {"id": "c2", "function": {"name": "agent_end", "arguments": '{"input": "done"}'}},
+        ]
+
+        formatted, tool_results, counts, executed = execute_tool_calls(
+            tool_calls,
+            {"lookup": regular_tool, "agent_end": agent_end_tool},
+            "openai",
+        )
+
+        assert regular_tool.call_count == 0
+        assert agent_end_tool.call_count == 0
+        assert counts == {}
+        assert len(tool_results) == 2
+        assert all("must be sent by itself" in json.loads(result)["error"] for result in tool_results)
+        assert all(tool_call.get("_batch_rejected") is True for tool_call in executed)
+        assert len(formatted) == 2
+        assert all(message["role"] == "tool" for message in formatted)
+
+    def test_control_call_success_requires_non_error_tool_result(self):
+        executed = [{"id": "c1", "function": {"name": "agent_end", "arguments": '{"input": "done"}'}}]
+
+        assert _control_call_succeeded(executed, [json.dumps({"error": "retry alone"})], "agent_end") is False
+        assert _control_call_succeeded(executed, ["Agent execution ended successfully."], "agent_end") is True
 
 
 class TestAllProvidersCoverage:

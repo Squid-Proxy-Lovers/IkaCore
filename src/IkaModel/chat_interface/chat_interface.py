@@ -69,6 +69,26 @@ def _build_chat_response(
     }
 
 
+def _tool_result_has_error(result: str) -> bool:
+    try:
+        parsed = json.loads(result)
+    except Exception:
+        return False
+    return isinstance(parsed, dict) and "error" in parsed
+
+
+def _control_call_succeeded(executed_tool_calls: List[dict], tool_results: List[str], control_name: str) -> bool:
+    for tool_call, tool_result in zip(executed_tool_calls, tool_results):
+        name = tool_call.get("function", {}).get("name") or tool_call.get("name", "")
+        if name == control_name and not _tool_result_has_error(tool_result):
+            return True
+    return False
+
+
+def _count_step_advancing_tool_calls(executed_tool_calls: List[dict]) -> int:
+    return sum(1 for tool_call in executed_tool_calls if not tool_call.get("_batch_rejected"))
+
+
 def init_message_history() -> dict:
     return {
         "system": {"message": "", "tokens": 0},
@@ -295,12 +315,14 @@ def chat(
             barebone_model._tool_call_counts.update(updated_counts)
         all_executed_tool_call_list.extend(executed_tool_call_list)
         
-        num_tools_executed = len(executed_tool_call_list)
+        num_tools_executed = _count_step_advancing_tool_calls(executed_tool_call_list)
         total_tool_calls_in_cycle += num_tools_executed
         if hasattr(barebone_model, '_current_step'):
             barebone_model._current_step += num_tools_executed
         
         for tool_call in executed_tool_call_list:
+            if tool_call.get("_batch_rejected"):
+                continue
             fn = tool_call.get("function", {})
             tool_name = fn.get("name") or tool_call.get("name", "")
             args = fn.get("arguments", "{}")
@@ -313,14 +335,8 @@ def chat(
             logger.log_tool_results(executed_tool_call_list, tool_results)
         
         LOG.debug("[TRACE] chat: Checking agent_end")
-        agent_end_called = False
-        stage_end_called = False
-        for tc in executed_tool_call_list:
-            name = tc.get("function", {}).get("name") or tc.get("name", "")
-            if name == "agent_end":
-                agent_end_called = True
-            elif name == "stage_end":
-                stage_end_called = True
+        agent_end_called = _control_call_succeeded(executed_tool_call_list, tool_results, "agent_end")
+        stage_end_called = _control_call_succeeded(executed_tool_call_list, tool_results, "stage_end")
 
         if agent_end_called:
             if logger:
@@ -434,14 +450,8 @@ def chat(
         if logger:
             logger.log_tool_results(executed_tool_call_list, tool_results)
         
-        agent_end_called = False
-        stage_end_called = False
-        for tc in executed_tool_call_list:
-            name = tc.get("function", {}).get("name") or tc.get("name", "")
-            if name == "agent_end":
-                agent_end_called = True
-            elif name == "stage_end":
-                stage_end_called = True
+        agent_end_called = _control_call_succeeded(executed_tool_call_list, tool_results, "agent_end")
+        stage_end_called = _control_call_succeeded(executed_tool_call_list, tool_results, "stage_end")
 
         if agent_end_called:
             if logger:
@@ -665,12 +675,14 @@ async def async_chat(
                 barebone_model._tool_call_counts.update(updated_counts)
             all_executed_tool_call_list.extend(executed_tool_call_list)
             
-            num_tools_executed = len(executed_tool_call_list)
+            num_tools_executed = _count_step_advancing_tool_calls(executed_tool_call_list)
             total_tool_calls_in_cycle += num_tools_executed
             if hasattr(barebone_model, '_current_step'):
                 barebone_model._current_step += num_tools_executed
             
             for tool_call in executed_tool_call_list:
+                if tool_call.get("_batch_rejected"):
+                    continue
                 fn = tool_call.get("function", {})
                 tool_name = fn.get("name") or tool_call.get("name", "")
                 args = fn.get("arguments", "{}")
@@ -683,14 +695,8 @@ async def async_chat(
                 logger.log_tool_results(executed_tool_call_list, tool_results)
             
             LOG.debug("[TRACE] async_chat: Checking agent_end")
-            agent_end_called = False
-            stage_end_called = False
-            for tc in executed_tool_call_list:
-                name = tc.get("function", {}).get("name") or tc.get("name", "")
-                if name == "agent_end":
-                    agent_end_called = True
-                elif name == "stage_end":
-                    stage_end_called = True
+            agent_end_called = _control_call_succeeded(executed_tool_call_list, tool_results, "agent_end")
+            stage_end_called = _control_call_succeeded(executed_tool_call_list, tool_results, "stage_end")
 
             if agent_end_called:
                 if logger:
@@ -788,14 +794,8 @@ async def async_chat(
             if logger:
                 logger.log_tool_results(executed_tool_call_list, tool_results)
             
-            agent_end_called = False
-            stage_end_called = False
-            for tc in executed_tool_call_list:
-                name = tc.get("function", {}).get("name") or tc.get("name", "")
-                if name == "agent_end":
-                    agent_end_called = True
-                elif name == "stage_end":
-                    stage_end_called = True
+            agent_end_called = _control_call_succeeded(executed_tool_call_list, tool_results, "agent_end")
+            stage_end_called = _control_call_succeeded(executed_tool_call_list, tool_results, "stage_end")
 
             if agent_end_called:
                 if logger:

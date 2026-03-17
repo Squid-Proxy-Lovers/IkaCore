@@ -56,7 +56,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         memory: bool = False,
         memory_access: Optional[Dict[str, bool]] = None,
         final_answer_check: Optional[List[Callable]] = None,
-        logging_level: int = 0,
+        logging_level: int = 1,
         logging_file: str = "logs.txt",
         show_usage_level0: bool = True,
         checkpoint_db_path: str = "checkpoints.db",
@@ -475,7 +475,9 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     final_content,
                     current_hierarchy,
                     step=current_step,
-                    is_final=True
+                    is_final=True,
+                    usage=response.get("usage", {}),
+                    cost=response.get("cost", {}),
                 )
                 if self.logger:
                     self.logger.log_step(
@@ -496,7 +498,9 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     last_content,
                     current_hierarchy,
                     step=current_step,
-                    is_final=False
+                    is_final=False,
+                    usage=response.get("usage", {}),
+                    cost=response.get("cost", {}),
                 )
                 if self.logger:
                     self.logger.log_step(
@@ -583,7 +587,9 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             f"Reached max steps ({self.maxsteps}). Returning last content.\n\n{final_response}",
             current_hierarchy,
             step=final_step,
-            is_final=True
+            is_final=True,
+            usage=getattr(self, "_total_usage", {}),
+            cost=getattr(self, "_total_cost", {}),
         )
         return final_response, final_response
 

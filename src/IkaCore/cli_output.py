@@ -451,10 +451,28 @@ class CLIOutput:
         response: str,
         hierarchy: List[str],
         step: int,
-        is_final: bool = False
+        is_final: bool = False,
+        usage: Optional[Dict[str, Any]] = None,
+        cost: Optional[Dict[str, Any]] = None,
     ):
         status = " (Final)" if is_final else ""
-        content = f"Agent: {agent_name}{status}\nResponse:\n{response}"
+        content_parts = [f"Agent: {agent_name}{status}", "Response:", response]
+        if usage:
+            content_parts.append(
+                "Usage: "
+                f"in={usage.get('input_tokens', 0)} "
+                f"cached={usage.get('input_cached_tokens', 0)} "
+                f"out={usage.get('output_tokens', 0)} "
+                f"total={usage.get('total_tokens', 0)}"
+            )
+        if cost:
+            content_parts.append(
+                "Cost: "
+                f"in=${float(cost.get('input_cost', 0.0) or 0.0):.6f} "
+                f"out=${float(cost.get('output_cost', 0.0) or 0.0):.6f} "
+                f"total=${float(cost.get('total_cost', 0.0) or 0.0):.6f}"
+            )
+        content = "\n".join(content_parts)
         self.emit(OutputType.AGENT_RESPONSE, content, hierarchy, step)
 
     def summarization(

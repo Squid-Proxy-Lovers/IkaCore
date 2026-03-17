@@ -3,6 +3,7 @@ import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Callable
 
 from IkaCore.cli_output import get_cli_output
@@ -246,6 +247,56 @@ def _build_empty_args_error(tool_name: str, tool_metadata: dict, tool_executors:
     })
 
 
+def _get_tool_name(tool_call: dict) -> str:
+    fn = tool_call.get("function", {})
+    return fn.get("name") or tool_call.get("name", "")
+
+
+def _format_results_for_provider(provider: str, tool_call_order: List[dict], tool_results: List[str]) -> List[dict]:
+    if provider in ("deepseek", "openai", "openrouter"):
+        return format_openai_results(tool_call_order, tool_results)
+    if provider == "openai_responses":
+        return format_openai_responses_results(tool_call_order, tool_results)
+    if provider == "anthropic":
+        return format_anthropic_results(tool_call_order, tool_results)
+    if provider == "gemini":
+        return format_gemini_results(tool_call_order, tool_results)
+    return []
+
+
+def _reject_mixed_agent_end_batch(
+    tool_calls: List[dict],
+    provider: str,
+    tool_call_counts: Dict[str, int],
+) -> tuple[List[dict], List[str], Dict[str, int], List[dict]]:
+    tool_names = [_get_tool_name(tool_call) for tool_call in tool_calls]
+    batch_summary = ", ".join(name or "<unknown>" for name in tool_names)
+    shared_reason = (
+        "Batched tool request rejected: 'agent_end' must be sent by itself with no other tool calls in the same response. "
+        "Do not batch 'agent_end' with any other tools. If you still need tool outputs, re-send those tools without "
+        "'agent_end'. After you review their results, send a new response containing only 'agent_end'."
+    )
+
+    rejected_tool_calls = []
+    tool_results = []
+    for tool_call in tool_calls:
+        tool_name = _get_tool_name(tool_call)
+        rejected_tool_call = deepcopy(tool_call)
+        rejected_tool_call["_batch_rejected"] = True
+        rejected_tool_call["_batch_rejected_reason"] = "mixed_agent_end"
+        rejected_tool_calls.append(rejected_tool_call)
+        tool_results.append(json.dumps({
+            "error": shared_reason,
+            "tool_name": tool_name,
+            "batched_tools": tool_names,
+            "batch_summary": batch_summary,
+        }))
+
+    LOG.warning("Rejected mixed agent_end batch: %s", batch_summary)
+    formatted_messages = _format_results_for_provider(provider, rejected_tool_calls, tool_results)
+    return formatted_messages, tool_results, tool_call_counts, rejected_tool_calls
+
+
 def execute_tool_calls(
     tool_calls: List[dict],
     tool_executors: Dict[str, Callable],
@@ -261,6 +312,10 @@ def execute_tool_calls(
 
     tool_metadata = tool_metadata or {}
     tool_call_counts = tool_call_counts or {}
+    tool_names = [_get_tool_name(tool_call) for tool_call in tool_calls]
+    if "agent_end" in tool_names and len(tool_calls) > 1:
+        return _reject_mixed_agent_end_batch(tool_calls, provider, tool_call_counts)
+
     tool_call_order = tool_calls.copy()
     tool_call_id_to_result: Dict[str, str] = {}
 
@@ -361,16 +416,7 @@ def execute_tool_calls(
         tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
         tool_results.append(tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})))
 
-    if provider in ("deepseek", "openai", "openrouter"):
-        formatted_messages = format_openai_results(tool_call_order, tool_results)
-    elif provider == "openai_responses":
-        formatted_messages = format_openai_responses_results(tool_call_order, tool_results)
-    elif provider == "anthropic":
-        formatted_messages = format_anthropic_results(tool_call_order, tool_results)
-    elif provider == "gemini":
-        formatted_messages = format_gemini_results(tool_call_order, tool_results)
-    else:
-        formatted_messages = []
+    formatted_messages = _format_results_for_provider(provider, tool_call_order, tool_results)
 
     return formatted_messages, tool_results, tool_call_counts, tool_call_order
 
@@ -448,6 +494,10 @@ async def async_execute_tool_calls(
 
     tool_metadata = tool_metadata or {}
     tool_call_counts = tool_call_counts or {}
+    tool_names = [_get_tool_name(tool_call) for tool_call in tool_calls]
+    if "agent_end" in tool_names and len(tool_calls) > 1:
+        return _reject_mixed_agent_end_batch(tool_calls, provider, tool_call_counts)
+
     tool_call_order = tool_calls.copy()
     tool_call_id_to_result: Dict[str, str] = {}
 
@@ -531,15 +581,6 @@ async def async_execute_tool_calls(
         tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
         tool_results.append(tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})))
 
-    if provider in ("deepseek", "openai", "openrouter"):
-        formatted_messages = format_openai_results(tool_call_order, tool_results)
-    elif provider == "openai_responses":
-        formatted_messages = format_openai_responses_results(tool_call_order, tool_results)
-    elif provider == "anthropic":
-        formatted_messages = format_anthropic_results(tool_call_order, tool_results)
-    elif provider == "gemini":
-        formatted_messages = format_gemini_results(tool_call_order, tool_results)
-    else:
-        formatted_messages = []
+    formatted_messages = _format_results_for_provider(provider, tool_call_order, tool_results)
 
     return formatted_messages, tool_results, tool_call_counts, tool_call_order

@@ -234,7 +234,14 @@ class IkaLogger:
             "gpt-4.1": (2.00, 0.50, 8.00),
             "gpt-4.1-mini": (0.40, 0.10, 1.60),
             "gpt-4.1-nano": (0.10, 0.025, 0.40),
+            "gpt-5": (1.25, 0.125, 10.00),
+            "gpt-5.1": (1.25, 0.125, 10.00),
             "gpt-5.2": (1.75, 0.175, 14.00),
+            "gpt-5.4": (2.50, 0.25, 15.00),
+            "gpt-5-mini": (0.25, 0.025, 2.00),
+            "gpt-5-nano": (0.05, 0.005, 0.40),
+            "gpt-5-codex": (1.25, 0.125, 10.00),
+            "gpt-5.1-codex": (1.25, 0.125, 10.00),
             "gpt-5.3-codex": (1.75, 0.175, 14.00),
             "claude-3-opus": (15.00, 15.00, 75.00),
             "claude-3-sonnet": (3.00, 3.00, 15.00),
@@ -255,7 +262,11 @@ class IkaLogger:
             "gemini-3.1-pro": (2.00, 0.20, 12.00),
         }
         mid = model_id.lower()
-        
+
+        # Strip provider prefixes such as "openai/gpt-5-mini".
+        if "/" in mid:
+            mid = mid.split("/", 1)[1]
+
         result = cost_map.get(mid)
         if result:
             return result
@@ -264,11 +275,6 @@ class IkaLogger:
             if mid.startswith(key):
                 return cost_map[key]
         return None
-
-        # Strip OpenRouter-style provider prefix (e.g. "google/gemini-3-flash-preview")
-        if "/" in mid:
-            mid = mid.split("/", 1)[1]
-        return cost_map.get(mid, None)
 
     def compute_cost(self, model_id: str, usage: Dict[str, Any]) -> Dict[str, float]:
         model_cost = self.get_model_cost(model_id)
