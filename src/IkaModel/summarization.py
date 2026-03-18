@@ -176,9 +176,9 @@ def parse_summary_response(provider: str, response: httpx.Response) -> str:
         raise ValueError(f"Unsupported provider: {provider}")
 
 
-def get_conversation_text(message_history: dict) -> str:
+def get_conversation_text(message_history: dict, *, include_first_input: bool = True) -> str:
     parts = []
-    if message_history["first_input"]["message"]:
+    if include_first_input and message_history["first_input"]["message"]:
         parts.append(message_history["first_input"]["message"])
     if message_history["summary"]["message"]:
         parts.append(message_history["summary"]["message"])
@@ -234,7 +234,8 @@ def run_summarization(
     if not message_history["first_input"]["message"] and not message_history["messages"]:
         return ""
 
-    conversation_text = get_conversation_text(message_history)
+    include_first_input = not (write_to_history and prompt_kind == "default")
+    conversation_text = get_conversation_text(message_history, include_first_input=include_first_input)
     system_prompt, user_prompt_prefix = _get_prompts_for_kind(prompt_kind)
 
     provider = _normalize_provider_for_summary(
@@ -315,7 +316,8 @@ async def async_summarise_message_history(
     if not message_history["first_input"]["message"] and not message_history["messages"]:
         return ""
 
-    conversation_text = get_conversation_text(message_history)
+    include_first_input = not (write_to_history and prompt_kind == "default")
+    conversation_text = get_conversation_text(message_history, include_first_input=include_first_input)
     system_prompt, user_prompt_prefix = _get_prompts_for_kind(prompt_kind)
 
     provider = _normalize_provider_for_summary(

@@ -1,0 +1,16 @@
+{
+  "api_key": "sk-or-v1-...",
+  "default_model": "meta-llama/llama-3.1-70b-instruct",
+  "http_referer": "https://your-app.com",
+  "x_title": "IkaCore Agent",
+  "models": {
+    "meta-llama/llama-3.1-70b-instruct": {
+      "max_tokens": 131072,
+      "temperature": 0.7
+    },
+    "anthropic/claude-3.5-sonnet": {
+      "max_tokens": 200000,
+      "temperature": 0.0
+    }
+  }
+}

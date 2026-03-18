@@ -1,0 +1,18 @@
+services:
+  ika-v8:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      additional_contexts:
+        ikacore: .
+        v8src: ${V8_HOST_PATH:-/Users/tarun/v8/v8}
+    working_dir: /workspace/IkaCore
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      IKA_ALLOWED_ROOT: /workspace/v8
+      IKA_CCP_SESSION: ${IKA_CCP_SESSION:-}
+      IKA_CCP_SHELF: ${IKA_CCP_SHELF:-ika_general_context}
+      IKA_CCP_BOOK: ${IKA_CCP_BOOK:-context_packs}
+    stdin_open: true
+    tty: true

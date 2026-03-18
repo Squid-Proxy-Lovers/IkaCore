@@ -1,5 +1,7 @@
+import copy
 import json
 import logging
+import re
 import uuid
 from typing import Any, Dict, Optional, List, Callable
 
@@ -36,6 +38,40 @@ from ..chat_helpers_common import (
 )
 
 LOG = logging.getLogger(__name__)
+_TERMINAL_CONTROL_TOOL_NAMES = {"agent_end", "end_execution"}
+_OVERFLOW_FAST_PATH_RATIO = 2.0
+_COMPACTION_TAIL_MAX_MESSAGES = 4
+_CONTEXT_PACK_MESSAGE_PREFIXES = ("[Context Pack:", "[Context Pack Loaded:")
+_CONTEXT_ERROR_TOKEN_RE = re.compile(
+    r"maximum context length is\s*([\d,]+)\s*tokens.*?"
+    r"requested\s*([\d,]+)\s*tokens\s*"
+    r"\(([\d,]+)\s*in the messages,\s*([\d,]+)\s*in the completion\)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _get_registered_tool_names(barebone_model: BareBoneModel) -> set[str]:
+    agent_tools = getattr(barebone_model, "agent_tools", None) or []
+    return {
+        getattr(tool, "name", "")
+        for tool in agent_tools
+        if getattr(tool, "name", "")
+    }
+
+
+def _get_terminal_control_tool_names(barebone_model: BareBoneModel) -> set[str]:
+    registered = _get_registered_tool_names(barebone_model)
+    names = registered & _TERMINAL_CONTROL_TOOL_NAMES
+    return names or {"agent_end"}
+
+
+def _get_primary_final_tool_name(barebone_model: BareBoneModel) -> str:
+    terminal_names = _get_terminal_control_tool_names(barebone_model)
+    if "end_execution" in terminal_names and "agent_end" not in terminal_names:
+        return "end_execution"
+    if "agent_end" in terminal_names:
+        return "agent_end"
+    return "end_execution" if "end_execution" in terminal_names else "agent_end"
 
 
 def _record_model_message(message_history: dict, content: str, tokens: int, reasoning_content: Optional[str] = None) -> None:
@@ -82,10 +118,286 @@ def init_message_history() -> dict:
     }
 
 
+def _message_content(message: Any) -> str:
+    if isinstance(message, dict):
+        content = message.get("content", "")
+        return content if isinstance(content, str) else str(content)
+    return str(message)
+
+
+def _is_context_pack_message(message: Any) -> bool:
+    return _message_content(message).startswith(_CONTEXT_PACK_MESSAGE_PREFIXES)
+
+
+def _sanitize_recent_tail(messages: List[dict]) -> List[dict]:
+    sanitized: List[dict] = []
+    tool_context_open = False
+
+    for message in messages:
+        role = message.get("role")
+        if role == "tool":
+            if tool_context_open:
+                sanitized.append(message)
+            continue
+
+        sanitized.append(message)
+        tool_context_open = bool(message.get("tool_calls"))
+
+    return sanitized
+
+
+def _rebuild_messages_after_compaction(message_history: dict, messages: Optional[list]) -> None:
+    if messages is None:
+        return
+
+    snapshot = [copy.deepcopy(message) for message in messages]
+    first_input = (message_history.get("first_input", {}) or {}).get("message", "")
+
+    preserved_context_messages: List[dict] = []
+    seen_context_contents: set[str] = set()
+    for message in snapshot:
+        content = _message_content(message)
+        if not content or not _is_context_pack_message(message):
+            continue
+        if content in seen_context_contents:
+            continue
+        if isinstance(message, dict):
+            preserved_context_messages.append(message)
+            seen_context_contents.add(content)
+
+    preserved_tail: List[dict] = []
+    seen_tail_contents: set[str] = set()
+    for message in reversed(snapshot):
+        if not isinstance(message, dict):
+            continue
+        content = _message_content(message)
+        if not content or content == first_input or _is_context_pack_message(message):
+            continue
+        if content in seen_tail_contents:
+            continue
+        preserved_tail.append(message)
+        seen_tail_contents.add(content)
+        if len(preserved_tail) >= _COMPACTION_TAIL_MAX_MESSAGES:
+            break
+    preserved_tail.reverse()
+    preserved_tail = _sanitize_recent_tail(preserved_tail)
+
+    rebuilt_messages: List[dict] = []
+    if first_input:
+        rebuilt_messages.append({"role": "user", "content": first_input})
+    rebuilt_messages.extend(preserved_context_messages)
+    rebuilt_messages.extend(preserved_tail)
+
+    messages.clear()
+    messages.extend(rebuilt_messages)
+
+
 def _estimate_tokens(text: str) -> int:
     if not text:
         return 0
     return max(1, len(str(text)) // 4)
+
+
+def _estimate_payload_tokens(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, str):
+        return _estimate_tokens(value)
+    if isinstance(value, bool):
+        return 1
+    if isinstance(value, (int, float)):
+        return _estimate_tokens(str(value))
+    if isinstance(value, list):
+        return sum(_estimate_payload_tokens(item) for item in value)
+    if isinstance(value, dict):
+        return sum(_estimate_payload_tokens(item) for item in value.values())
+    return _estimate_tokens(str(value))
+
+
+def _extract_requested_completion_tokens(payload: dict) -> int:
+    for key in ("max_completion_tokens", "max_tokens"):
+        value = payload.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+    generation_config = payload.get("generationConfig")
+    if isinstance(generation_config, dict):
+        value = generation_config.get("maxOutputTokens")
+        if isinstance(value, int) and value > 0:
+            return value
+    return 0
+
+
+def _parse_context_error_token_stats(error: Exception) -> dict:
+    match = _CONTEXT_ERROR_TOKEN_RE.search(str(error))
+    if not match:
+        return {}
+
+    max_tokens, requested_tokens, message_tokens, completion_tokens = (
+        int(group.replace(",", ""))
+        for group in match.groups()
+    )
+    return {
+        "max_tokens": max_tokens,
+        "requested_tokens": requested_tokens,
+        "message_tokens": message_tokens,
+        "completion_tokens": completion_tokens,
+        "source": "provider",
+    }
+
+
+def _get_request_token_stats(
+    barebone_model: BareBoneModel,
+    payload: dict,
+    error: Optional[Exception] = None,
+) -> dict:
+    parsed = _parse_context_error_token_stats(error) if error else {}
+    max_tokens = (
+        parsed.get("max_tokens")
+        or getattr(barebone_model, "context_budget", None)
+        or get_max_tokens(barebone_model.model_id)
+    )
+    completion_tokens = parsed.get("completion_tokens")
+    if completion_tokens is None:
+        completion_tokens = _extract_requested_completion_tokens(payload)
+    message_tokens = parsed.get("message_tokens")
+    if message_tokens is None:
+        message_tokens = _estimate_payload_tokens(payload)
+    requested_tokens = parsed.get("requested_tokens")
+    if requested_tokens is None:
+        requested_tokens = message_tokens + completion_tokens
+    usage_ratio = (requested_tokens / max_tokens) if max_tokens else 0.0
+    return {
+        "max_tokens": max_tokens,
+        "requested_tokens": requested_tokens,
+        "message_tokens": message_tokens,
+        "completion_tokens": completion_tokens,
+        "usage_ratio": usage_ratio,
+        "source": parsed.get("source", "estimated"),
+    }
+
+
+def _build_overflow_recovery_prompt(stats: dict, *, hard_limit: bool) -> str:
+    ratio_pct = int(stats["usage_ratio"] * 100) if stats["max_tokens"] else 0
+    strict_line = (
+        "You must not request any broad raw listings, recursive dumps, or unbounded search results. "
+        "Return exactly one narrow tool call with explicit bounds, or a short plan if a tool call is not yet safe."
+        if hard_limit else
+        "Remake the step with much tighter control. Use one small bounded tool call, page results, and prefer summaries over raw output."
+    )
+    return (
+        "CRITICAL CONTEXT OVERFLOW RECOVERY.\n"
+        f"Your previous request would have used approximately {stats['requested_tokens']} tokens total "
+        f"({stats['message_tokens']} in messages, {stats['completion_tokens']} requested for completion) "
+        f"against a maximum context of {stats['max_tokens']} tokens ({ratio_pct}% of limit).\n"
+        "The oversized in-flight input has been deleted.\n"
+        f"{strict_line}\n"
+        "Required constraints:\n"
+        "- Choose a much narrower scope.\n"
+        "- Add explicit limits such as depth, count, page size, or file count.\n"
+        "- Avoid returning large raw outputs when a summary or targeted slice is enough.\n"
+        "- If you need more data, gather it over multiple small tool calls instead of one huge call."
+    )
+
+
+def _apply_overflow_remake_recovery(
+    barebone_model: BareBoneModel,
+    message_history: dict,
+    messages: Optional[list],
+    stats: dict,
+    *,
+    hard_limit: bool,
+    fast_path: bool = False,
+) -> None:
+    if messages is None:
+        return
+
+    prompt = _build_overflow_recovery_prompt(stats, hard_limit=hard_limit)
+    summarise_message_history(barebone_model, message_history)
+    messages.clear()
+    messages.append({"role": "user", "content": prompt})
+
+    hierarchy = getattr(barebone_model, "agent_hierarchy", None) or []
+    mode = "fast-path" if fast_path else "retry"
+    strictness = "strict" if hard_limit else "controlled"
+    get_cli_output().emit(
+        OutputType.AGENT_RESPONSE,
+        (
+            f"Context overflow recovery ({mode}, {strictness}): dropped oversized in-flight input "
+            f"and requested a smaller remake ({stats['requested_tokens']}/{stats['max_tokens']} tokens, "
+            f"{stats['usage_ratio'] * 100:.0f}% of limit)."
+        ),
+        hierarchy,
+        step=0,
+    )
+
+
+async def _apply_overflow_remake_recovery_async(
+    barebone_model: BareBoneModel,
+    message_history: dict,
+    messages: Optional[list],
+    stats: dict,
+    *,
+    hard_limit: bool,
+    fast_path: bool = False,
+    client: Optional[httpx.AsyncClient] = None,
+) -> None:
+    if messages is None:
+        return
+
+    prompt = _build_overflow_recovery_prompt(stats, hard_limit=hard_limit)
+    await async_summarise_message_history(barebone_model, message_history, client=client)
+    messages.clear()
+    messages.append({"role": "user", "content": prompt})
+
+    hierarchy = getattr(barebone_model, "agent_hierarchy", None) or []
+    mode = "fast-path" if fast_path else "retry"
+    strictness = "strict" if hard_limit else "controlled"
+    get_cli_output().emit(
+        OutputType.AGENT_RESPONSE,
+        (
+            f"Context overflow recovery ({mode}, {strictness}): dropped oversized in-flight input "
+            f"and requested a smaller remake ({stats['requested_tokens']}/{stats['max_tokens']} tokens, "
+            f"{stats['usage_ratio'] * 100:.0f}% of limit)."
+        ),
+        hierarchy,
+        step=0,
+    )
+
+
+def _build_tool_result_guardrail_message(
+    executed_tool_call_list: List[dict],
+    tool_results: List[str],
+) -> str:
+    directives: List[str] = []
+
+    for idx, tool_call in enumerate(executed_tool_call_list):
+        raw_result = tool_results[idx] if idx < len(tool_results) else ""
+        if not isinstance(raw_result, str):
+            continue
+        try:
+            parsed = json.loads(raw_result)
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+
+        stop_info = parsed.get("stop_repeating_tool_call")
+        if not isinstance(stop_info, dict):
+            continue
+
+        tool_name = stop_info.get("tool") or tool_call.get("function", {}).get("name") or tool_call.get("name", "")
+        pack_name = stop_info.get("name", "")
+        book_name = stop_info.get("book", "")
+        next_action = parsed.get("next_required_action") or "Use a different tool."
+
+        directives.append(
+            "CRITICAL: STOP. "
+            f"Do not call {tool_name} again for context pack '{pack_name}' in book '{book_name}' "
+            "during this execution. "
+            f"{next_action}"
+        )
+
+    return "\n".join(dict.fromkeys(directives))
 
 
 def get_total_tokens(message_history: dict) -> int:
@@ -147,6 +459,7 @@ def _check_context_and_compact(
             )
         message_history["_context_warning_issued"] = "critical"
         summarise_message_history(barebone_model, message_history)
+        _rebuild_messages_after_compaction(message_history, messages)
         # Reset warning state after compaction so warnings can fire again
         message_history["_context_warning_issued"] = None
         return True
@@ -198,6 +511,7 @@ async def _async_check_context_and_compact(
             )
         message_history["_context_warning_issued"] = "critical"
         await async_summarise_message_history(barebone_model, message_history, client)
+        _rebuild_messages_after_compaction(message_history, messages)
         message_history["_context_warning_issued"] = None
         return True
 
@@ -208,19 +522,67 @@ def _api_request_with_context_fallback(
     build_payload_fn: Callable[[], tuple[str, dict, dict]],
     barebone_model: BareBoneModel,
     message_history: dict,
-    timeout: float = 900.0
+    timeout: float = 900.0,
+    messages: Optional[list] = None,
 ) -> httpx.Response:
-    api_url, headers, payload = build_payload_fn()
-    try:
-        return api_request_retry(api_url, headers, payload, timeout=timeout)
-    except Exception as e:
-        if not _is_context_length_error(e):
-            raise
-        LOG.warning("Context length exceeded. Forcing summarization and retrying.")
-        get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
-        summarise_message_history(barebone_model, message_history)
+    recovery_stage = 0
+    while True:
         api_url, headers, payload = build_payload_fn()
-        return api_request_retry(api_url, headers, payload, timeout=timeout)
+        stats = _get_request_token_stats(barebone_model, payload)
+        if (
+            recovery_stage == 0
+            and messages is not None
+            and stats["usage_ratio"] >= _OVERFLOW_FAST_PATH_RATIO
+        ):
+            LOG.warning(
+                "Request preflight estimated at %.0f%% of context budget. Triggering overflow remake fast path.",
+                stats["usage_ratio"] * 100,
+            )
+            _apply_overflow_remake_recovery(
+                barebone_model,
+                message_history,
+                messages,
+                stats,
+                hard_limit=False,
+                fast_path=True,
+            )
+            recovery_stage = 2
+            continue
+        try:
+            return api_request_retry(api_url, headers, payload, timeout=timeout)
+        except Exception as e:
+            if not _is_context_length_error(e):
+                raise
+            stats = _get_request_token_stats(barebone_model, payload, error=e)
+            if recovery_stage == 0:
+                LOG.warning("Context length exceeded. Forcing summarization and retrying.")
+                get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
+                summarise_message_history(barebone_model, message_history)
+                recovery_stage = 1
+                continue
+            if recovery_stage == 1 and messages is not None:
+                LOG.warning("Context still exceeded after summarization. Rebuilding the current input with tighter control.")
+                _apply_overflow_remake_recovery(
+                    barebone_model,
+                    message_history,
+                    messages,
+                    stats,
+                    hard_limit=False,
+                )
+                recovery_stage = 2
+                continue
+            if recovery_stage == 2 and messages is not None:
+                LOG.warning("Context still exceeded after controlled remake. Escalating to strict remake mode.")
+                _apply_overflow_remake_recovery(
+                    barebone_model,
+                    message_history,
+                    messages,
+                    stats,
+                    hard_limit=True,
+                )
+                recovery_stage = 3
+                continue
+            raise
 
 
 async def _api_request_with_context_fallback_async(
@@ -228,18 +590,70 @@ async def _api_request_with_context_fallback_async(
     barebone_model: BareBoneModel,
     message_history: dict,
     timeout: float = 900.0,
-    client: Optional[httpx.AsyncClient] = None
+    client: Optional[httpx.AsyncClient] = None,
+    messages: Optional[list] = None,
 ) -> httpx.Response:
-    api_url, headers, payload = build_payload_fn()
-    try:
-        return await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
-    except Exception as e:
-        if not _is_context_length_error(e):
-            raise
-        LOG.warning("Context length exceeded. Forcing summarization and retrying.")
-        get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
-        await async_summarise_message_history(barebone_model, message_history, client=client)
+    recovery_stage = 0
+    while True:
         api_url, headers, payload = build_payload_fn()
+        stats = _get_request_token_stats(barebone_model, payload)
+        if (
+            recovery_stage == 0
+            and messages is not None
+            and stats["usage_ratio"] >= _OVERFLOW_FAST_PATH_RATIO
+        ):
+            LOG.warning(
+                "Request preflight estimated at %.0f%% of context budget. Triggering overflow remake fast path.",
+                stats["usage_ratio"] * 100,
+            )
+            await _apply_overflow_remake_recovery_async(
+                barebone_model,
+                message_history,
+                messages,
+                stats,
+                hard_limit=False,
+                fast_path=True,
+                client=client,
+            )
+            recovery_stage = 2
+            continue
+        try:
+            return await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+        except Exception as e:
+            if not _is_context_length_error(e):
+                raise
+            stats = _get_request_token_stats(barebone_model, payload, error=e)
+            if recovery_stage == 0:
+                LOG.warning("Context length exceeded. Forcing summarization and retrying.")
+                get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
+                await async_summarise_message_history(barebone_model, message_history, client=client)
+                recovery_stage = 1
+                continue
+            if recovery_stage == 1 and messages is not None:
+                LOG.warning("Context still exceeded after summarization. Rebuilding the current input with tighter control.")
+                await _apply_overflow_remake_recovery_async(
+                    barebone_model,
+                    message_history,
+                    messages,
+                    stats,
+                    hard_limit=False,
+                    client=client,
+                )
+                recovery_stage = 2
+                continue
+            if recovery_stage == 2 and messages is not None:
+                LOG.warning("Context still exceeded after controlled remake. Escalating to strict remake mode.")
+                await _apply_overflow_remake_recovery_async(
+                    barebone_model,
+                    message_history,
+                    messages,
+                    stats,
+                    hard_limit=True,
+                    client=client,
+                )
+                recovery_stage = 3
+                continue
+            raise
 
 def chat(
     barebone_model: BareBoneModel,
@@ -289,7 +703,7 @@ def chat(
     def _build():
         return build_provider_request(provider, barebone_model, messages, message_history)
     
-    response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout)
+    response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout, messages)
     
     response.raise_for_status()
     data = response.json()
@@ -312,6 +726,8 @@ def chat(
     all_executed_tool_call_list: List[dict] = []
     content_before_tools = content
     tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
+    terminal_tool_names = _get_terminal_control_tool_names(barebone_model)
+    final_tool_name = _get_primary_final_tool_name(barebone_model)
     rounds = 0
     total_tool_calls_in_cycle = 0
     recent_tool_calls = []
@@ -345,7 +761,7 @@ def chat(
                     LOG.error(f"Tool '{tool_name}' called {recent_count} times identically. Forcing agent termination with summarization.")
 
                     # Use summarization to create a force_answer response
-                    from .summarization import run_summarization
+                    from ..summarization import run_summarization
                     force_answer = run_summarization(
                         barebone_model,
                         message_history,
@@ -396,7 +812,12 @@ def chat(
                     "parameters": _tool_params,
                 }
         step = getattr(barebone_model, '_current_step', 0)
-        print("tool_calls_from_llm:", tool_calls)
+        get_cli_output().emit(
+            OutputType.AGENT_RESPONSE,
+            f"tool_calls_from_llm: {tool_calls}",
+            list(agent_hierarchy or []),
+            step=step,
+        )
         tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
         if hasattr(barebone_model, '_tool_call_counts'):
             barebone_model._tool_call_counts.update(updated_counts)
@@ -419,12 +840,12 @@ def chat(
         if logger:
             logger.log_tool_results(executed_tool_call_list, tool_results)
         
-        LOG.debug("[TRACE] chat: Checking agent_end")
+        LOG.debug("[TRACE] chat: Checking terminal control tools")
         agent_end_called = False
         stage_end_called = False
         for tc in executed_tool_call_list:
             name = tc.get("function", {}).get("name") or tc.get("name", "")
-            if name == "agent_end":
+            if name in terminal_tool_names:
                 agent_end_called = True
             elif name == "stage_end":
                 stage_end_called = True
@@ -461,8 +882,11 @@ def chat(
                 control_tool = "stage_end"
                 hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call stage_end to advance to the next stage."
             else:
-                control_tool = "agent_end"
-                hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call agent_end with your final answer."
+                control_tool = final_tool_name
+                hijack_message = (
+                    f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. "
+                    f"You MUST call {final_tool_name} with your final answer."
+                )
             
             msg_id = str(uuid.uuid4())
             message_history["messages"][msg_id] = {
@@ -481,7 +905,17 @@ def chat(
             seen = list(dict.fromkeys(repeated_tool_names))
             repeated_warning_msg = (
                 "System note: You have already called the following tool(s) multiple times with the same arguments: "
-                + ", ".join(seen) + ". Do not repeat these calls. Proceed to the next step (e.g. use submit_discovery or other tools, then agent_end when done)."
+                + ", ".join(seen)
+                + f". Do not repeat these calls. Proceed to the next step (e.g. use submit_discovery or other tools, then {final_tool_name} when done)."
+            )
+        guardrail_warning_msg = _build_tool_result_guardrail_message(
+            executed_tool_call_list,
+            tool_results,
+        )
+        if guardrail_warning_msg:
+            repeated_warning_msg = (
+                f"{repeated_warning_msg}\n{guardrail_warning_msg}".strip()
+                if repeated_warning_msg else guardrail_warning_msg
             )
 
         LOG.debug("[TRACE] chat: Appending tool messages")
@@ -505,7 +939,7 @@ def chat(
             return build_provider_request(provider, barebone_model, messages, message_history)
         
         LOG.debug("[TRACE] chat: Sending follow-up API request")
-        response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout)
+        response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout, messages)
         LOG.debug("[TRACE] chat: API request returned")
         response.raise_for_status()
         data = response.json()
@@ -536,7 +970,12 @@ def chat(
                 }
         agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
         step = getattr(barebone_model, '_current_step', 0)
-        print("tool_calls_from_llm:", tool_calls)
+        get_cli_output().emit(
+            OutputType.AGENT_RESPONSE,
+            f"tool_calls_from_llm: {tool_calls}",
+            list(agent_hierarchy or []),
+            step=step,
+        )
         tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
         if hasattr(barebone_model, '_tool_call_counts'):
             barebone_model._tool_call_counts.update(updated_counts)
@@ -548,7 +987,7 @@ def chat(
         stage_end_called = False
         for tc in executed_tool_call_list:
             name = tc.get("function", {}).get("name") or tc.get("name", "")
-            if name == "agent_end":
+            if name in terminal_tool_names:
                 agent_end_called = True
             elif name == "stage_end":
                 stage_end_called = True
@@ -656,7 +1095,7 @@ async def async_chat(
         def _build():
             return build_provider_request(provider, barebone_model, messages, message_history)
         
-        response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client)
+        response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client, messages)
         response.raise_for_status()
         data = response.json()
 
@@ -678,6 +1117,8 @@ async def async_chat(
         all_executed_tool_call_list: List[dict] = []
         content_before_tools = content
         tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
+        terminal_tool_names = _get_terminal_control_tool_names(barebone_model)
+        final_tool_name = _get_primary_final_tool_name(barebone_model)
         rounds = 0
         total_tool_calls_in_cycle = 0
         recent_tool_calls = []
@@ -711,7 +1152,7 @@ async def async_chat(
                         LOG.error(f"Tool '{tool_name}' called {recent_count} times identically. Forcing agent termination with summarization.")
 
                         # Use summarization to create a force_answer response
-                        from .summarization import async_summarise_message_history
+                        from ..summarization import async_summarise_message_history
                         try:
                             force_answer = await async_summarise_message_history(
                                 barebone_model,
@@ -756,7 +1197,8 @@ async def async_chat(
                 seen_async = list(dict.fromkeys(repeated_tool_names_async))
                 repeated_warning_msg_async = (
                     "System note: You have already called the following tool(s) multiple times with the same arguments: "
-                    + ", ".join(seen_async) + ". Do not repeat these calls. Proceed to the next step (e.g. use submit_discovery or other tools, then agent_end when done)."
+                    + ", ".join(seen_async)
+                    + f". Do not repeat these calls. Proceed to the next step (e.g. use submit_discovery or other tools, then {final_tool_name} when done)."
                 )
 
             tool_metadata = {}
@@ -767,7 +1209,12 @@ async def async_chat(
                         "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
                     }
             step = getattr(barebone_model, '_current_step', 0)
-            print("tool_calls_from_llm:", tool_calls)
+            get_cli_output().emit(
+                OutputType.AGENT_RESPONSE,
+                f"tool_calls_from_llm: {tool_calls}",
+                list(agent_hierarchy or []),
+                step=step,
+            )
             tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
             if hasattr(barebone_model, '_tool_call_counts'):
                 barebone_model._tool_call_counts.update(updated_counts)
@@ -790,12 +1237,12 @@ async def async_chat(
             if logger:
                 logger.log_tool_results(executed_tool_call_list, tool_results)
             
-            LOG.debug("[TRACE] async_chat: Checking agent_end")
+            LOG.debug("[TRACE] async_chat: Checking terminal control tools")
             agent_end_called = False
             stage_end_called = False
             for tc in executed_tool_call_list:
                 name = tc.get("function", {}).get("name") or tc.get("name", "")
-                if name == "agent_end":
+                if name in terminal_tool_names:
                     agent_end_called = True
                 elif name == "stage_end":
                     stage_end_called = True
@@ -832,8 +1279,11 @@ async def async_chat(
                     control_tool = "stage_end"
                     hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call stage_end to advance to the next stage."
                 else:
-                    control_tool = "agent_end"
-                    hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call agent_end with your final answer."
+                    control_tool = final_tool_name
+                    hijack_message = (
+                        f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. "
+                        f"You MUST call {final_tool_name} with your final answer."
+                    )
                 
                 msg_id = str(uuid.uuid4())
                 message_history["messages"][msg_id] = {
@@ -846,6 +1296,16 @@ async def async_chat(
                 hijacked = True
                 tool_calls = []
                 break
+
+            guardrail_warning_msg_async = _build_tool_result_guardrail_message(
+                executed_tool_call_list,
+                tool_results,
+            )
+            if guardrail_warning_msg_async:
+                repeated_warning_msg_async = (
+                    f"{repeated_warning_msg_async}\n{guardrail_warning_msg_async}".strip()
+                    if repeated_warning_msg_async else guardrail_warning_msg_async
+                )
 
             LOG.debug("[TRACE] async_chat: Appending tool messages")
             append_provider_tool_messages(
@@ -868,7 +1328,7 @@ async def async_chat(
                 return build_provider_request(provider, barebone_model, messages, message_history)
             
             LOG.debug("[TRACE] async_chat: Sending follow-up API request")
-            response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client)
+            response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client, messages)
             LOG.debug("[TRACE] async_chat: API request returned")
             response.raise_for_status()
             data = response.json()
@@ -891,7 +1351,12 @@ async def async_chat(
                     }
             agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
             step = getattr(barebone_model, '_current_step', 0)
-            print("tool_calls_from_llm:", tool_calls)
+            get_cli_output().emit(
+                OutputType.AGENT_RESPONSE,
+                f"tool_calls_from_llm: {tool_calls}",
+                list(agent_hierarchy or []),
+                step=step,
+            )
             tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
             if hasattr(barebone_model, '_tool_call_counts'):
                 barebone_model._tool_call_counts.update(updated_counts)
@@ -903,7 +1368,7 @@ async def async_chat(
             stage_end_called = False
             for tc in executed_tool_call_list:
                 name = tc.get("function", {}).get("name") or tc.get("name", "")
-                if name == "agent_end":
+                if name in terminal_tool_names:
                     agent_end_called = True
                 elif name == "stage_end":
                     stage_end_called = True

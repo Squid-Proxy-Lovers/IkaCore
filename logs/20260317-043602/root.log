@@ -1,0 +1,22 @@
+Request: Your goal is to find security bugs in v8, please test and verify all bugs ensure everything you do has backed by ground truth and there is no false postaives. Please make as much sub agents as needed, your job is to ensure there are no false postives and find as many bugs as possible ! please do not stop till you find a verfied security bug tarun@mac v8 % ls
+AUTHORS                 DEPS                    LICENSE.strongtalk      S390_OWNERS
+bazel                   DIR_METADATA            LICENSE.v8              samples
+build                   docs                    LOONG_OWNERS            src
+build_overrides         ENG_REVIEW_OWNERS       MIPS_OWNERS             summary.md
+BUILD.bazel             GEMINI.md               MODULE.bazel            test
+BUILD.gn                gni                     out                     testing
+buildtools              include                 OWNERS                  third_party
+CODE_OF_CONDUCT.md      infra                   PPC_OWNERS              tools
+codereview.settings     INFRA_OWNERS            PRESUBMIT.py            WATCHLISTS
+COMMON_OWNERS           INTL_OWNERS             pyrightconfig.json
+crash.js                LICENSE                 README.md
+custom_deps             LICENSE.fdlibm          RISCV_OWNERS
+tarun@mac v8 % cd out 
+tarun@mac out % ls
+fuzzbuild
+tarun@mac out % pwd
+/Users/tarun/v8/v8/out 
+
+Here is the location and folder strucure of the v8 code base please only operate in its bounds
+
+

@@ -1,0 +1,36 @@
+[92m┌──────────────────────────────────────────────────────────────────────────────┐[0m
+[92m│ [TOOL CALL] Step 0 | +39.3s | Thread:8586895552 Instance:0                   │[0m
+[92m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[92m│ Chain: root -> math_computer -> math_calculator -> math_calculator -> arithm │[0m
+[92m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[92m│ Calling tool: make_subagent                                                  │[0m
+[92m│ Arguments:                                                                   │[0m
+[92m│ {                                                                            │[0m
+[92m│ "name": "arithmetic_calculator",                                             │[0m
+[92m│ "description": "A specialized subagent for performing basic arithmetic       │[0m
+[92m│ calculations and providing explanations. Focused on mathematical accuracy    │[0m
+[92m│ and clarity.",                                                               │[0m
+[92m│ "prompt": "Compute the arithmetic expression: 2+2. Provide the numerical     │[0m
+[92m│ answer and a brief explanation of the calculation."                          │[0m
+[92m│ }                                                                            │[0m
+[92m└──────────────────────────────────────────────────────────────────────────────┘[0m
+[91m┌──────────────────────────────────────────────────────────────────────────────┐[0m
+[91m│ [TOOL RESULT] Step 0 | +39.3s | Thread:8586895552 Instance:0                 │[0m
+[91m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[91m│ Chain: root -> math_computer -> math_calculator -> math_calculator -> arithm │[0m
+[91m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[91m│ Tool: make_subagent                                                          │[0m
+[91m│ Result:                                                                      │[0m
+[91m│ {"status": "created", "name": "arithmetic_calculator"}                       │[0m
+[91m└──────────────────────────────────────────────────────────────────────────────┘[0m
+[92m┌──────────────────────────────────────────────────────────────────────────────┐[0m
+[92m│ [TOOL CALL] Step 1 | +41.9s | Thread:8586895552 Instance:0                   │[0m
+[92m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[92m│ Chain: root -> math_computer -> math_calculator -> math_calculator -> arithm │[0m
+[92m├──────────────────────────────────────────────────────────────────────────────┤[0m
+[92m│ Calling tool: run_subagent                                                   │[0m
+[92m│ Arguments:                                                                   │[0m
+[92m│ {                                                                            │[0m
+[92m│ "name": "arithmetic_calculator"                                              │[0m
+[92m│ }                                                                            │[0m
+[92m└──────────────────────────────────────────────────────────────────────────────┘[0m
