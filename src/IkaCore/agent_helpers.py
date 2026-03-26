@@ -232,16 +232,12 @@ class AgentHelpersMixin:
     def _save_stage_checkpoint(self, stage_index: int, remaining_steps: int, last_content: str) -> Optional[str]:
         if not self.checkpoint_store:
             return None
-        
-        if stage_index < len(self.Stages):
-            stage = self.Stages[stage_index]
-            stage_checkpoint_enabled = getattr(stage, "checkpoint", False)
-            if not stage_checkpoint_enabled:
-                return None
-        
+
+        agent_chain = getattr(self, "_parent_hierarchy", []) + [self.name]
         payload = {
             "scope": "stage",
             "agent_name": self.name,
+            "agent_chain": agent_chain,
             "stage_index": stage_index,
             "remaining_steps": remaining_steps,
             "last_content": last_content,
@@ -282,17 +278,163 @@ class AgentHelpersMixin:
     def _save_agent_checkpoint(self, remaining_steps: int, last_content: str) -> Optional[str]:
         if not self.checkpoint_store:
             return None
+        agent_chain = getattr(self, "_parent_hierarchy", []) + [self.name]
+
+        # Capture the full parent chain so resume can restore the entire call stack.
+        # parent_contexts[0] = direct parent, parent_contexts[-1] = root.
+        # Each entry holds the parent's message_history *before* this step completed
+        # (i.e. the state the parent was in when it invoked this agent as a subagent).
+        parent_contexts: list = []
+        parent = getattr(self, "_parent_agent", None)
+        while parent is not None:
+            steps_taken = len(parent.message_history.get("messages", {}))
+            live = getattr(parent, "_live_messages", None)
+            parent_contexts.append({
+                "agent_name": parent.name,
+                "message_history": deepcopy(parent.message_history),
+                "maxsteps": parent.maxsteps,
+                "remaining_steps": max(1, parent.maxsteps - steps_taken),
+                "chat_messages": deepcopy(live if live is not None else getattr(parent, "_current_chat_messages", [])),
+            })
+            parent = getattr(parent, "_parent_agent", None)
+
         payload = {
             "scope": "agent",
             "agent_name": self.name,
+            "agent_chain": agent_chain,
             "remaining_steps": remaining_steps,
             "last_content": last_content,
             "message_history": deepcopy(self.message_history),
             "maxsteps": self.maxsteps,
             "memory_access": deepcopy(self.memory_access),
             "timestamp": time.time(),
+            "parent_contexts": parent_contexts,
+            # Raw LLM chat messages so run_simple() can resume in-place.
+            "chat_messages": deepcopy(getattr(self, "_current_chat_messages", [])),
         }
-        return self.checkpoint_store.save_checkpoint(scope="agent", payload=payload)
+        checkpoint_uid = self.checkpoint_store.save_checkpoint(scope="agent", payload=payload)
+        if checkpoint_uid:
+            chain_str = " -> ".join(agent_chain) if agent_chain else self.name
+            if self.logger:
+                self.logger.write_line(f"[CHECKPOINT] scope=agent agent_chain={chain_str} uid={checkpoint_uid} remaining={remaining_steps}")
+            cli = get_cli_output()
+            checkpoint_msg = f"Checkpoint saved (agent)\nChain: {chain_str}\nUID: {checkpoint_uid}\nRemaining steps: {remaining_steps}"
+            cli.emit(OutputType.AGENT_INIT, checkpoint_msg, agent_chain, step=0)
+        return checkpoint_uid
+
+    def _save_agent_entry_checkpoint(self) -> Optional[str]:
+        """Save a checkpoint at the very start of agent execution (before any steps).
+
+        Captures the initial task (first_input) and the full parent chain so that
+        resuming from this checkpoint restarts the agent from scratch with the same
+        inputs and parent context.  Called once per fresh invocation.
+        """
+        if not self.checkpoint_store:
+            return None
+
+        agent_chain = getattr(self, "_parent_hierarchy", []) + [self.name]
+
+        parent_contexts: list = []
+        parent = getattr(self, "_parent_agent", None)
+        while parent is not None:
+            steps_taken = len(parent.message_history.get("messages", {}))
+            # Prefer _live_messages (a live reference to the actual messages list
+            # inside run_simple, updated by chat() in-place during every tool round)
+            # over _current_chat_messages (which is only snapshotted after chat_wrapper
+            # returns and therefore lags one full step behind).
+            live = getattr(parent, "_live_messages", None)
+            parent_contexts.append({
+                "agent_name": parent.name,
+                "message_history": deepcopy(parent.message_history),
+                "maxsteps": parent.maxsteps,
+                "remaining_steps": max(1, parent.maxsteps - steps_taken),
+                "chat_messages": deepcopy(live if live is not None else getattr(parent, "_current_chat_messages", [])),
+            })
+            parent = getattr(parent, "_parent_agent", None)
+
+        payload = {
+            "scope": "agent_entry",
+            "agent_name": self.name,
+            "agent_chain": agent_chain,
+            "message_history": deepcopy(self.message_history),
+            "maxsteps": self.maxsteps,
+            "remaining_steps": self.maxsteps,
+            "last_content": "",
+            "memory_access": deepcopy(getattr(self, "memory_access", {})),
+            "parent_contexts": parent_contexts,
+            "timestamp": time.time(),
+        }
+
+        checkpoint_uid = self.checkpoint_store.save_checkpoint(scope="agent_entry", payload=payload)
+        if checkpoint_uid:
+            chain_str = " -> ".join(agent_chain) if agent_chain else self.name
+            if self.logger:
+                self.logger.write_line(f"[CHECKPOINT] scope=agent_entry agent_chain={chain_str} uid={checkpoint_uid}")
+            cli = get_cli_output()
+            checkpoint_msg = f"Checkpoint saved (agent entry)\nChain: {chain_str}\nUID: {checkpoint_uid}"
+            cli.emit(OutputType.AGENT_INIT, checkpoint_msg, agent_chain, step=0)
+        return checkpoint_uid
+
+    def _save_stage_entry_checkpoint(self, stage_index: int, remaining_steps: int) -> Optional[str]:
+        """Save a checkpoint at the very start of a stage (before any steps in that stage).
+
+        Resuming from this checkpoint restarts the stage from scratch with the same
+        message_history and parent context.  Called once per stage entry.
+        """
+        if not self.checkpoint_store:
+            return None
+        if not self.Stages or stage_index >= len(self.Stages):
+            return None
+
+        agent_chain = getattr(self, "_parent_hierarchy", []) + [self.name]
+        stage_name = self.Stages[stage_index].name
+
+        parent_contexts: list = []
+        parent = getattr(self, "_parent_agent", None)
+        while parent is not None:
+            steps_taken = len(parent.message_history.get("messages", {}))
+            live = getattr(parent, "_live_messages", None)
+            parent_contexts.append({
+                "agent_name": parent.name,
+                "message_history": deepcopy(parent.message_history),
+                "maxsteps": parent.maxsteps,
+                "remaining_steps": max(1, parent.maxsteps - steps_taken),
+                "chat_messages": deepcopy(live if live is not None else getattr(parent, "_current_chat_messages", [])),
+            })
+            parent = getattr(parent, "_parent_agent", None)
+
+        payload = {
+            "scope": "stage_entry",
+            "agent_name": self.name,
+            "agent_chain": agent_chain,
+            "stage_index": stage_index,
+            "stage_name": stage_name,
+            "message_history": deepcopy(self.message_history),
+            "maxsteps": self.maxsteps,
+            "remaining_steps": remaining_steps,
+            "last_content": "",
+            "memory_access": deepcopy(getattr(self, "memory_access", {})),
+            "parent_contexts": parent_contexts,
+            "timestamp": time.time(),
+        }
+
+        checkpoint_uid = self.checkpoint_store.save_checkpoint(scope="stage_entry", payload=payload)
+        if checkpoint_uid:
+            if self.logger:
+                self.logger.write_line(
+                    f"[CHECKPOINT] scope=stage_entry stage_index={stage_index} "
+                    f"stage_name={stage_name} uid={checkpoint_uid} remaining={remaining_steps}"
+                )
+            cli = get_cli_output()
+            current_hierarchy = agent_chain + [f"Stage {stage_index}: {stage_name}"]
+            checkpoint_msg = (
+                f"Checkpoint saved (stage entry)\n"
+                f"Stage {stage_index}: {stage_name}\n"
+                f"UID: {checkpoint_uid}\n"
+                f"Remaining steps: {remaining_steps}"
+            )
+            cli.emit(OutputType.AGENT_INIT, checkpoint_msg, current_hierarchy, step=0)
+        return checkpoint_uid
 
     def load_checkpoint(self, uid: str) -> Optional[dict]:
         if not self.checkpoint_store:

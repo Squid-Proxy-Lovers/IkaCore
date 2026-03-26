@@ -14,6 +14,25 @@ _TOOL_EXECUTOR_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool
 _TOOL_EXECUTOR_LOCK = threading.Lock()
 
 
+def _resolve_tool_timeout(
+    tool_name: str,
+    tool_executors: Dict[str, Callable],
+    default_timeout: float,
+) -> float:
+    executor_fn = tool_executors.get(tool_name)
+    override = getattr(executor_fn, "__tool_timeout__", None) if executor_fn else None
+    try:
+        return float(override) if override is not None else float(default_timeout)
+    except (TypeError, ValueError):
+        LOG.warning(
+            "Invalid timeout override %r for tool '%s'; using default timeout %ss",
+            override,
+            tool_name,
+            default_timeout,
+        )
+        return float(default_timeout)
+
+
 def _ensure_tool_executor_pool() -> ThreadPoolExecutor:
     """Ensure the global tool executor is alive before scheduling work."""
     global _TOOL_EXECUTOR_POOL
@@ -102,6 +121,7 @@ def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Call
     LOG.debug(f"[TOOL START] Executing tool '{tool_name}'")
     cli = get_cli_output()
     hierarchy = list(agent_hierarchy or []) + [tool_name]
+    effective_timeout = _resolve_tool_timeout(tool_name, tool_executors, timeout)
 
     if tool_name not in tool_executors:
         error_msg = f"Tool '{tool_name}' not found in tool executors"
@@ -129,7 +149,7 @@ def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Call
             # Pool can be shut down by lifecycle races; recreate once and retry.
             executor_pool = _reset_tool_executor_pool()
             future = executor_pool.submit(executor_fn, validated_args)
-        result = future.result(timeout=timeout)
+        result = future.result(timeout=effective_timeout)
 
         result_str = result if isinstance(result, str) else json.dumps(result)
         cli.tool_result(tool_name, result_str, hierarchy, step)
@@ -141,7 +161,7 @@ def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Call
     except FutureTimeoutError:
         if future is not None:
             future.cancel()
-        timeout_msg = f"Tool '{tool_name}' execution timed out after {timeout}s"
+        timeout_msg = f"Tool '{tool_name}' execution timed out after {effective_timeout}s"
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
         LOG.warning(timeout_msg)
         return json.dumps({"error": timeout_msg})
@@ -382,18 +402,19 @@ def execute_tool_calls(
             futures = {}
             for tool_name, args, tool_call_id in parallel_calls:
                 future = executor_pool.submit(execute_tool, tool_name, args, tool_executors, timeout, agent_hierarchy, step)
-                futures[future] = (tool_name, tool_call_id)
+                effective_timeout = _resolve_tool_timeout(tool_name, tool_executors, timeout)
+                futures[future] = (tool_name, tool_call_id, effective_timeout)
 
             for future in futures:
-                tool_name, tool_call_id = futures[future]
+                tool_name, tool_call_id, effective_timeout = futures[future]
                 try:
                     # Guard against wrapper-level hangs as well.
-                    result = future.result(timeout=timeout + 5.0)
+                    result = future.result(timeout=effective_timeout + 5.0)
                     tool_call_id_to_result[tool_call_id] = result
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
                 except FutureTimeoutError:
                     future.cancel()
-                    error_msg = f"Parallel tool execution timed out after {timeout + 5.0}s for '{tool_name}'"
+                    error_msg = f"Parallel tool execution timed out after {effective_timeout + 5.0}s for '{tool_name}'"
                     LOG.warning(error_msg)
                     tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
@@ -432,6 +453,7 @@ async def async_execute_tool(
     LOG.debug(f"[TOOL START] Executing tool '{tool_name}' (async)")
     cli = get_cli_output()
     hierarchy = list(agent_hierarchy or []) + [tool_name]
+    effective_timeout = _resolve_tool_timeout(tool_name, tool_executors, timeout)
 
     if tool_name not in tool_executors:
         error_msg = f"Tool '{tool_name}' not found in tool executors"
@@ -453,11 +475,11 @@ async def async_execute_tool(
     try:
         loop = asyncio.get_event_loop()
         if asyncio.iscoroutinefunction(executor_fn):
-            result = await asyncio.wait_for(executor_fn(validated_args), timeout=timeout)
+            result = await asyncio.wait_for(executor_fn(validated_args), timeout=effective_timeout)
         else:
             result = await asyncio.wait_for(
                 loop.run_in_executor(None, executor_fn, validated_args),
-                timeout=timeout
+                timeout=effective_timeout
             )
 
         result_str = result if isinstance(result, str) else json.dumps(result)
@@ -468,7 +490,7 @@ async def async_execute_tool(
             return result
         return json.dumps(result)
     except asyncio.TimeoutError:
-        timeout_msg = f"Tool '{tool_name}' execution timed out after {timeout}s"
+        timeout_msg = f"Tool '{tool_name}' execution timed out after {effective_timeout}s"
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
         LOG.warning(timeout_msg)
         return json.dumps({"error": timeout_msg})

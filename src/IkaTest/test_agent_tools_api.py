@@ -16,6 +16,7 @@ if str(src) not in sys.path:
 mock_ika_mem = MagicMock()
 with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
     from IkaCore.agents import IkaBaseAgent
+from IkaCore.agent_tools import SUBAGENT_TOOL_TIMEOUT_SECONDS
 from IkaCore.tools import IkaTools
 from IkaCore.stages import IkaStage
 from IkaModel.base import AgentTool, ToolArgs, BareBoneModel
@@ -137,6 +138,12 @@ class TestBuildToolExecutors:
         out = executors["Sub"]({"input": "Do task"})
         assert "Sub result" in out
         sub.execution.assert_called_once()
+
+    def test_subagent_executor_has_extended_timeout_override(self):
+        sub = _minimal_agent(name="Sub")
+        a = _minimal_agent(subagents=[sub])
+        executors = a.build_tool_executors(a.build_simple_tools())
+        assert getattr(executors["Sub"], "__tool_timeout__", None) == SUBAGENT_TOOL_TIMEOUT_SECONDS
 
 
 class TestApiPayloadToolSchema:

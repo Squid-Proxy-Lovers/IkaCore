@@ -5,6 +5,7 @@ message_history updates, and chat() return shape (content, history, costs, answe
 """
 import json
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -282,6 +283,34 @@ class TestApiResponseParsing:
         assert tokens == 8
         usage = extract_usage("openrouter", data)
         assert usage["total_tokens"] == 8
+
+
+class TestToolExecutionTimeouts:
+    def test_execute_tool_calls_honors_executor_timeout_override(self):
+        def slow_tool(_args):
+            time.sleep(0.05)
+            return "finished"
+
+        slow_tool.__tool_timeout__ = 0.2
+
+        tool_calls = [
+            {
+                "id": "call_1",
+                "function": {
+                    "name": "slow_tool",
+                    "arguments": "{}",
+                },
+            }
+        ]
+
+        _, tool_results, _, _ = execute_tool_calls(
+            tool_calls,
+            {"slow_tool": slow_tool},
+            provider="openai",
+            timeout=0.01,
+        )
+
+        assert tool_results == ["finished"]
 
 
 class TestMessageHistoryUpdates:

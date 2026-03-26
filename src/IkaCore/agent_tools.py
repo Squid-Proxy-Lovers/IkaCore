@@ -10,6 +10,9 @@ from IkaModel.base import AgentTool, ToolArgs
 from .agent_parse import AgentParseMixin
 
 
+SUBAGENT_TOOL_TIMEOUT_SECONDS = 9000.0
+
+
 class AgentToolsMixin(AgentParseMixin):
 
     def _convert_subagents_to_tools(self, subagents: Optional[List["IkaBaseAgent"]] = None) -> List[AgentTool]:
@@ -112,33 +115,46 @@ class AgentToolsMixin(AgentParseMixin):
             task_input = args.get("input") or args.get("task") or ""
             if not task_input:
                 return json.dumps({"error": "No input provided for subagent"})
-            
+
             try:
                 if self.logger:
                     self.logger.log_action(f"Calling subagent: {subagent.name}")
-                
-                # Store parent hierarchy in subagent for use in get_barebone
+
+                # Store parent hierarchy and parent reference so checkpoints can
+                # reconstruct the full call stack on resume.
                 subagent._parent_hierarchy = parent_hierarchy or []
-                
-                base = getattr(subagent, "_base_prompt", None) or getattr(subagent, "prompt", "")
-                full = (base + "\n\n" + task_input).strip() if base else task_input
-                subagent.message_history["first_input"]["message"] = full
-                subagent.prompt = full
-                
+                subagent._parent_agent = self
+
+                # Only overwrite prompt / message_history for a fresh invocation.
+                # If a resume checkpoint has been pre-loaded by BaseAgent.run_task,
+                # leave the subagent's state untouched so execution() picks it up.
+                if not getattr(subagent, "_resume_checkpoint", None):
+                    base = getattr(subagent, "_base_prompt", None) or getattr(subagent, "prompt", "")
+                    full = (base + "\n\n" + task_input).strip() if base else task_input
+                    subagent.message_history["first_input"]["message"] = full
+                    subagent.prompt = full
+
                 result = subagent.execution()
+
+                # Clear the resume checkpoint after use so the next call to this
+                # subagent (if any) starts fresh rather than re-resuming.
+                subagent._resume_checkpoint = None
+
                 final_output = result.get("final_message", "")
                 summary = result.get("summary", final_output)
-                
+
                 if self.logger:
                     self.logger.log_action(f"Subagent {subagent.name} completed")
-                
+
                 return summary or final_output
             except Exception as e:
                 error_msg = f"Error executing subagent '{subagent.name}': {str(e)}"
                 if self.logger:
                     self.logger.log_action(error_msg)
                 return json.dumps({"error": error_msg})
-        
+
+        subagent_executor.__tool_timeout__ = SUBAGENT_TOOL_TIMEOUT_SECONDS
+        subagent_executor.__ika_is_subagent_tool__ = True
         return subagent_executor
 
     def build_tool_executors(

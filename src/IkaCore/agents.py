@@ -149,6 +149,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
     def execute_stage(self, stage_index: int, remaining_steps: int) -> tuple[int, str, bool, Optional[str], int]:
 
         stage = self.Stages[stage_index]
+        self._save_stage_entry_checkpoint(stage_index, remaining_steps)
         base_system = self.final_prompt(stage)
         system_prompt = (self.system_prompt + "\n\n" + base_system) if self.system_prompt else base_system
         self.message_history["system"]["message"] = system_prompt
@@ -307,8 +308,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     elapsed=time.time() - step_start,
                 )
             remaining_after = max(0, remaining_steps - used_steps)
-            if self.checkpoint:
-                self._save_stage_checkpoint(stage_index, remaining_after, last_content)
+            self._save_stage_checkpoint(stage_index, remaining_after, last_content)
 
             if used_steps >= step_limit:
                 if extension_count < self.max_stage_extensions:
@@ -343,7 +343,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             self.logger.log_stage_end(stage.name, used_steps)
         return stage_index + 1, last_content, False, None, used_steps
 
-    def run_simple(self) -> tuple[str, str]:
+    def run_simple(self, initial_messages: Optional[List[dict]] = None) -> tuple[str, str]:
         dynamic_tools = self.build_simple_tools()
         system_prompt = self.system_prompt
         current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
@@ -363,7 +363,18 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         # Propagate context_budget so chat() can trigger summarization earlier
         if getattr(self, 'context_budget', None):
             barebone_model.context_budget = self.context_budget
-        messages: List[dict] = [{"role": "user", "content": start_prompt}]
+
+        # Restore conversation from checkpoint if provided; otherwise start fresh.
+        if initial_messages:
+            messages: List[dict] = list(initial_messages)
+        else:
+            messages = [{"role": "user", "content": start_prompt}]
+
+        # Keep a live reference so that child agents' _save_agent_entry_checkpoint()
+        # can read the up-to-date conversation (including intermediate tool-call rounds
+        # within a single chat_wrapper call) without waiting for chat_wrapper to return.
+        self._live_messages = messages
+
         last_content = ""
         last_agent_end_text = None
         current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
@@ -528,6 +539,10 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             max_steps_val = int(self.maxsteps)
             current_step_val = int(step_num) if step_num is not None else 0
             remaining_after = max(0, max_steps_val - (current_step_val + 1))
+            # Snapshot the raw chat messages so entry checkpoints of child agents
+            # (saved when a subagent is about to be invoked) can capture this
+            # agent's full conversation context for later restoration.
+            self._current_chat_messages = list(messages)
             self._save_agent_checkpoint(remaining_after, last_content)
             step_num += 1
 
@@ -601,15 +616,27 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
 
         resume_cp = getattr(self, "_resume_checkpoint", None)
 
+        # Save an entry checkpoint for every fresh (non-resume) invocation so we
+        # can always restart from this exact point even if no tool calls are made.
+        if not resume_cp:
+            self._save_agent_entry_checkpoint()
+
         if self.Stages:
             stage_idx = 0
             agent_end_text = None
             remaining_steps = self.maxsteps
-            if resume_cp and resume_cp.get("scope") == "stage":
-                stage_idx = min(resume_cp.get("stage_index", 0), len(self.Stages) - 1)
-                remaining_steps = max(1, resume_cp.get("remaining_steps", remaining_steps))
-                self.message_history = resume_cp.get("message_history", self.message_history)
-                last_content = resume_cp.get("last_content", "")
+            if resume_cp:
+                scope = resume_cp.get("scope")
+                if scope in ("stage", "stage_entry"):
+                    stage_idx = min(resume_cp.get("stage_index", 0), len(self.Stages) - 1)
+                    remaining_steps = max(1, resume_cp.get("remaining_steps", remaining_steps))
+                    self.message_history = resume_cp.get("message_history", self.message_history)
+                    last_content = resume_cp.get("last_content", "")
+                elif scope in ("agent", "agent_entry"):
+                    self.message_history = resume_cp.get("message_history", self.message_history)
+                    self.maxsteps = max(1, resume_cp.get("remaining_steps", self.maxsteps))
+                    remaining_steps = self.maxsteps
+            self._resume_checkpoint = None
             while 0 <= stage_idx < len(self.Stages):
                 stage_idx, last_content, agent_end_called, end_text, used = self.execute_stage(stage_idx, remaining_steps)
                 remaining_steps -= used
@@ -637,12 +664,19 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             }
             return self.next_agent.execution()
 
-        if resume_cp and resume_cp.get("scope") == "agent":
-            self.message_history = resume_cp.get("message_history", self.message_history)
-            self.maxsteps = max(1, resume_cp.get("remaining_steps", self.maxsteps))
+        saved_chat_messages: Optional[List[dict]] = None
+        if resume_cp:
+            scope = resume_cp.get("scope")
+            if scope in ("agent", "agent_entry"):
+                self.message_history = resume_cp.get("message_history", self.message_history)
+                self.maxsteps = max(1, resume_cp.get("remaining_steps", self.maxsteps))
+                # Restore the raw LLM chat messages so run_simple() resumes the
+                # conversation in-place rather than restarting from first_input.
+                saved_chat_messages = resume_cp.get("chat_messages") or None
+            self._resume_checkpoint = None
 
         if not self.final_answer_checks:
-            final_message, _ = self.run_simple()
+            final_message, _ = self.run_simple(initial_messages=saved_chat_messages)
             current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
             barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
             return self._build_final_output(final_message, barebone_model)
