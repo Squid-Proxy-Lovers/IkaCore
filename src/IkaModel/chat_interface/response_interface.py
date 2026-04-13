@@ -38,10 +38,20 @@ def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
         usage["input_tokens"] = raw_usage.get("prompt_tokens", raw_usage.get("input_tokens", 0))
         usage["output_tokens"] = raw_usage.get("completion_tokens", raw_usage.get("output_tokens", 0))
         usage["total_tokens"] = raw_usage.get("total_tokens", usage["input_tokens"] + usage["output_tokens"])
+        # OpenAI: usage.prompt_tokens_details.cached_tokens
+        ptd = raw_usage.get("prompt_tokens_details") or {}
+        cached = ptd.get("cached_tokens", 0) or 0
+        # DeepSeek: usage.prompt_cache_hit_tokens
+        if not cached:
+            cached = raw_usage.get("prompt_cache_hit_tokens", 0) or 0
+        usage["input_cached_tokens"] = cached
     elif provider == "openai_responses":
         usage["input_tokens"] = raw_usage.get("input_tokens", 0)
         usage["output_tokens"] = raw_usage.get("output_tokens", 0)
         usage["total_tokens"] = raw_usage.get("total_tokens", usage["input_tokens"] + usage["output_tokens"])
+        # Responses API: usage.input_tokens_details.cached_tokens
+        itd = raw_usage.get("input_tokens_details") or {}
+        usage["input_cached_tokens"] = itd.get("cached_tokens", 0) or 0
     elif provider == "anthropic":
         usage["input_tokens"] = raw_usage.get("input_tokens", 0)
         usage["output_tokens"] = raw_usage.get("output_tokens", 0)
