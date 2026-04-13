@@ -236,6 +236,8 @@ class IkaLogger:
             "gpt-4.1-nano": (0.10, 0.025, 0.40),
             "gpt-5.2": (1.75, 0.175, 14.00),
             "gpt-5.3-codex": (1.75, 0.175, 14.00),
+            "gpt-5.4": (2.50, 0.25, 15.00),
+            "gpt-5.4-mini": (0.75, 0.075, 4.50),
             "claude-3-opus": (15.00, 15.00, 75.00),
             "claude-3-sonnet": (3.00, 3.00, 15.00),
             "claude-3-haiku": (0.250, 0.250, 1.250),
@@ -253,6 +255,7 @@ class IkaLogger:
             "gemini-3-flash-preview": (0.50, 0.05, 3.00),
             "gemini-3-pro": (2.00, 0.20, 12.00),
             "gemini-3.1-pro": (2.00, 0.20, 12.00),
+            "xiaomi/mimo-v2-pro": (0.00, 0.00, 0.00),
         }
         mid = model_id.lower()
         
