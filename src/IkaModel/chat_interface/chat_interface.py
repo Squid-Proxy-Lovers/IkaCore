@@ -38,6 +38,17 @@ from ..chat_helpers_common import (
 LOG = logging.getLogger(__name__)
 
 
+def _runtime_checkpoint(
+    barebone_model: BareBoneModel,
+    checkpoint_kind: str,
+    state: Optional[dict] = None,
+) -> None:
+    hooks = getattr(barebone_model, "_runtime_hooks", None) or {}
+    callback = hooks.get("on_checkpoint")
+    if callback:
+        callback(checkpoint_kind, state=state or {})
+
+
 def _record_model_message(message_history: dict, content: str, tokens: int, reasoning_content: Optional[str] = None) -> None:
     msg_id = str(uuid.uuid4())
     history_entry = {"message": content, "tokens": tokens}
@@ -288,13 +299,31 @@ def chat(
 
     def _build():
         return build_provider_request(provider, barebone_model, messages, message_history)
-    
+    _runtime_checkpoint(
+        barebone_model,
+        "pre_model",
+        {
+            "messages": messages,
+            "message_history": message_history,
+            "provider": provider,
+        },
+    )
     response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout)
     
     response.raise_for_status()
     data = response.json()
     
     content, reasoning_content, tool_calls, tokens = parse_provider_response(provider, data, barebone_model.model_id)
+    _runtime_checkpoint(
+        barebone_model,
+        "post_model",
+        {
+            "content": content,
+            "tool_calls": tool_calls,
+            "message_history": message_history,
+            "provider": provider,
+        },
+    )
     usage_info = extract_usage(provider, data)
     if usage_info:
         tokens = usage_info.get("total_tokens", tokens)
@@ -323,6 +352,15 @@ def chat(
     agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
 
     while tool_calls and tool_executors and rounds < max_tool_rounds:
+        _runtime_checkpoint(
+            barebone_model,
+            "pre_tool_round",
+            {
+                "round": rounds,
+                "tool_calls": tool_calls,
+                "message_history": message_history,
+            },
+        )
         repeated_tool_names: List[str] = []
         for tool_call in tool_calls:
             fn = tool_call.get("function", {})
@@ -398,6 +436,16 @@ def chat(
         step = getattr(barebone_model, '_current_step', 0)
         print("tool_calls_from_llm:", tool_calls)
         tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+        _runtime_checkpoint(
+            barebone_model,
+            "post_tool_round",
+            {
+                "round": rounds,
+                "executed_tool_calls": executed_tool_call_list,
+                "tool_results": tool_results,
+                "message_history": message_history,
+            },
+        )
         if hasattr(barebone_model, '_tool_call_counts'):
             barebone_model._tool_call_counts.update(updated_counts)
         all_executed_tool_call_list.extend(executed_tool_call_list)
@@ -505,12 +553,33 @@ def chat(
             return build_provider_request(provider, barebone_model, messages, message_history)
         
         LOG.debug("[TRACE] chat: Sending follow-up API request")
+        _runtime_checkpoint(
+            barebone_model,
+            "pre_model",
+            {
+                "messages": messages,
+                "message_history": message_history,
+                "provider": provider,
+                "round": rounds,
+            },
+        )
         response = _api_request_with_context_fallback(_build_follow, barebone_model, message_history, timeout)
         LOG.debug("[TRACE] chat: API request returned")
         response.raise_for_status()
         data = response.json()
         
         content, reasoning_content, tool_calls, tokens = parse_provider_response(provider, data, barebone_model.model_id)
+        _runtime_checkpoint(
+            barebone_model,
+            "post_model",
+            {
+                "content": content,
+                "tool_calls": tool_calls,
+                "message_history": message_history,
+                "provider": provider,
+                "round": rounds,
+            },
+        )
         usage_info = extract_usage(provider, data)
         if usage_info:
             tokens = usage_info.get("total_tokens", 0)
@@ -655,12 +724,21 @@ async def async_chat(
     try:
         def _build():
             return build_provider_request(provider, barebone_model, messages, message_history)
-        
+        _runtime_checkpoint(
+            barebone_model,
+            "pre_model",
+            {"messages": messages, "message_history": message_history, "provider": provider},
+        )
         response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client)
         response.raise_for_status()
         data = response.json()
 
         content, reasoning_content, tool_calls, tokens = parse_provider_response(provider, data, barebone_model.model_id)
+        _runtime_checkpoint(
+            barebone_model,
+            "post_model",
+            {"content": content, "tool_calls": tool_calls, "message_history": message_history, "provider": provider},
+        )
         usage_info = extract_usage(provider, data)
         if usage_info:
             tokens = usage_info.get("total_tokens", tokens)
@@ -689,6 +767,11 @@ async def async_chat(
         agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
 
         while tool_calls and tool_executors and rounds < max_tool_rounds:
+            _runtime_checkpoint(
+                barebone_model,
+                "pre_tool_round",
+                {"round": rounds, "tool_calls": tool_calls, "message_history": message_history},
+            )
             repeated_tool_names_async: List[str] = []
             for tool_call in tool_calls:
                 fn = tool_call.get("function", {})
@@ -769,6 +852,16 @@ async def async_chat(
             step = getattr(barebone_model, '_current_step', 0)
             print("tool_calls_from_llm:", tool_calls)
             tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+            _runtime_checkpoint(
+                barebone_model,
+                "post_tool_round",
+                {
+                    "round": rounds,
+                    "executed_tool_calls": executed_tool_call_list,
+                    "tool_results": tool_results,
+                    "message_history": message_history,
+                },
+            )
             if hasattr(barebone_model, '_tool_call_counts'):
                 barebone_model._tool_call_counts.update(updated_counts)
             all_executed_tool_call_list.extend(executed_tool_call_list)
@@ -868,12 +961,22 @@ async def async_chat(
                 return build_provider_request(provider, barebone_model, messages, message_history)
             
             LOG.debug("[TRACE] async_chat: Sending follow-up API request")
+            _runtime_checkpoint(
+                barebone_model,
+                "pre_model",
+                {"messages": messages, "message_history": message_history, "provider": provider, "round": rounds},
+            )
             response = await _api_request_with_context_fallback_async(_build_follow, barebone_model, message_history, timeout, client)
             LOG.debug("[TRACE] async_chat: API request returned")
             response.raise_for_status()
             data = response.json()
             
             content, reasoning_content, tool_calls, tokens = parse_provider_response(provider, data, barebone_model.model_id)
+            _runtime_checkpoint(
+                barebone_model,
+                "post_model",
+                {"content": content, "tool_calls": tool_calls, "message_history": message_history, "provider": provider, "round": rounds},
+            )
             usage_info = extract_usage(provider, data)
             if usage_info:
                 tokens = usage_info.get("total_tokens", 0)

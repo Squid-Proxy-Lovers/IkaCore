@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any, Dict, List, Optional, Callable
 
 from IkaCore.cli_output import get_cli_output
+from IkaCore.runtime_control import RuntimePauseRequested
 
 LOG = logging.getLogger(__name__)
 
@@ -115,6 +116,8 @@ def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Call
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
         LOG.warning(timeout_msg)
         return json.dumps({"error": timeout_msg})
+    except RuntimePauseRequested:
+        raise
     except Exception as e:
         error_msg = f"Error executing tool '{tool_name}': {str(e)}"
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
@@ -305,6 +308,8 @@ def execute_tool_calls(
                     result = future.result()
                     tool_call_id_to_result[tool_call_id] = result
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+                except RuntimePauseRequested:
+                    raise
                 except Exception as e:
                     error_msg = f"Parallel tool execution error: {str(e)}"
                     LOG.error(error_msg)
@@ -387,6 +392,8 @@ async def async_execute_tool(
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
         LOG.warning(timeout_msg)
         return json.dumps({"error": timeout_msg})
+    except RuntimePauseRequested:
+        raise
     except Exception as e:
         error_msg = f"Error executing tool '{tool_name}': {str(e)}"
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
@@ -475,6 +482,8 @@ async def async_execute_tool_calls(
             tool_name = parallel_calls[i][0] if i < len(parallel_calls) else ""
             tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
             if isinstance(result, Exception):
+                if isinstance(result, RuntimePauseRequested):
+                    raise result
                 error_msg = f"Parallel tool execution error: {str(result)}"
                 LOG.error(error_msg)
                 tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})

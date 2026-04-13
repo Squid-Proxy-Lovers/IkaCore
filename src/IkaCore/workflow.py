@@ -9,6 +9,7 @@ from copy import deepcopy
 
 from IkaCore.agents import IkaBaseAgent, summarise_message_history
 from IkaCore.cli_output import get_cli_output
+from IkaCore.checkpoint import CheckpointStore
 
 
 WorkflowCompressionHook = Callable[[List[str], IkaBaseAgent], str]
@@ -194,6 +195,9 @@ class IkaWorkflow:
         self._visiting: Set[str] = set()
         self._node_dependencies: Dict[str, Set[str]] = {}
         self._node_dependents: Dict[str, Set[str]] = {}
+        self._runtime_store: Optional[CheckpointStore] = None
+        self._runtime_run_id: Optional[str] = None
+        self._runtime_frame_id: Optional[str] = None
 
         self._validate_nodes()
         self._validate_edges()
@@ -320,6 +324,40 @@ class IkaWorkflow:
     def _prepare_context(self, node: WorkflowNode, upstream: List[str]) -> str:
         return self.compress_hook(upstream, node.agent) if upstream else ""
 
+    def _get_runtime_store(self) -> Optional[CheckpointStore]:
+        if self._runtime_store is not None:
+            return self._runtime_store
+        for node in self.nodes:
+            store = getattr(node.agent, "checkpoint_store", None)
+            if store is not None:
+                self._runtime_store = store
+                return store
+        return None
+
+    def _ensure_runtime(self) -> None:
+        store = self._get_runtime_store()
+        if store is None or self._runtime_run_id:
+            return
+        self._runtime_run_id = store.create_run(
+            entry_type="workflow",
+            entry_name=self.name,
+            metadata={"workflow_name": self.name},
+        )
+        self._runtime_frame_id = store.create_frame(
+            run_id=self._runtime_run_id,
+            frame_type="workflow",
+            frame_name=self.name,
+            position={"start_node": self.start_node},
+            metadata={"workflow_name": self.name},
+        )
+        store.set_run_root_frame(self._runtime_run_id, self._runtime_frame_id)
+        store.record_event(
+            self._runtime_run_id,
+            self._runtime_frame_id,
+            "workflow_started",
+            {"workflow_name": self.name},
+        )
+
     def _run_node(self, node_name: str, upstream_contexts: Dict[str, List[str]]) -> WorkflowResult:
         if node_name in self._results:
             return self._results[node_name]
@@ -334,6 +372,12 @@ class IkaWorkflow:
         self._apply_stage_wiring(node)
         if context_text:
             node.agent.inject_workflow_context(context_text)
+        if self._runtime_run_id:
+            node.agent.checkpoint_store = self._get_runtime_store()
+            node.agent._runtime_run_id = self._runtime_run_id
+            node.agent._runtime_parent_frame_id = self._runtime_frame_id
+            node.agent._runtime_return_to_frame_id = self._runtime_frame_id
+            node.agent._runtime_invocation_type = "workflow_node"
 
         execution_output = node.agent.execution()
         final_message = execution_output.get("final_message") or ""
@@ -423,13 +467,19 @@ class IkaWorkflow:
         
         return agent_copy
 
-    def run_async(self, initial_context: Optional[str] = None) -> Dict[str, WorkflowResult]:
+    def run_async(
+        self,
+        initial_context: Optional[str] = None,
+        replay_from_run_id: Optional[str] = None,
+        parallel_replay: Optional[Dict[str, List[int]]] = None,
+    ) -> Dict[str, WorkflowResult]:
         upstream_contexts: Dict[str, List[str]] = {}
         if initial_context:
             upstream_contexts[self.start_node] = [initial_context]
         
         self._results = {}
         self._visiting = set()
+        self._ensure_runtime()
         ready_nodes: Set[str] = {self.start_node}
         completed_nodes: Set[str] = set()
         pending_nodes: Set[str] = set(node.name for node in self.nodes)
@@ -442,6 +492,7 @@ class IkaWorkflow:
             step=0
         )
         cli.start_parallel()
+        replay_plan = parallel_replay or {}
         
         while ready_nodes or any(node_futures.values()):
             current_futures = []
@@ -458,12 +509,53 @@ class IkaWorkflow:
                 )
 
                 node_futures[node_name] = []
+                historical_instances = {}
+                if replay_from_run_id and self._runtime_store:
+                    for frame in self._runtime_store.list_workflow_node_instances(replay_from_run_id, node_name):
+                        instance_id = int(frame.get("metadata_json", {}).get("workflow_instance_id") or 0)
+                        historical_instances[instance_id] = frame
+                rerun_instances = set(replay_plan.get(node_name, []))
+                scheduled_any = False
 
                 for instance_id in range(num_instances):
                     instance_input = instance_inputs[instance_id] if instance_id < len(instance_inputs) else None
+                    historical_frame = historical_instances.get(instance_id)
+                    should_rerun = (instance_id in rerun_instances) or (not replay_from_run_id)
+                    if replay_from_run_id and historical_frame is not None and not should_rerun:
+                        outputs = historical_frame.get("outputs_json", {})
+                        final_message = outputs.get("final_message", "")
+                        summary = outputs.get("summary", final_message)
+                        if node_name not in self._results:
+                            self._results[node_name] = WorkflowResult(
+                                name=node_name,
+                                final=final_message,
+                                summary=f"[Instance {instance_id}]: {summary}",
+                                history={
+                                    "final_message": final_message,
+                                    "summary": summary,
+                                    "runtime": {
+                                        "run_id": replay_from_run_id,
+                                        "frame_id": historical_frame["frame_id"],
+                                        "reused": True,
+                                    },
+                                },
+                                child_summaries={},
+                            )
+                        else:
+                            existing = self._results[node_name].summary
+                            self._results[node_name].summary = f"{existing}\n\n[Instance {instance_id}]: {summary}"
+                        continue
                     agent_instance = self._create_agent_instance(node.agent, instance_id, instance_input)
                     if node.stage_wiring:
                         agent_instance.apply_workflow_stage_wiring(node.stage_wiring)
+                    if self._runtime_run_id:
+                        agent_instance.checkpoint_store = self._get_runtime_store()
+                        agent_instance._runtime_run_id = self._runtime_run_id
+                        agent_instance._runtime_parent_frame_id = self._runtime_frame_id
+                        agent_instance._runtime_return_to_frame_id = self._runtime_frame_id
+                        agent_instance._runtime_invocation_type = "workflow_node"
+                        agent_instance._runtime_workflow_node_name = node_name
+                        agent_instance._runtime_workflow_instance_id = instance_id
                     context_text = ""
                     if upstream_contexts.get(node_name):
                         context_text = self._prepare_context(node, upstream_contexts[node_name])
@@ -478,8 +570,19 @@ class IkaWorkflow:
                     )
                     node_futures[node_name].append(future)
                     current_futures.append(future)
+                    scheduled_any = True
                 ready_nodes.remove(node_name)
                 completed_nodes.add(node_name)
+                if not scheduled_any and node_name in self._results:
+                    summary = self._results[node_name].summary
+                    for edge in self.edges:
+                        if edge.source == node_name and edge.edge_type == "next":
+                            upstream_contexts.setdefault(edge.target, []).append(summary)
+                            target_deps = self._node_dependencies[edge.target]
+                            if target_deps.issubset(completed_nodes):
+                                if edge.target not in completed_nodes and edge.target not in ready_nodes:
+                                    ready_nodes.add(edge.target)
+                                    pending_nodes.discard(edge.target)
 
             if current_futures:
                 results = self.async_executor.wait_for_completion(current_futures)
@@ -535,16 +638,37 @@ class IkaWorkflow:
             f"Completed async execution. Results for {len(self._results)} nodes.",
             step=len(self._results)
         )
+        if self._runtime_run_id and self._runtime_frame_id and self._runtime_store:
+            self._runtime_store.update_frame(
+                self._runtime_frame_id,
+                status="completed",
+                outputs={"result_count": len(self._results)},
+            )
+            self._runtime_store.update_run_status(self._runtime_run_id, "completed", ended=True)
         return self._results
 
-    def run(self, initial_context: Optional[str] = None, use_async: bool = False) -> Dict[str, WorkflowResult]:
+    def run(
+        self,
+        initial_context: Optional[str] = None,
+        use_async: bool = False,
+        replay_from_run_id: Optional[str] = None,
+        parallel_replay: Optional[Dict[str, List[int]]] = None,
+    ) -> Dict[str, WorkflowResult]:
         if use_async:
-            return self.run_async(initial_context)
+            return self.run_async(initial_context, replay_from_run_id=replay_from_run_id, parallel_replay=parallel_replay)
         
         upstream_contexts: Dict[str, List[str]] = {}
         if initial_context:
             upstream_contexts[self.start_node] = [initial_context]
         self._results = {}
         self._visiting = set()
+        self._ensure_runtime()
         self._run_node(self.start_node, upstream_contexts)
+        if self._runtime_run_id and self._runtime_frame_id and self._runtime_store:
+            self._runtime_store.update_frame(
+                self._runtime_frame_id,
+                status="completed",
+                outputs={"result_count": len(self._results)},
+            )
+            self._runtime_store.update_run_status(self._runtime_run_id, "completed", ended=True)
         return self._results

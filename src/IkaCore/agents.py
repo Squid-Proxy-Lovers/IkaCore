@@ -25,6 +25,7 @@ from IkaCore.agent_memory import AgentMemoryMixin
 from IkaCore.agent_tools import AgentToolsMixin
 from IkaCore.agent_execution import AgentExecutionMixin
 from IkaCore.agent_helpers import AgentHelpersMixin
+from IkaCore.runtime_control import RuntimePauseRequested
 
 
 class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, AgentHelpersMixin):
@@ -127,6 +128,15 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         self._last_api_call_ts: float = 0.0
         self.checkpoint_store = CheckpointStore(checkpoint_db_path) if checkpoint else None
         self._resume_checkpoint: Optional[dict] = None
+        self._runtime_run_id: Optional[str] = None
+        self._runtime_frame_id: Optional[str] = None
+        self._runtime_parent_frame_id: Optional[str] = None
+        self._runtime_return_to_frame_id: Optional[str] = None
+        self._runtime_invocation_type: Optional[str] = None
+        self._runtime_stage_frame_ids: Dict[int, str] = {}
+        self._runtime_active_stage_frame_id: Optional[str] = None
+        self._last_snapshot_id: Optional[str] = None
+        self._runtime_control = None
         self.short_term_memory: Optional[STMemory] = None
         self.long_term_memory: Optional[LTMemory] = get_global_long_term_memory()
         self.summarize_final = summarize_final
@@ -149,6 +159,22 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
     def execute_stage(self, stage_index: int, remaining_steps: int) -> tuple[int, str, bool, Optional[str], int]:
 
         stage = self.Stages[stage_index]
+        stage_frame_id = self._ensure_stage_runtime_frame(stage_index, stage)
+        if self.checkpoint_store and stage_frame_id:
+            stage_entry_state = self._runtime_snapshot_state(
+                scope="stage",
+                remaining_steps=remaining_steps,
+                last_content="",
+                frame_id=stage_frame_id,
+                stage_index=stage_index,
+            )
+            self._create_runtime_snapshot(
+                frame_id=stage_frame_id,
+                snapshot_kind="frame_entry",
+                state=stage_entry_state,
+                resume_strategy="restart_frame",
+                label=f"stage-entry:{stage_index}",
+            )
         base_system = self.final_prompt(stage)
         system_prompt = (self.system_prompt + "\n\n" + base_system) if self.system_prompt else base_system
         self.message_history["system"]["message"] = system_prompt
@@ -288,10 +314,28 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     if self.logger:
                         self.logger.log_action(f"ERROR: {str(e)}")
                     raise
+                self._complete_runtime_frame(
+                    stage_frame_id,
+                    status="completed",
+                    outputs={"final_message": final_content, "last_content": last_content},
+                    position={"stage_index": stage_index, "stage_name": stage.name},
+                )
                 return stage_index, final_content, True, final_content, used_steps
             if target_stage == "next":
+                self._complete_runtime_frame(
+                    stage_frame_id,
+                    status="completed",
+                    outputs={"last_content": last_content},
+                    position={"stage_index": stage_index, "stage_name": stage.name},
+                )
                 return stage_index + 1, last_content, False, None, used_steps
             if isinstance(target_stage, int):
+                self._complete_runtime_frame(
+                    stage_frame_id,
+                    status="completed",
+                    outputs={"last_content": last_content, "target_stage": target_stage},
+                    position={"stage_index": stage_index, "stage_name": stage.name},
+                )
                 return target_stage, last_content, False, None, used_steps
 
             messages.append({"role": "assistant", "content": last_content})
@@ -341,9 +385,20 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
 
         if self.logger:
             self.logger.log_stage_end(stage.name, used_steps)
+        self._complete_runtime_frame(
+            stage_frame_id,
+            status="completed",
+            outputs={"last_content": last_content},
+            position={"stage_index": stage_index, "stage_name": stage.name},
+        )
         return stage_index + 1, last_content, False, None, used_steps
 
     def run_simple(self) -> tuple[str, str]:
+        self._ensure_runtime_entry_frame(
+            invocation_type=self._runtime_invocation_type or "agent",
+            position={"mode": "simple"},
+            inputs={"prompt": self.prompt},
+        )
         dynamic_tools = self.build_simple_tools()
         system_prompt = self.system_prompt
         current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
@@ -601,112 +656,205 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             self.load_checkpoint(checkpoint_uid)
 
         resume_cp = getattr(self, "_resume_checkpoint", None)
+        root_frame_id = self._ensure_runtime_entry_frame(
+            invocation_type=self._runtime_invocation_type or "agent",
+            position={"mode": "staged" if self.Stages else "simple"},
+            inputs={"prompt": self.prompt},
+        )
+        if self.checkpoint_store and root_frame_id and not resume_cp:
+            entry_scope = "stage" if self.Stages else "agent"
+            entry_state = self._runtime_snapshot_state(
+                scope=entry_scope,
+                remaining_steps=self.maxsteps,
+                last_content="",
+                frame_id=root_frame_id,
+            )
+            self._create_runtime_snapshot(
+                frame_id=root_frame_id,
+                snapshot_kind="frame_entry",
+                state=entry_state,
+                resume_strategy="restart_frame",
+                label="entry",
+            )
+        if self.checkpoint_store and self._runtime_run_id:
+            self.checkpoint_store.update_run_status(self._runtime_run_id, "running")
 
-        if self.Stages:
-            stage_idx = 0
-            agent_end_text = None
-            remaining_steps = self.maxsteps
-            if resume_cp and resume_cp.get("scope") == "stage":
-                stage_idx = min(resume_cp.get("stage_index", 0), len(self.Stages) - 1)
-                remaining_steps = max(1, resume_cp.get("remaining_steps", remaining_steps))
+        try:
+            if self.Stages:
+                stage_idx = 0
+                agent_end_text = None
+                remaining_steps = self.maxsteps
+                if resume_cp and resume_cp.get("scope") == "stage":
+                    stage_idx = min(resume_cp.get("stage_index", 0), len(self.Stages) - 1)
+                    remaining_steps = max(1, resume_cp.get("remaining_steps", remaining_steps))
+                    self.message_history = resume_cp.get("message_history", self.message_history)
+                    last_content = resume_cp.get("last_content", "")
+                while 0 <= stage_idx < len(self.Stages):
+                    stage_idx, last_content, agent_end_called, end_text, used = self.execute_stage(stage_idx, remaining_steps)
+                    remaining_steps -= used
+                    if agent_end_called:
+                        agent_end_text = end_text
+                        break
+                final_message = agent_end_text if agent_end_text and agent_end_text.strip() not in [".", ""] else last_content
+                current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+                barebone_model = self.get_barebone(self.message_history["system"]["message"], [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
+                final_output = self._build_final_output(final_message, barebone_model)
+                self._complete_runtime_frame(
+                    root_frame_id,
+                    status="completed",
+                    outputs={"final_message": final_output.get("final_message"), "summary": final_output.get("summary")},
+                )
+                if self.checkpoint_store and self._runtime_run_id:
+                    self.checkpoint_store.update_run_status(self._runtime_run_id, "completed", ended=True)
+                return final_output
+
+            if self.next_agent:
+                final_message, _ = self.run_simple()
+                if self.summarize_final:
+                    current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+                    barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
+                    summary = summarise_message_history(barebone_model, self.message_history) or final_message
+                else:
+                    summary = final_message
+                self.next_agent.message_history = {
+                    "system": {"message": self.next_agent.system_prompt or "", "tokens": 0},
+                    "first_input": {"message": f"Previous agent summary:\n{summary}", "tokens": 0},
+                    "summary": {"message": "", "tokens": 0},
+                    "messages": {},
+                    "compaction_count": 0,
+                    "_context_warning_issued": None,
+                }
+                self.next_agent.checkpoint_store = self.checkpoint_store
+                self.next_agent._runtime_run_id = self._runtime_run_id
+                self.next_agent._runtime_parent_frame_id = root_frame_id
+                self.next_agent._runtime_return_to_frame_id = root_frame_id
+                self.next_agent._runtime_invocation_type = "next_agent_handoff"
+                result = self.next_agent.execution()
+                self._complete_runtime_frame(
+                    root_frame_id,
+                    status="completed",
+                    outputs={"final_message": result.get("final_message"), "summary": result.get("summary")},
+                )
+                if self.checkpoint_store and self._runtime_run_id:
+                    self.checkpoint_store.update_run_status(self._runtime_run_id, "completed", ended=True)
+                return result
+
+            if resume_cp and resume_cp.get("scope") == "agent":
                 self.message_history = resume_cp.get("message_history", self.message_history)
-                last_content = resume_cp.get("last_content", "")
-            while 0 <= stage_idx < len(self.Stages):
-                stage_idx, last_content, agent_end_called, end_text, used = self.execute_stage(stage_idx, remaining_steps)
-                remaining_steps -= used
-                if agent_end_called:
-                    agent_end_text = end_text
-                    break
-            final_message = agent_end_text if agent_end_text and agent_end_text.strip() not in [".", ""] else last_content
-            current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
-            barebone_model = self.get_barebone(self.message_history["system"]["message"], [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
-            return self._build_final_output(final_message, barebone_model)
+                self.maxsteps = max(1, resume_cp.get("remaining_steps", self.maxsteps))
 
-        if self.next_agent:
-            final_message, _ = self.run_simple()
-            if self.summarize_final:
+            if not self.final_answer_checks:
+                final_message, _ = self.run_simple()
                 current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
                 barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
-                summary = summarise_message_history(barebone_model, self.message_history) or final_message
-            else:
-                summary = final_message
-            self.next_agent.message_history = {
-                "system": {"message": self.next_agent.system_prompt or "", "tokens": 0},
-                "first_input": {"message": f"Previous agent summary:\n{summary}", "tokens": 0},
-                "summary": {"message": "", "tokens": 0},
-                "messages": {},
-                "compaction_count": 0,
-                "_context_warning_issued": None,
-            }
-            return self.next_agent.execution()
-
-        if resume_cp and resume_cp.get("scope") == "agent":
-            self.message_history = resume_cp.get("message_history", self.message_history)
-            self.maxsteps = max(1, resume_cp.get("remaining_steps", self.maxsteps))
-
-        if not self.final_answer_checks:
-            final_message, _ = self.run_simple()
-            current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
-            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
-            return self._build_final_output(final_message, barebone_model)
-
-        original_maxsteps = self.maxsteps
-        original_prompt = self.prompt
-        max_retries = 3
-        retry_count = 0
-        
-        while retry_count <= max_retries:
-            final_message, _ = self.run_simple()
-            current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
-            barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
-            final_output = self._build_final_output(final_message, barebone_model)
-
-            failed_checks = []
-            for check in self.final_answer_checks:
-                if not check(final_output):
-                    func_name = getattr(check, '__name__', 'unknown')
-                    failed_checks.append(func_name)
-
-            if not failed_checks:
-                self.maxsteps = original_maxsteps
-                self.prompt = original_prompt
+                final_output = self._build_final_output(final_message, barebone_model)
+                self._complete_runtime_frame(
+                    root_frame_id,
+                    status="completed",
+                    outputs={"final_message": final_output.get("final_message"), "summary": final_output.get("summary")},
+                )
+                if self.checkpoint_store and self._runtime_run_id:
+                    self.checkpoint_store.update_run_status(self._runtime_run_id, "completed", ended=True)
                 return final_output
 
-            if retry_count < max_retries:
-                self.maxsteps = original_maxsteps + 10
-                failed_check_names = ", ".join(failed_checks)
-                check_descriptions = []
+            original_maxsteps = self.maxsteps
+            original_prompt = self.prompt
+            max_retries = 3
+            retry_count = 0
+            
+            while retry_count <= max_retries:
+                final_message, _ = self.run_simple()
+                current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
+                barebone_model = self.get_barebone(self.system_prompt or self.description or self.prompt, [], parent_hierarchy=current_hierarchy, suppress_init_output=True)
+                final_output = self._build_final_output(final_message, barebone_model)
+
+                failed_checks = []
                 for check in self.final_answer_checks:
-                    func_name = getattr(check, '__name__', 'unknown')
-                    if func_name in failed_checks:
-                        doc = getattr(check, '__doc__', 'No description available').strip()
-                        check_descriptions.append(f"{func_name}: {doc}")
-                
-                feedback_msg = (
-                    f"Your previous answer failed validation checks: {failed_check_names}.\n"
-                    f"Failed check requirements:\n" + "\n".join(f"- {desc}" for desc in check_descriptions) + "\n"
-                    f"Please review the requirements and provide an improved answer. "
-                    f"You have {self.maxsteps} steps to complete this task."
-                )
-                self.prompt = f"{original_prompt}\n\n[FEEDBACK]: {feedback_msg}"
-                self.message_history["first_input"]["message"] = self.prompt
-                self.message_history["messages"] = {}
-                retry_count += 1
-                cli = get_cli_output()
-                cli.agent_response(
-                    self.name,
-                    f"Validation failed for checks: {failed_check_names}. Retrying (attempt {retry_count}/{max_retries})...",
-                    [self.name],
-                    step=0
-                )
-            else:
-                self.maxsteps = original_maxsteps
-                self.prompt = original_prompt
-                failed_check_names = ", ".join(failed_checks)
-                if self.logger:
-                    self.logger.log_action(f"Final answer validation failed after {max_retries} retries. Returning last output despite failed checks: {failed_check_names}")
-                return final_output
+                    if not check(final_output):
+                        func_name = getattr(check, '__name__', 'unknown')
+                        failed_checks.append(func_name)
 
-        self.maxsteps = original_maxsteps
-        self.prompt = original_prompt
-        return final_output
+                if not failed_checks:
+                    self.maxsteps = original_maxsteps
+                    self.prompt = original_prompt
+                    self._complete_runtime_frame(
+                        root_frame_id,
+                        status="completed",
+                        outputs={"final_message": final_output.get("final_message"), "summary": final_output.get("summary")},
+                    )
+                    if self.checkpoint_store and self._runtime_run_id:
+                        self.checkpoint_store.update_run_status(self._runtime_run_id, "completed", ended=True)
+                    return final_output
+
+                if retry_count < max_retries:
+                    self.maxsteps = original_maxsteps + 10
+                    failed_check_names = ", ".join(failed_checks)
+                    check_descriptions = []
+                    for check in self.final_answer_checks:
+                        func_name = getattr(check, '__name__', 'unknown')
+                        if func_name in failed_checks:
+                            doc = getattr(check, '__doc__', 'No description available').strip()
+                            check_descriptions.append(f"{func_name}: {doc}")
+                    
+                    feedback_msg = (
+                        f"Your previous answer failed validation checks: {failed_check_names}.\n"
+                        f"Failed check requirements:\n" + "\n".join(f"- {desc}" for desc in check_descriptions) + "\n"
+                        f"Please review the requirements and provide an improved answer. "
+                        f"You have {self.maxsteps} steps to complete this task."
+                    )
+                    self.prompt = f"{original_prompt}\n\n[FEEDBACK]: {feedback_msg}"
+                    self.message_history["first_input"]["message"] = self.prompt
+                    self.message_history["messages"] = {}
+                    retry_count += 1
+                    cli = get_cli_output()
+                    cli.agent_response(
+                        self.name,
+                        f"Validation failed for checks: {failed_check_names}. Retrying (attempt {retry_count}/{max_retries})...",
+                        [self.name],
+                        step=0
+                    )
+                else:
+                    self.maxsteps = original_maxsteps
+                    self.prompt = original_prompt
+                    failed_check_names = ", ".join(failed_checks)
+                    if self.logger:
+                        self.logger.log_action(f"Final answer validation failed after {max_retries} retries. Returning last output despite failed checks: {failed_check_names}")
+                    self._complete_runtime_frame(
+                        root_frame_id,
+                        status="completed",
+                        outputs={"final_message": final_output.get("final_message"), "summary": final_output.get("summary")},
+                    )
+                    if self.checkpoint_store and self._runtime_run_id:
+                        self.checkpoint_store.update_run_status(self._runtime_run_id, "completed", ended=True)
+                    return final_output
+
+            self.maxsteps = original_maxsteps
+            self.prompt = original_prompt
+            return final_output
+        except RuntimePauseRequested as pause:
+            if self.checkpoint_store and self._runtime_run_id:
+                self.checkpoint_store.update_run_status(self._runtime_run_id, "paused")
+            return {
+                "final_message": last_content,
+                "summary": last_content,
+                "usage": getattr(self, "_total_usage", {}),
+                "cost": getattr(self, "_total_cost", {}),
+                "model_id": self.model_id,
+                "runtime": {
+                    "run_id": getattr(self, "_runtime_run_id", None),
+                    "frame_id": getattr(self, "_runtime_frame_id", None),
+                    "last_snapshot_id": getattr(self, "_last_snapshot_id", None),
+                    "paused": True,
+                    "checkpoint_kind": pause.checkpoint_kind,
+                    "snapshot_id": pause.snapshot_id,
+                },
+            }
+        except Exception:
+            self._complete_runtime_frame(
+                root_frame_id,
+                status="failed",
+                outputs={"last_content": last_content},
+            )
+            if self.checkpoint_store and self._runtime_run_id:
+                self.checkpoint_store.update_run_status(self._runtime_run_id, "failed", ended=True)
+            raise

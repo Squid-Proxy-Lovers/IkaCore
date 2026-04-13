@@ -99,7 +99,18 @@ class ToolArgs:
 
 @dataclass
 class AgentTool:
-    def __init__(self, id:str, name: str, description: str, args: ToolArgs, required: bool = True, parallel: bool = False, limit_calls: int = 0): 
+    def __init__(
+        self,
+        id: str,
+        name: str,
+        description: str,
+        args: ToolArgs,
+        required: bool = True,
+        parallel: bool = False,
+        limit_calls: int = 0,
+        side_effect_type: str = "pure",
+        replay_policy: Optional[str] = None,
+    ): 
         self.validate(name)
         self.id = id
         self.name = name
@@ -108,6 +119,8 @@ class AgentTool:
         self.required = required
         self.parallel = parallel # assume that all tools are not parallel by default
         self.limit_calls = limit_calls
+        self.side_effect_type = side_effect_type
+        self.replay_policy = replay_policy or ("allow" if side_effect_type in {"pure", "idempotent"} else "deny")
 
 
     @staticmethod

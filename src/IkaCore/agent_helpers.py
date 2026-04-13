@@ -15,6 +15,7 @@ from IkaCore.logging_utils import IkaLogger
 from IkaCore.checkpoint import CheckpointStore
 from IkaCore.cli_output import get_cli_output, OutputType
 from IkaCore.prompts import *
+from IkaCore.runtime_control import RuntimeControl, RuntimePauseRequested
 
 from IkaModel.base import BareBoneModel, AgentTool, ToolArgs, AgentEndException
 from IkaModel.chat_interface.chat_interface import chat, async_chat, summarise_message_history
@@ -57,6 +58,15 @@ class AgentHelpersMixin:
     _last_api_call_ts: float
     checkpoint_store: Optional[CheckpointStore]
     _resume_checkpoint: Optional[dict]
+    _runtime_run_id: Optional[str]
+    _runtime_frame_id: Optional[str]
+    _runtime_parent_frame_id: Optional[str]
+    _runtime_return_to_frame_id: Optional[str]
+    _runtime_invocation_type: Optional[str]
+    _runtime_stage_frame_ids: Dict[int, str]
+    _runtime_active_stage_frame_id: Optional[str]
+    _last_snapshot_id: Optional[str]
+    _runtime_control: Optional[RuntimeControl]
     short_term_memory: Optional[Any]
     long_term_memory: Optional[Any]
     summarize_final: bool
@@ -231,6 +241,267 @@ class AgentHelpersMixin:
                 if "subagents" in wiring:
                     stage.subagents = wiring["subagents"]
 
+    def _runtime_enabled(self) -> bool:
+        return self.checkpoint_store is not None
+
+    def configure_runtime_control(
+        self,
+        *,
+        pause_points: Optional[List[str]] = None,
+        parallel_replay: Optional[Dict[str, List[int]]] = None,
+        reuse_historical_parallel_results: bool = True,
+    ) -> RuntimeControl:
+        control = RuntimeControl(
+            pause_points=set(pause_points or []),
+            parallel_replay=parallel_replay or {},
+            reuse_historical_parallel_results=reuse_historical_parallel_results,
+        )
+        self._runtime_control = control
+        return control
+
+    def request_pause_at(self, *checkpoint_kinds: str) -> None:
+        control = getattr(self, "_runtime_control", None) or self.configure_runtime_control()
+        control.request_pause(*checkpoint_kinds)
+
+    def clear_pause_requests(self, *checkpoint_kinds: str) -> None:
+        control = getattr(self, "_runtime_control", None)
+        if not control:
+            return
+        control.clear_pause(*checkpoint_kinds)
+
+    def _runtime_config(self) -> Dict[str, Any]:
+        return {
+            "agent_name": self.name,
+            "model_id": self.model_id,
+            "api_url": self.api_url,
+            "maxsteps": self.maxsteps,
+            "use_async": self.use_async,
+            "has_stages": bool(self.Stages),
+        }
+
+    def _bind_runtime_from_checkpoint(self, checkpoint_data: Dict[str, Any]) -> None:
+        meta = checkpoint_data.get("_snapshot_meta") or {}
+        if meta:
+            self._runtime_run_id = meta.get("run_id")
+            snapshot_frame_id = meta.get("frame_id")
+            snapshot_scope = checkpoint_data.get("scope")
+            if snapshot_scope == "stage" and snapshot_frame_id:
+                self._runtime_active_stage_frame_id = snapshot_frame_id
+                frame = self.checkpoint_store.get_frame(snapshot_frame_id) if self.checkpoint_store else None
+                self._runtime_frame_id = frame.get("parent_frame_id") if frame else None
+                if frame and checkpoint_data.get("stage_index") is not None:
+                    self._runtime_stage_frame_ids[checkpoint_data["stage_index"]] = snapshot_frame_id
+            else:
+                self._runtime_frame_id = snapshot_frame_id
+            self._last_snapshot_id = meta.get("snapshot_id")
+
+    def _ensure_runtime_entry_frame(
+        self,
+        *,
+        invocation_type: Optional[str] = None,
+        position: Optional[Dict[str, Any]] = None,
+        inputs: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        if not self._runtime_enabled():
+            return None
+
+        if not self._runtime_run_id:
+            entry_type = invocation_type or self._runtime_invocation_type or "agent"
+            self._runtime_run_id = self.checkpoint_store.create_run(
+                entry_type=entry_type,
+                entry_name=self.name,
+                metadata={"agent_name": self.name},
+            )
+            self.checkpoint_store.record_event(
+                self._runtime_run_id,
+                None,
+                "run_started",
+                {"entry_type": entry_type, "agent_name": self.name},
+            )
+
+        if self._runtime_frame_id:
+            return self._runtime_frame_id
+
+        frame_type = invocation_type or self._runtime_invocation_type or "agent"
+        self._runtime_frame_id = self.checkpoint_store.create_frame(
+            run_id=self._runtime_run_id,
+            frame_type=frame_type,
+            frame_name=self.name,
+            parent_frame_id=self._runtime_parent_frame_id,
+            caller_frame_id=self._runtime_parent_frame_id,
+            return_to_frame_id=self._runtime_return_to_frame_id,
+            position=position or {},
+            inputs=inputs or {"prompt": self.prompt},
+            resolved_config=self._runtime_config(),
+            metadata={
+                "agent_name": self.name,
+                "workflow_node_name": getattr(self, "_runtime_workflow_node_name", None),
+                "workflow_instance_id": getattr(self, "_runtime_workflow_instance_id", None),
+            },
+        )
+        if not self.checkpoint_store.get_run(self._runtime_run_id).get("root_frame_id"):
+            self.checkpoint_store.set_run_root_frame(self._runtime_run_id, self._runtime_frame_id)
+        self.checkpoint_store.record_event(
+            self._runtime_run_id,
+            self._runtime_frame_id,
+            "frame_started",
+            {"frame_type": frame_type, "agent_name": self.name},
+        )
+        return self._runtime_frame_id
+
+    def _ensure_stage_runtime_frame(self, stage_index: int, stage: IkaStage) -> Optional[str]:
+        if not self._runtime_enabled():
+            return None
+        if stage_index in self._runtime_stage_frame_ids:
+            self._runtime_active_stage_frame_id = self._runtime_stage_frame_ids[stage_index]
+            return self._runtime_active_stage_frame_id
+
+        parent_frame_id = self._ensure_runtime_entry_frame(invocation_type="agent")
+        frame_id = self.checkpoint_store.create_frame(
+            run_id=self._runtime_run_id,
+            frame_type="stage",
+            frame_name=f"{self.name}:{stage.name}",
+            parent_frame_id=parent_frame_id,
+            caller_frame_id=parent_frame_id,
+            return_to_frame_id=parent_frame_id,
+            return_slot=f"stage:{stage_index}",
+            return_mode="continue_parent",
+            on_complete="return_to_parent",
+            position={"stage_index": stage_index, "stage_name": stage.name},
+            inputs={"stage_prompt": stage.prompt},
+            resolved_config=self._runtime_config(),
+            metadata={"agent_name": self.name, "stage_name": stage.name},
+        )
+        self._runtime_stage_frame_ids[stage_index] = frame_id
+        self._runtime_active_stage_frame_id = frame_id
+        self.checkpoint_store.record_event(
+            self._runtime_run_id,
+            frame_id,
+            "stage_started",
+            {"stage_index": stage_index, "stage_name": stage.name},
+        )
+        return frame_id
+
+    def _runtime_snapshot_state(
+        self,
+        *,
+        scope: str,
+        remaining_steps: int,
+        last_content: str,
+        frame_id: str,
+        stage_index: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        state = {
+            "scope": scope,
+            "agent_name": self.name,
+            "run_id": self._runtime_run_id,
+            "frame_id": frame_id,
+            "root_frame_id": self._runtime_frame_id,
+            "remaining_steps": remaining_steps,
+            "last_content": last_content,
+            "message_history": deepcopy(self.message_history),
+            "maxsteps": self.maxsteps,
+            "memory_access": deepcopy(self.memory_access),
+            "parent_frame_id": self._runtime_parent_frame_id,
+            "return_to_frame_id": self._runtime_return_to_frame_id,
+            "invocation_type": self._runtime_invocation_type or "agent",
+            "timestamp": time.time(),
+        }
+        if stage_index is not None:
+            state["stage_index"] = stage_index
+        return state
+
+    def _create_runtime_snapshot(
+        self,
+        *,
+        frame_id: Optional[str],
+        snapshot_kind: str,
+        state: Dict[str, Any],
+        resume_strategy: str = "exact",
+        label: Optional[str] = None,
+    ) -> Optional[str]:
+        if not self._runtime_enabled() or not self._runtime_run_id or not frame_id:
+            return None
+        snapshot_id = self.checkpoint_store.create_snapshot(
+            self._runtime_run_id,
+            frame_id,
+            snapshot_kind,
+            state,
+            resume_strategy=resume_strategy,
+            label=label,
+            prev_snapshot_id=self._last_snapshot_id,
+        )
+        self._last_snapshot_id = snapshot_id
+        self.checkpoint_store.record_event(
+            self._runtime_run_id,
+            frame_id,
+            "snapshot_created",
+            {"snapshot_id": snapshot_id, "snapshot_kind": snapshot_kind, "label": label},
+        )
+        return snapshot_id
+
+    def _runtime_checkpoint(
+        self,
+        checkpoint_kind: str,
+        *,
+        frame_id: Optional[str] = None,
+        state: Optional[Dict[str, Any]] = None,
+        resume_strategy: str = "exact",
+    ) -> Optional[str]:
+        if not self._runtime_enabled():
+            return None
+        active_frame_id = frame_id or getattr(self, "_runtime_active_stage_frame_id", None) or getattr(self, "_runtime_frame_id", None)
+        if not active_frame_id:
+            return None
+        checkpoint_state = state or self._runtime_snapshot_state(
+            scope="agent",
+            remaining_steps=getattr(self, "maxsteps", 0),
+            last_content="",
+            frame_id=active_frame_id,
+        )
+        checkpoint_state["checkpoint_kind"] = checkpoint_kind
+        snapshot_id = self._create_runtime_snapshot(
+            frame_id=active_frame_id,
+            snapshot_kind=checkpoint_kind,
+            state=checkpoint_state,
+            resume_strategy=resume_strategy,
+            label=checkpoint_kind,
+        )
+        control = getattr(self, "_runtime_control", None)
+        if control and control.should_pause(checkpoint_kind):
+            self._complete_runtime_frame(
+                active_frame_id,
+                status="paused",
+                outputs={"paused_at": checkpoint_kind},
+            )
+            if self.checkpoint_store and self._runtime_run_id:
+                self.checkpoint_store.update_run_status(self._runtime_run_id, "paused")
+            raise RuntimePauseRequested(checkpoint_kind, snapshot_id=snapshot_id, frame_id=active_frame_id)
+        return snapshot_id
+
+    def _complete_runtime_frame(
+        self,
+        frame_id: Optional[str],
+        *,
+        status: str,
+        outputs: Optional[Dict[str, Any]] = None,
+        position: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self._runtime_enabled() or not frame_id:
+            return
+        self.checkpoint_store.update_frame(
+            frame_id,
+            status=status,
+            outputs=outputs,
+            position=position,
+        )
+        self.checkpoint_store.record_event(
+            self._runtime_run_id,
+            frame_id,
+            "frame_status_changed",
+            {"status": status},
+        )
+
     def _save_stage_checkpoint(self, stage_index: int, remaining_steps: int, last_content: str) -> Optional[str]:
         if not self.checkpoint_store:
             return None
@@ -240,20 +511,22 @@ class AgentHelpersMixin:
             stage_checkpoint_enabled = getattr(stage, "checkpoint", False)
             if not stage_checkpoint_enabled:
                 return None
-        
-        payload = {
-            "scope": "stage",
-            "agent_name": self.name,
-            "stage_index": stage_index,
-            "remaining_steps": remaining_steps,
-            "last_content": last_content,
-            "message_history": deepcopy(self.message_history),
-            "maxsteps": self.maxsteps,
-            "memory_access": deepcopy(self.memory_access),
-            "timestamp": time.time(),
-        }
-        
-        checkpoint_uid = self.checkpoint_store.save_checkpoint(scope="stage", payload=payload)
+
+        frame_id = self._ensure_stage_runtime_frame(stage_index, stage)
+        payload = self._runtime_snapshot_state(
+            scope="stage",
+            remaining_steps=remaining_steps,
+            last_content=last_content,
+            frame_id=frame_id,
+            stage_index=stage_index,
+        )
+        checkpoint_uid = self._create_runtime_snapshot(
+            frame_id=frame_id,
+            snapshot_kind="boundary",
+            state=payload,
+            resume_strategy="restart_frame",
+            label=f"stage:{stage_index}",
+        )
         
         if checkpoint_uid:
             stage_name = self.Stages[stage_index].name if stage_index < len(self.Stages) else "unknown"
@@ -284,17 +557,24 @@ class AgentHelpersMixin:
     def _save_agent_checkpoint(self, remaining_steps: int, last_content: str) -> Optional[str]:
         if not self.checkpoint_store:
             return None
-        payload = {
-            "scope": "agent",
-            "agent_name": self.name,
-            "remaining_steps": remaining_steps,
-            "last_content": last_content,
-            "message_history": deepcopy(self.message_history),
-            "maxsteps": self.maxsteps,
-            "memory_access": deepcopy(self.memory_access),
-            "timestamp": time.time(),
-        }
-        return self.checkpoint_store.save_checkpoint(scope="agent", payload=payload)
+        frame_id = self._ensure_runtime_entry_frame(
+            invocation_type=self._runtime_invocation_type or "agent",
+            position={"mode": "simple" if not self.Stages else "staged"},
+            inputs={"prompt": self.prompt},
+        )
+        payload = self._runtime_snapshot_state(
+            scope="agent",
+            remaining_steps=remaining_steps,
+            last_content=last_content,
+            frame_id=frame_id,
+        )
+        return self._create_runtime_snapshot(
+            frame_id=frame_id,
+            snapshot_kind="boundary",
+            state=payload,
+            resume_strategy="exact",
+            label="agent",
+        )
 
     def load_checkpoint(self, uid: str) -> Optional[dict]:
         if not self.checkpoint_store:
@@ -302,9 +582,33 @@ class AgentHelpersMixin:
         checkpoint_data = self.checkpoint_store.load_checkpoint(uid)
         if checkpoint_data:
             self._resume_checkpoint = checkpoint_data
+            self._bind_runtime_from_checkpoint(checkpoint_data)
         else:
             self._resume_checkpoint = None
         return checkpoint_data
+
+    def resume_from_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
+        if not self.checkpoint_store:
+            raise ValueError("Checkpoint store is not enabled for this agent")
+        resume_info = self.checkpoint_store.resume_from_snapshot(snapshot_id)
+        self._resume_checkpoint = resume_info["state"]
+        self._bind_runtime_from_checkpoint(self._resume_checkpoint)
+        return self.execution(checkpoint_uid=snapshot_id)
+
+    def restart_from_frame(self, frame_id: str, *, allow_unsafe_replay: bool = False) -> Dict[str, Any]:
+        if not self.checkpoint_store:
+            raise ValueError("Checkpoint store is not enabled for this agent")
+        replay = self.checkpoint_store.restart_frame(frame_id, allow_unsafe_replay=allow_unsafe_replay)
+        return self.resume_from_snapshot(replay["snapshot_id"])
+
+    def fork_from_snapshot(self, snapshot_id: str, *, allow_unsafe_replay: bool = False) -> Dict[str, Any]:
+        if not self.checkpoint_store:
+            raise ValueError("Checkpoint store is not enabled for this agent")
+        replay = self.checkpoint_store.fork_run_from_snapshot(
+            snapshot_id,
+            allow_unsafe_replay=allow_unsafe_replay,
+        )
+        return self.resume_from_snapshot(replay["snapshot_id"])
 
     def final_prompt(self, stage: IkaStage) -> str:
         parts = [self.start_prompt, stage.prompt, self.end_prompt]
@@ -619,6 +923,9 @@ class AgentHelpersMixin:
         client: Optional[Any] = None,
     ) -> Dict[str, Any]:
         message_history = self.message_history
+        barebone_model._runtime_hooks = {
+            "on_checkpoint": self._runtime_checkpoint,
+        }
         try:
             if self.use_async:
                 result = asyncio.run(
@@ -695,4 +1002,9 @@ class AgentHelpersMixin:
             "usage": getattr(self, "_total_usage", {}),
             "cost": getattr(self, "_total_cost", {}),
             "model_id": barebone_model.model_id,
+            "runtime": {
+                "run_id": getattr(self, "_runtime_run_id", None),
+                "frame_id": getattr(self, "_runtime_frame_id", None),
+                "last_snapshot_id": getattr(self, "_last_snapshot_id", None),
+            },
         }

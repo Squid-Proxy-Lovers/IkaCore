@@ -1,6 +1,9 @@
 from typing import Callable, Dict, Optional
 import uuid
 
+VALID_SIDE_EFFECT_TYPES = {"pure", "idempotent", "side_effecting", "external_transactional"}
+VALID_REPLAY_POLICIES = {"allow", "same_call_only", "deny"}
+
 
 def validate_required_fields(fields: Dict[str, object]) -> None:
     for field_name, value in fields.items():
@@ -16,11 +19,19 @@ class IkaTools:
         required:bool = True, 
         execute_function: Optional[Callable] = None,
         parallel: bool = True,
-        id: Optional[str] = None
+        id: Optional[str] = None,
+        side_effect_type: str = "pure",
+        replay_policy: Optional[str] = None,
     ) -> None:
     
         if id is None:
             id = uuid.uuid4().hex
+        if side_effect_type not in VALID_SIDE_EFFECT_TYPES:
+            raise ValueError(f"Invalid side_effect_type '{side_effect_type}'")
+        if replay_policy is None:
+            replay_policy = "allow" if side_effect_type in {"pure", "idempotent"} else "deny"
+        if replay_policy not in VALID_REPLAY_POLICIES:
+            raise ValueError(f"Invalid replay_policy '{replay_policy}'")
         self.id = id
         self.name = name
         self.description = description
@@ -29,6 +40,8 @@ class IkaTools:
         self.required = required
         self.execute_function = execute_function
         self.parallel = parallel
+        self.side_effect_type = side_effect_type
+        self.replay_policy = replay_policy
 
         validate_required_fields(
             {

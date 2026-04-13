@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import inspect
 from typing import Optional, List, Dict, Callable
+from types import GeneratorType
 
 from IkaCore.tools import IkaTools
 from IkaCore.stages import IkaStage
 from IkaModel.base import AgentTool, ToolArgs
+from IkaCore.runtime_control import RuntimePauseRequested, set_tool_checkpoint_handler
 
 from .agent_parse import AgentParseMixin
 
@@ -48,7 +51,9 @@ class AgentToolsMixin(AgentParseMixin):
         """
         converted: List[AgentTool] = []
         for tool in stage_tools:
-            if isinstance(tool, AgentTool):
+            if isinstance(tool, AgentTool) or (
+                hasattr(tool, "args") and hasattr(tool, "name") and hasattr(tool, "description")
+            ):
                 converted.append(tool)
                 continue
 
@@ -94,6 +99,8 @@ class AgentToolsMixin(AgentParseMixin):
                     required=tool.required,
                     parallel=getattr(tool, 'parallel', True),
                     limit_calls=getattr(tool, 'limit_calls', 0),
+                    side_effect_type=getattr(tool, "side_effect_type", "pure"),
+                    replay_policy=getattr(tool, "replay_policy", None),
                 )
             )
         return converted
@@ -119,6 +126,11 @@ class AgentToolsMixin(AgentParseMixin):
                 
                 # Store parent hierarchy in subagent for use in get_barebone
                 subagent._parent_hierarchy = parent_hierarchy or []
+                subagent.checkpoint_store = self.checkpoint_store
+                subagent._runtime_run_id = getattr(self, "_runtime_run_id", None)
+                subagent._runtime_parent_frame_id = getattr(self, "_runtime_frame_id", None)
+                subagent._runtime_return_to_frame_id = getattr(self, "_runtime_frame_id", None)
+                subagent._runtime_invocation_type = "subagent_call"
                 
                 base = getattr(subagent, "_base_prompt", None) or getattr(subagent, "prompt", "")
                 full = (base + "\n\n" + task_input).strip() if base else task_input
@@ -151,6 +163,7 @@ class AgentToolsMixin(AgentParseMixin):
         stage: Optional[IkaStage] = None,
     ) -> Dict[str, Callable]:
         tool_executors: Dict[str, Callable] = {}
+        runtime_tool_metadata: Dict[str, Dict[str, Any]] = {}
         
         def stage_end_executor(args: dict) -> str:
             return "Stage end signal received. Moving to next stage."
@@ -158,33 +171,172 @@ class AgentToolsMixin(AgentParseMixin):
         def change_stage_executor(args: dict) -> str:
             reason = args.get("reason", "")
             return f"Stage change requested. Reason: {reason}. Processing stage transition."
+
+        def register_runtime_metadata(
+            tool_name: str,
+            *,
+            side_effect_type: str = "pure",
+            replay_policy: Optional[str] = None,
+            tool_kind: str = "tool",
+        ) -> None:
+            runtime_tool_metadata[tool_name] = {
+                "side_effect_type": side_effect_type,
+                "replay_policy": replay_policy or ("allow" if side_effect_type in {"pure", "idempotent"} else "deny"),
+                "tool_kind": tool_kind,
+            }
+
+        def wrap_runtime_executor(tool_name: str, executor: Callable) -> Callable:
+            metadata = runtime_tool_metadata.get(tool_name, {
+                "side_effect_type": "pure",
+                "replay_policy": "allow",
+                "tool_kind": "tool",
+            })
+
+            def wrapped(args: dict):
+                active_frame_id = getattr(self, "_runtime_active_stage_frame_id", None) or getattr(self, "_runtime_frame_id", None)
+                run_id = getattr(self, "_runtime_run_id", None)
+                checkpoint_index = 0
+
+                def tool_checkpoint_handler(*, label: str, payload: dict):
+                    nonlocal checkpoint_index
+                    checkpoint_index += 1
+                    checkpoint_kind = f"tool_progress:{tool_name}:{label}"
+                    checkpoint_state = {
+                        "scope": "tool",
+                        "run_id": run_id,
+                        "frame_id": active_frame_id,
+                        "tool_name": tool_name,
+                        "tool_args": args,
+                        "tool_progress_index": checkpoint_index,
+                        "tool_progress_payload": payload,
+                    }
+                    snapshot_id = self._runtime_checkpoint(
+                        checkpoint_kind,
+                        frame_id=active_frame_id,
+                        state=checkpoint_state,
+                        resume_strategy="exact",
+                    )
+                    return {"snapshot_id": snapshot_id, "checkpoint_kind": checkpoint_kind}
+
+                if self.checkpoint_store and run_id and active_frame_id:
+                    self.checkpoint_store.record_event(
+                        run_id,
+                        active_frame_id,
+                        "tool_started",
+                        {
+                            "tool_name": tool_name,
+                            "tool_args": args,
+                            "tool_kind": metadata["tool_kind"],
+                            "side_effect_type": metadata["side_effect_type"],
+                            "replay_policy": metadata["replay_policy"],
+                        },
+                    )
+                try:
+                    set_tool_checkpoint_handler(tool_checkpoint_handler)
+                    result = executor(args)
+                    if isinstance(result, GeneratorType) or inspect.isgenerator(result):
+                        iterator = result
+                        last_progress = None
+                        while True:
+                            try:
+                                progress_payload = next(iterator)
+                                last_progress = progress_payload
+                                tool_checkpoint_handler(
+                                    label=f"yield_{checkpoint_index}",
+                                    payload={"yield": progress_payload},
+                                )
+                            except StopIteration as stop:
+                                result = stop.value if stop.value is not None else last_progress
+                                break
+                except RuntimePauseRequested:
+                    raise
+                except Exception as exc:
+                    if self.checkpoint_store and run_id and active_frame_id:
+                        self.checkpoint_store.record_event(
+                            run_id,
+                            active_frame_id,
+                            "tool_failed",
+                            {
+                                "tool_name": tool_name,
+                                "tool_args": args,
+                                "tool_kind": metadata["tool_kind"],
+                                "side_effect_type": metadata["side_effect_type"],
+                                "replay_policy": metadata["replay_policy"],
+                                "error": str(exc),
+                            },
+                        )
+                    raise
+                finally:
+                    set_tool_checkpoint_handler(None)
+                if self.checkpoint_store and run_id and active_frame_id:
+                    if isinstance(result, str):
+                        result_payload = result
+                    else:
+                        try:
+                            result_payload = json.dumps(result)
+                        except Exception:
+                            result_payload = str(result)
+                    self.checkpoint_store.record_event(
+                        run_id,
+                        active_frame_id,
+                        "tool_completed",
+                        {
+                            "tool_name": tool_name,
+                            "tool_args": args,
+                            "tool_result": result_payload,
+                            "tool_kind": metadata["tool_kind"],
+                            "side_effect_type": metadata["side_effect_type"],
+                            "replay_policy": metadata["replay_policy"],
+                        },
+                    )
+                return result
+
+            return wrapped
         
         control_tools = {"stage_end", "change_stage", "agent_end"}
         
         for tool in tools:
-            if isinstance(tool, AgentTool):
+            if isinstance(tool, AgentTool) or (
+                hasattr(tool, "args") and hasattr(tool, "name") and hasattr(tool, "description")
+            ):
                 tool_name = tool.name
                 if tool_name == "stage_end":
-                    tool_executors[tool_name] = stage_end_executor
+                    register_runtime_metadata(tool_name, tool_kind="control")
+                    tool_executors[tool_name] = wrap_runtime_executor(tool_name, stage_end_executor)
                 elif tool_name == "change_stage":
-                    tool_executors[tool_name] = change_stage_executor
+                    register_runtime_metadata(tool_name, tool_kind="control")
+                    tool_executors[tool_name] = wrap_runtime_executor(tool_name, change_stage_executor)
                 elif tool_name == "ask_user":
                     if stage and getattr(stage, "hitl", False):
                         sn = stage.name
-                        tool_executors["ask_user"] = lambda args, sn=sn: self._prompt_hitl_question(sn, args.get("question") or "")
+                        register_runtime_metadata("ask_user", side_effect_type="side_effecting", replay_policy="deny", tool_kind="hitl")
+                        tool_executors["ask_user"] = wrap_runtime_executor("ask_user", lambda args, sn=sn: self._prompt_hitl_question(sn, args.get("question") or ""))
                 elif tool_name not in control_tools:
                     if hasattr(tool, "execute_function") and tool.execute_function:
-                        tool_executors[tool_name] = tool.execute_function
+                        register_runtime_metadata(
+                            tool_name,
+                            side_effect_type=getattr(tool, "side_effect_type", "pure"),
+                            replay_policy=getattr(tool, "replay_policy", None),
+                            tool_kind="tool",
+                        )
+                        tool_executors[tool_name] = wrap_runtime_executor(tool_name, tool.execute_function)
             elif hasattr(tool, "execute_function") and tool.execute_function:
                 if tool.name not in control_tools:
-                    tool_executors[tool.name] = tool.execute_function
+                    register_runtime_metadata(
+                        tool.name,
+                        side_effect_type=getattr(tool, "side_effect_type", "pure"),
+                        replay_policy=getattr(tool, "replay_policy", None),
+                        tool_kind="tool",
+                    )
+                    tool_executors[tool.name] = wrap_runtime_executor(tool.name, tool.execute_function)
         
         # Add subagent executors
         source_subagents = subagents if subagents is not None else self.subagents
         if source_subagents:
             for subagent in source_subagents:
                 subagent_name = getattr(subagent, "name", "subagent")
-                tool_executors[subagent_name] = self._build_subagent_executor(subagent, parent_hierarchy)
+                register_runtime_metadata(subagent_name, tool_kind="subagent")
+                tool_executors[subagent_name] = wrap_runtime_executor(subagent_name, self._build_subagent_executor(subagent, parent_hierarchy))
         
         # Add memory tool executors based on access control
         effective_access = memory_access or self.memory_access
@@ -194,7 +346,8 @@ class AgentToolsMixin(AgentParseMixin):
                     self._enforce_rate_limit_tool("short_term_save")
                     data = args.get("input") or args.get("data") or ""
                     return self._save_to_short_term(data)
-                tool_executors["short_term_save"] = short_save_executor
+                register_runtime_metadata("short_term_save", side_effect_type="side_effecting", replay_policy="deny", tool_kind="memory")
+                tool_executors["short_term_save"] = wrap_runtime_executor("short_term_save", short_save_executor)
             
             if effective_access.get("short_term_search", False):
                 def short_search_executor(args: dict) -> str:
@@ -204,7 +357,8 @@ class AgentToolsMixin(AgentParseMixin):
                     score_threshold = args.get("score_threshold", 0.6)
                     result = self._search_short_term(query, limit=limit, score_threshold=score_threshold)
                     return json.dumps(result)  # Convert dict to JSON string
-                tool_executors["short_term_search"] = short_search_executor
+                register_runtime_metadata("short_term_search", tool_kind="memory")
+                tool_executors["short_term_search"] = wrap_runtime_executor("short_term_search", short_search_executor)
         
         if self.long_term_memory:
             if effective_access.get("long_term_save", False):
@@ -217,7 +371,8 @@ class AgentToolsMixin(AgentParseMixin):
                         output = parts[1].strip()
                         return self._save_to_long_term(task, output)
                     return "error: long_term_save requires format 'task|output'"
-                tool_executors["long_term_save"] = long_save_executor
+                register_runtime_metadata("long_term_save", side_effect_type="side_effecting", replay_policy="deny", tool_kind="memory")
+                tool_executors["long_term_save"] = wrap_runtime_executor("long_term_save", long_save_executor)
             
             if effective_access.get("long_term_search", False):
                 def long_search_executor(args: dict) -> str:
@@ -232,7 +387,8 @@ class AgentToolsMixin(AgentParseMixin):
                         filter_func=long_term_filter,
                     )
                     return json.dumps(result)  # Convert dict to JSON string
-                tool_executors["long_term_search"] = long_search_executor
+                register_runtime_metadata("long_term_search", tool_kind="memory")
+                tool_executors["long_term_search"] = wrap_runtime_executor("long_term_search", long_search_executor)
         
         def agent_end_executor(args: dict) -> str:
             content = args.get("input", "")
@@ -279,6 +435,7 @@ class AgentToolsMixin(AgentParseMixin):
             
             return "Agent execution ended successfully."
 
-        tool_executors["agent_end"] = agent_end_executor
+        register_runtime_metadata("agent_end", tool_kind="control")
+        tool_executors["agent_end"] = wrap_runtime_executor("agent_end", agent_end_executor)
         
         return tool_executors
