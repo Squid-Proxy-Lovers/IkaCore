@@ -234,18 +234,32 @@ class IkaLogger:
             "gpt-4.1": (2.00, 0.50, 8.00),
             "gpt-4.1-mini": (0.40, 0.10, 1.60),
             "gpt-4.1-nano": (0.10, 0.025, 0.40),
+            "gpt-5": (2.50, 0.25, 20.00),
+            "gpt-5-mini": (0.45, 0.045, 3.60),
+            "gpt-5-nano": (0.10, 0.01, 0.40),
             "gpt-5.2": (1.75, 0.175, 14.00),
             "gpt-5.3-codex": (1.75, 0.175, 14.00),
-            "claude-3-opus": (15.00, 15.00, 75.00),
-            "claude-3-sonnet": (3.00, 3.00, 15.00),
-            "claude-3-haiku": (0.250, 0.250, 1.250),
-            "claude-sonnet-4": (3.00, 3.00, 15.00),
-            "claude-sonnet-4-5": (3.00, 3.00, 15.00),
-            "claude-opus-4": (15.00, 15.00, 75.00),
-            "claude-opus-4-5": (15.00, 15.00, 75.00),
-            "claude-haiku-4": (0.80, 0.80, 4.00),
-            "deepseek-chat": (0.140, 0.140, 0.280),
-            "deepseek-reasoner": (0.550, 0.140, 2.190),
+            "gpt-5.4": (2.50, 0.25, 15.00),
+            "gpt-5.4-mini": (0.75, 0.075, 4.50),
+            "gpt-5.4-nano": (0.20, 0.02, 1.25),
+            "gpt-5.4-pro": (30.00, 30.00, 180.00),
+            "claude-3-opus": (15.00, 1.50, 75.00),
+            "claude-3-sonnet": (3.00, 0.30, 15.00),
+            "claude-3-haiku": (0.250, 0.03, 1.250),
+            "claude-3-5-haiku": (0.80, 0.08, 4.00),
+            "claude-3-5-sonnet": (3.00, 0.30, 15.00),
+            "claude-3-7-sonnet": (3.00, 0.30, 15.00),
+            "claude-sonnet-4": (3.00, 0.30, 15.00),
+            "claude-sonnet-4-5": (3.00, 0.30, 15.00),
+            "claude-sonnet-4-6": (3.00, 0.30, 15.00),
+            "claude-opus-4": (15.00, 1.50, 75.00),
+            "claude-opus-4-1": (15.00, 1.50, 75.00),
+            "claude-opus-4-5": (5.00, 0.50, 25.00),
+            "claude-opus-4-6": (5.00, 0.50, 25.00),
+            "claude-haiku-4": (0.80, 0.08, 4.00),
+            "claude-haiku-4-5": (1.00, 0.10, 5.00),
+            "deepseek-chat": (0.280, 0.028, 0.420),
+            "deepseek-reasoner": (0.280, 0.028, 0.420),
             "gemini-1.5-pro": (3.50, 3.50, 10.50),
             "gemini-2.0-flash": (0.10, 0.025, 0.40),
             "gemini-2.5-flash-preview-05-20": (0.15, 0.0375, 0.60),
@@ -253,22 +267,54 @@ class IkaLogger:
             "gemini-3-flash-preview": (0.50, 0.05, 3.00),
             "gemini-3-pro": (2.00, 0.20, 12.00),
             "gemini-3.1-pro": (2.00, 0.20, 12.00),
+            "gemini-3.1-pro-preview": (2.00, 0.20, 12.00),
+            "gemini-3.1-pro-preview-customtools": (2.00, 0.20, 12.00),
+            # Released Mar 18, 2026. 196,608 context.
+            "minimax-m2.7": (0.30, 0.30, 1.20),
         }
-        mid = model_id.lower()
-        
+        mid = (model_id or "").lower().strip()
+        if not mid:
+            return None
+
+        # Strip provider prefixes like "openai/gpt-5.4".
+        if "/" in mid:
+            mid = mid.split("/", 1)[1]
+
         result = cost_map.get(mid)
         if result:
             return result
-        # Try prefix matching for versioned model IDs (e.g. "gemini-2.5-flash-preview-05-20" variants)
-        for key in cost_map:
-            if mid.startswith(key):
-                return cost_map[key]
-        return None
 
-        # Strip OpenRouter-style provider prefix (e.g. "google/gemini-3-flash-preview")
-        if "/" in mid:
-            mid = mid.split("/", 1)[1]
-        return cost_map.get(mid, None)
+        # Resolve provider-specific model IDs, for example:
+        # "anthropic.claude-sonnet-4-6", "us.anthropic.claude-opus-4-6-v1:0", "claude-opus-4-5@20251101"
+        candidates = [mid]
+        if "anthropic." in mid:
+            candidates.append(mid.split("anthropic.", 1)[1])
+        if "." in mid:
+            candidates.append(mid.split(".")[-1])
+        for delim in ("@", ":"):
+            if delim in mid:
+                candidates.append(mid.split(delim, 1)[0])
+        # De-duplicate while preserving order.
+        seen = set()
+        normalized = []
+        for c in candidates:
+            c = c.strip()
+            if c and c not in seen:
+                normalized.append(c)
+                seen.add(c)
+
+        for cand in normalized:
+            result = cost_map.get(cand)
+            if result:
+                return result
+
+        # Try prefix matching for versioned model IDs.
+        sorted_keys = sorted(cost_map.keys(), key=len, reverse=True)
+        for cand in normalized:
+            for key in sorted_keys:
+                if cand.startswith(key):
+                    return cost_map[key]
+        return None
 
     def compute_cost(self, model_id: str, usage: Dict[str, Any]) -> Dict[str, float]:
         model_cost = self.get_model_cost(model_id)
