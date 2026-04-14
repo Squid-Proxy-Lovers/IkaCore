@@ -31,15 +31,16 @@ def get_provider(model_id: str, api_url: Optional[str] = None, use_responses_api
     # PRIORITY 1: Check API URL if provided (most reliable)
     if api_url:
         api_url_lower = api_url.lower()
+        # OpenRouter must be checked BEFORE generic /v1/chat/completions,
+        # since OpenRouter URLs end with that path but need their own adapter.
+        if "openrouter.ai" in api_url_lower:
+            return "openrouter"
         # Explicit Responses API endpoint → always use it
         if api_url_lower.rstrip("/").endswith("/v1/responses"):
             return "openai_responses"
         # Explicit Chat Completions endpoint → opt-out of Responses API
         if api_url_lower.rstrip("/").endswith("/v1/chat/completions") and not use_responses_api:
             return "openai"
-        # Check OpenRouter FIRST before checking for "gemini" or "claude" in URL
-        if "openrouter.ai" in api_url_lower:
-            return "openrouter"
         elif "generativelanguage.googleapis.com" in api_url_lower:
             return "gemini"
         elif "anthropic.com" in api_url_lower:
