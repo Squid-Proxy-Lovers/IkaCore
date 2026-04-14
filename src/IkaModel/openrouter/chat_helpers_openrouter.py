@@ -72,8 +72,22 @@ def parse_openrouter_response(data: dict, model_id: str) -> Tuple[str, Optional[
     if cost > 0:
         LOG.debug(f"OpenRouter request cost: ${cost:.6f}")
 
-    # Check for reasoning content (o1/o3 models)
-    reasoning_content = message_obj.get("reasoning_content")
+    # Check for reasoning content (o1/o3 models + OpenRouter reasoning field)
+    reasoning_content = message_obj.get("reasoning_content") or message_obj.get("reasoning")
+
+    # Log GLM reasoning to file for analysis
+    if reasoning_content and "glm" in (model_id or "").lower():
+        import os as _os
+        log_path = _os.environ.get("GLM_REASONING_LOG")
+        if log_path:
+            try:
+                with open(log_path, "a") as f:
+                    f.write(f"\n===== {model_id} =====\n")
+                    f.write(reasoning_content[:4000])
+                    f.write(f"\n---\ntool_calls: {len(tool_calls)}\n")
+                    f.write("=" * 40 + "\n")
+            except Exception:
+                pass
 
     return content, reasoning_content, tool_calls, tokens
 
