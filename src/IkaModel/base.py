@@ -163,7 +163,7 @@ class BareBoneModel:
         agent_hierarchy: Optional[List[str]] = None,
         suppress_init_output: bool = False,
         reasoning_effort: Optional[str] = None,
-        use_responses_api: bool = False,
+        use_responses_api: bool = True,
         ):
 
         # User MUST provide the following:

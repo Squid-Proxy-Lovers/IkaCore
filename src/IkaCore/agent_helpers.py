@@ -117,7 +117,7 @@ class AgentHelpersMixin:
         if "deepseek" in model_id_lower:
             return "https://api.deepseek.com/chat/completions"
         if "gpt" in model_id_lower or "o1" in model_id_lower or "o3" in model_id_lower:
-            return "https://api.openai.com/v1/chat/completions"
+            return "https://api.openai.com/v1/responses"
         if "claude" in model_id_lower:
             return "https://api.anthropic.com/v1/messages"
         if "gemini" in model_id_lower:

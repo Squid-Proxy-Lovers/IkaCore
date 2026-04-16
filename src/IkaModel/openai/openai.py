@@ -70,8 +70,11 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
         x in model.model_id.lower() for x in ["gpt-4.1", "gpt-5"]
     )
 
-    # Cap max_tokens based on model limits
+    # Cap completion tokens based on model and endpoint limits.
+    # For chat/completions, providers commonly reject values above 8192.
     max_tokens_value = model.max_tokens if model.max_tokens and model.max_tokens > 0 else 4096
+    if max_tokens_value > 8192:
+        max_tokens_value = 8192
     model_id_lower = model.model_id.lower()
 
     if "gpt-4o-mini" in model_id_lower:
@@ -101,8 +104,9 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
     else:
         payload["max_tokens"] = max_tokens_value
 
-    # Reasoning effort (low/medium/high) for models that support it (GPT-5+, o1, o3)
-    if getattr(model, "reasoning_effort", None):
+    # reasoning_effort is not supported with function tools on /v1/chat/completions.
+    # Keep it only when tools are absent (or when using the Responses API path elsewhere).
+    if getattr(model, "reasoning_effort", None) and not model.agent_tools:
         payload["reasoning_effort"] = model.reasoning_effort
 
     if model.agent_tools:

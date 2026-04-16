@@ -177,7 +177,7 @@ def chat(
         message_history["first_input"]["message"] = messages[0].get("content", str(messages[0]))
         message_history["first_input"]["tokens"] = 0
     
-    use_responses_api = getattr(barebone_model, "use_responses_api", False)
+    use_responses_api = getattr(barebone_model, "use_responses_api", True)
     provider = get_provider(barebone_model.model_id, barebone_model.api_url, use_responses_api)
 
     def _build():
@@ -537,7 +537,7 @@ async def async_chat(
         message_history["first_input"]["message"] = messages[0].get("content", str(messages[0]))
         message_history["first_input"]["tokens"] = 0
 
-    use_responses_api = getattr(barebone_model, "use_responses_api", False)
+    use_responses_api = getattr(barebone_model, "use_responses_api", True)
     provider = get_provider(barebone_model.model_id, barebone_model.api_url, use_responses_api)
 
     # Create shared client if not provided
