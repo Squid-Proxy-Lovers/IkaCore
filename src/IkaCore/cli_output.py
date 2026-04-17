@@ -454,6 +454,8 @@ class CLIOutput:
         is_final: bool = False,
         usage: Optional[Dict[str, Any]] = None,
         cost: Optional[Dict[str, Any]] = None,
+        cumulative_usage: Optional[Dict[str, Any]] = None,
+        cumulative_cost: Optional[Dict[str, Any]] = None,
     ):
         status = " (Final)" if is_final else ""
         content_parts = [f"Agent: {agent_name}{status}", "Response:", response]
@@ -471,6 +473,21 @@ class CLIOutput:
                 f"in=${float(cost.get('input_cost', 0.0) or 0.0):.6f} "
                 f"out=${float(cost.get('output_cost', 0.0) or 0.0):.6f} "
                 f"total=${float(cost.get('total_cost', 0.0) or 0.0):.6f}"
+            )
+        if cumulative_usage:
+            content_parts.append(
+                "Cumulative Usage: "
+                f"in={cumulative_usage.get('input_tokens', 0)} "
+                f"cached={cumulative_usage.get('input_cached_tokens', 0)} "
+                f"out={cumulative_usage.get('output_tokens', 0)} "
+                f"total={cumulative_usage.get('total_tokens', 0)}"
+            )
+        if cumulative_cost:
+            content_parts.append(
+                "Cumulative Cost: "
+                f"in=${float(cumulative_cost.get('input_cost', 0.0) or 0.0):.6f} "
+                f"out=${float(cumulative_cost.get('output_cost', 0.0) or 0.0):.6f} "
+                f"total=${float(cumulative_cost.get('total_cost', 0.0) or 0.0):.6f}"
             )
         content = "\n".join(content_parts)
         self.emit(OutputType.AGENT_RESPONSE, content, hierarchy, step)

@@ -306,6 +306,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     usage=response.get("usage", {}),
                     cost=response.get("cost", {}),
                     elapsed=time.time() - step_start,
+                    cumulative_usage=getattr(self, "_total_usage", {}),
+                    cumulative_cost=getattr(self, "_total_cost", {}),
                 )
             remaining_after = max(0, remaining_steps - used_steps)
             self._save_stage_checkpoint(stage_index, remaining_after, last_content)
@@ -489,6 +491,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     is_final=True,
                     usage=response.get("usage", {}),
                     cost=response.get("cost", {}),
+                    cumulative_usage=getattr(self, "_total_usage", {}),
+                    cumulative_cost=getattr(self, "_total_cost", {}),
                 )
                 if self.logger:
                     self.logger.log_step(
@@ -499,6 +503,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                         usage=response.get("usage", {}),
                         cost=response.get("cost", {}),
                         elapsed=time.time() - step_start,
+                        cumulative_usage=getattr(self, "_total_usage", {}),
+                        cumulative_cost=getattr(self, "_total_cost", {}),
                     )
                 return final_content, final_content
 
@@ -512,6 +518,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     is_final=False,
                     usage=response.get("usage", {}),
                     cost=response.get("cost", {}),
+                    cumulative_usage=getattr(self, "_total_usage", {}),
+                    cumulative_cost=getattr(self, "_total_cost", {}),
                 )
                 if self.logger:
                     self.logger.log_step(
@@ -522,6 +530,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                         usage=response.get("usage", {}),
                         cost=response.get("cost", {}),
                         elapsed=time.time() - step_start,
+                        cumulative_usage=getattr(self, "_total_usage", {}),
+                        cumulative_cost=getattr(self, "_total_cost", {}),
                     )
                 step_num += 1
                 continue
@@ -535,6 +545,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     usage=response.get("usage", {}),
                     cost=response.get("cost", {}),
                     elapsed=time.time() - step_start,
+                    cumulative_usage=getattr(self, "_total_usage", {}),
+                    cumulative_cost=getattr(self, "_total_cost", {}),
                 )
             max_steps_val = int(self.maxsteps)
             current_step_val = int(step_num) if step_num is not None else 0

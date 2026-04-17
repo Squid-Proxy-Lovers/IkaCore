@@ -184,14 +184,16 @@ class IkaLogger:
         if self.level == 2:
             self.log_json({"event": "stage_end", "stage": stage_name, "used_steps": used_steps})
 
-    def log_step(self, stage_name: str, step_idx: int, output: str, tool_calls: list, usage: dict, cost: dict, elapsed: float) -> None:
+    def log_step(self, stage_name: str, step_idx: int, output: str, tool_calls: list, usage: dict, cost: dict, elapsed: float, cumulative_usage: Optional[dict] = None, cumulative_cost: Optional[dict] = None) -> None:
         tool_names = [t.get("name") or t.get("function", {}).get("name", "") for t in (tool_calls or [])]
         preview = (output or "")[:200].replace("\n", " ")
         usage_part = f" tokens={usage} cost={cost}" if (self.level != 0 or self.show_usage_level0) else ""
+        if cumulative_cost:
+            usage_part += f" cumulative_cost={cumulative_cost}"
         line = self._color(f"[STEP] stage={stage_name} step={step_idx} tools={tool_names} elapsed={elapsed:.2f}s{usage_part} out='{preview}'", "green")
         self.write_line(line)
         if self.level == 2:
-            self.log_json({
+            log_entry = {
                 "event": "step",
                 "stage": stage_name,
                 "step": step_idx,
@@ -200,7 +202,12 @@ class IkaLogger:
                 "usage": usage,
                 "cost": cost,
                 "output_preview": preview,
-            })
+            }
+            if cumulative_usage:
+                log_entry["cumulative_usage"] = cumulative_usage
+            if cumulative_cost:
+                log_entry["cumulative_cost"] = cumulative_cost
+            self.log_json(log_entry)
 
     def log_hitl_prompt(self, stage_name: str) -> None:
         line = self._color(f"[HITL] Stage '{stage_name}' awaiting user input. Type your message or 'stage_end' to finish.", "orange")
@@ -238,6 +245,9 @@ class IkaLogger:
             "gpt-5.1": (1.25, 0.125, 10.00),
             "gpt-5.2": (1.75, 0.175, 14.00),
             "gpt-5.4": (2.50, 0.25, 15.00),
+            "gpt-5.4-mini": (0.75, 0.075, 4.50),
+            "gpt-5.4-nano": (0.20, 0.02, 1.25),
+            "gpt-5.4-pro": (30.00, 15.00, 180.00),
             "gpt-5-mini": (0.25, 0.025, 2.00),
             "gpt-5-nano": (0.05, 0.005, 0.40),
             "gpt-5-codex": (1.25, 0.125, 10.00),
