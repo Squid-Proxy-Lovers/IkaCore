@@ -228,8 +228,11 @@ class IkaLogger:
 
     @staticmethod
     def get_model_cost(model_id: str) -> Optional[tuple[float, float, float]]:
-        # (input_cost_per_M, cached_input_cost_per_M, output_cost_per_M)
+        # Prices are (input_per_1M, cached_input_per_1M, output_per_1M) USD.
+        # Native provider slugs live first; OpenRouter `provider/model` slugs
+        # are ALSO accepted — the lookup normalizes the id below.
         cost_map = {
+            # ── OpenAI ─────────────────────────────────────────────────
             "gpt-4o": (2.50, 1.25, 10.00),
             "gpt-4.1": (2.00, 0.50, 8.00),
             "gpt-4.1-mini": (0.40, 0.10, 1.60),
@@ -243,6 +246,7 @@ class IkaLogger:
             "gpt-5.4-mini": (0.75, 0.075, 4.50),
             "gpt-5.4-nano": (0.20, 0.02, 1.25),
             "gpt-5.4-pro": (30.00, 30.00, 180.00),
+            # ── Anthropic ──────────────────────────────────────────────
             "claude-3-opus": (15.00, 1.50, 75.00),
             "claude-3-sonnet": (3.00, 0.30, 15.00),
             "claude-3-haiku": (0.250, 0.03, 1.250),
@@ -258,8 +262,10 @@ class IkaLogger:
             "claude-opus-4-6": (5.00, 0.50, 25.00),
             "claude-haiku-4": (0.80, 0.08, 4.00),
             "claude-haiku-4-5": (1.00, 0.10, 5.00),
+            # ── DeepSeek (direct API) ──────────────────────────────────
             "deepseek-chat": (0.280, 0.028, 0.420),
             "deepseek-reasoner": (0.280, 0.028, 0.420),
+            # ── Google ─────────────────────────────────────────────────
             "gemini-1.5-pro": (3.50, 3.50, 10.50),
             "gemini-2.0-flash": (0.10, 0.025, 0.40),
             "gemini-2.5-flash-preview-05-20": (0.15, 0.0375, 0.60),
@@ -269,14 +275,36 @@ class IkaLogger:
             "gemini-3.1-pro": (2.00, 0.20, 12.00),
             "gemini-3.1-pro-preview": (2.00, 0.20, 12.00),
             "gemini-3.1-pro-preview-customtools": (2.00, 0.20, 12.00),
-            # Released Mar 18, 2026. 196,608 context.
+            # ── MiniMax (direct / Released Mar 18, 2026, 196k context) ─
             "minimax-m2.7": (0.30, 0.30, 1.20),
+            # ── OpenRouter-only models ─────────────────────────────────
+            # Slug form `<provider>/<model>` strips to these bare names via
+            # the `/` split below. Cached rates default to 10% of input when
+            # the provider doesn't publish an explicit cache discount — the
+            # same convention Anthropic / OpenAI use.
+            "kat-coder-pro-v2":  (0.30, 0.03, 1.20),   # KwaiKAT / Kwaipilot
+            "qwen3.6-plus":      (0.50, 0.05, 3.00),
+            "qwen3.5-35b-a3b":   (0.30, 0.03, 1.50),   # estimated
+            "qwen3-coder":       (0.20, 0.02, 0.80),
+            "qwen3-coder-next":  (0.20, 0.02, 0.80),
+            "deepseek-v3.2":     (0.28, 0.028, 0.42),
+            "deepseek-v3.1":     (0.27, 0.027, 0.42),
+            "glm-5.1":           (1.40, 0.14, 4.40),   # Z.ai
+            "glm-5":             (1.40, 0.14, 4.40),
+            "glm-4.6":           (0.50, 0.05, 1.75),
+            "kimi-k2-5":         (0.60, 0.06, 3.00),   # Moonshot
+            "mimo-v2-pro":       (1.00, 0.10, 3.00),   # MiniMax
+            "minimax-m2.5":      (1.20, 0.12, 3.60),   # estimated
+            "nemotron-3":        (0.60, 0.06, 2.40),   # estimated
+            "gpt-oss-120b":      (0.30, 0.03, 1.00),
         }
         mid = (model_id or "").lower().strip()
         if not mid:
             return None
 
-        # Strip provider prefixes like "openai/gpt-5.4".
+        # Strip provider prefixes like "openai/gpt-5.4" — covers every
+        # OpenRouter `<provider>/<model>` slug (kwaipilot/kat-coder-pro-v2,
+        # qwen/qwen3.6-plus, z-ai/glm-5.1, deepseek/deepseek-v3.2, …).
         if "/" in mid:
             mid = mid.split("/", 1)[1]
 
@@ -285,7 +313,8 @@ class IkaLogger:
             return result
 
         # Resolve provider-specific model IDs, for example:
-        # "anthropic.claude-sonnet-4-6", "us.anthropic.claude-opus-4-6-v1:0", "claude-opus-4-5@20251101"
+        # "anthropic.claude-sonnet-4-6", "us.anthropic.claude-opus-4-6-v1:0",
+        # "claude-opus-4-5@20251101", "deepseek-v3.2:thinking".
         candidates = [mid]
         if "anthropic." in mid:
             candidates.append(mid.split("anthropic.", 1)[1])
