@@ -79,10 +79,16 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
         else:
             api_messages.append({"role": "user", "content": str(msg)})
     
-    # DeepSeek has a max_tokens limit of 8192
+    # DeepSeek V4 supports up to 32K output tokens (vs 8K on the legacy
+    # deepseek-chat / deepseek-reasoner models). The old 8192 cap was causing
+    # verbose non-thinking-mode replies to truncate mid-response, after which
+    # the model would restate the same analysis on the next turn and truncate
+    # again — a soft loop that never reached submit_triage_decision /
+    # agent_end. 32K gives the model room to finish and emit the closing
+    # tool call in a single turn.
     max_tokens_value = model.max_tokens if model.max_tokens and model.max_tokens > 0 else 4096
-    if max_tokens_value > 8192:
-        max_tokens_value = 8192
+    if max_tokens_value > 32768:
+        max_tokens_value = 32768
     
     payload = {
         "model": model.model_id,
@@ -203,14 +209,16 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
         
         model_id_lower = (model.model_id or "").lower()
         is_reasoner = "reasoner" in model_id_lower
-        
+
+        # NOTE: AgentTool.required means "this tool is expected to be used at
+        # some point during the run" — NOT "every API turn must emit a tool
+        # call". Mapping it to OpenAI tool_choice="required" or to a forced
+        # function pin traps the model in an infinite tool-call loop on
+        # providers that strictly honor tool_choice (e.g. DeepSeek V4), because
+        # the model can never emit a natural-language finish. Termination is
+        # already enforced by the agent loop (agent_end + max_tool_calls +
+        # repeat-call guard), so always let the provider choose freely.
         if not is_reasoner:
-            required_tools = [t for t in model.agent_tools if t.required]
-            if len(required_tools) == 1:
-                payload["tool_choice"] = {"type": "function", "function": {"name": required_tools[0].name}}
-            elif len(required_tools) > 1:
-                payload["tool_choice"] = "required"
-            else:
-                payload["tool_choice"] = "auto"
+            payload["tool_choice"] = "auto"
     
     return payload

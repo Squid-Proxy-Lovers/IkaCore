@@ -366,32 +366,37 @@ def test_deepseek_reasoner_no_tool_choice():
 
 
 def test_deepseek_chat_has_tool_choice():
+    """Non-reasoner DeepSeek payloads should advertise tools with tool_choice="auto".
+
+    We deliberately do NOT pin tool_choice to a specific function or set it to
+    "required" — DeepSeek V4 honors those strictly and the model gets stuck in
+    an infinite tool-call loop because it can never emit a natural-language
+    finish. Termination is enforced by the agent loop instead.
+    """
     model = Mock()
     model.model_id = "deepseek-chat"
     model.max_tokens = 4096
     model.temperature = 0.0
     model.deepthinking = False
-    
+
     class MockToolArgs:
         def __init__(self):
             self.type = "input"
             self.description = "Test tool description"
             self.properties = None
-    
+
     class MockTool:
         def __init__(self, name, required=False):
             self.name = name
             self.description = f"Description for {name}"
             self.required = required
             self.args = MockToolArgs()
-    
+
     model.agent_tools = [MockTool("test_tool", required=True)]
 
     payload = deepseek_fill_payload(model, [], {})
 
-    assert "tool_choice" in payload
-    assert payload["tool_choice"]["type"] == "function"
-    assert payload["tool_choice"]["function"]["name"] == "test_tool"
+    assert payload.get("tool_choice") == "auto"
 
 
 def run_all_tests():

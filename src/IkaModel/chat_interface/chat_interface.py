@@ -303,8 +303,16 @@ def chat(
         for tool_call in executed_tool_call_list:
             fn = tool_call.get("function", {})
             tool_name = fn.get("name") or tool_call.get("name", "")
-            args = fn.get("arguments", "{}")
-            signature = (tool_name, args)
+            args_raw = fn.get("arguments", "{}")
+            # Normalize to match the signature format used by the repeat-detection
+            # check above (line ~230). Storing the raw provider string here would
+            # never match the sorted/no-whitespace dump used for lookup, so the
+            # 5-strike force-terminate guard would never fire.
+            try:
+                args_parsed = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+            except Exception:
+                args_parsed = {}
+            signature = (tool_name, json.dumps(args_parsed, sort_keys=True))
             recent_tool_calls.append(signature)
             if len(recent_tool_calls) > 10:
                 recent_tool_calls.pop(0)
@@ -673,8 +681,13 @@ async def async_chat(
             for tool_call in executed_tool_call_list:
                 fn = tool_call.get("function", {})
                 tool_name = fn.get("name") or tool_call.get("name", "")
-                args = fn.get("arguments", "{}")
-                signature = (tool_name, args)
+                args_raw = fn.get("arguments", "{}")
+                # Normalize so this matches the lookup signature built above.
+                try:
+                    args_parsed = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                except Exception:
+                    args_parsed = {}
+                signature = (tool_name, json.dumps(args_parsed, sort_keys=True))
                 recent_tool_calls.append(signature)
                 if len(recent_tool_calls) > 10:
                     recent_tool_calls.pop(0)
