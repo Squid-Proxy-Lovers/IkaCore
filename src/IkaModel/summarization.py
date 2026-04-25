@@ -72,7 +72,7 @@ def _normalize_provider_for_summary(provider: str) -> str:
 def get_summary_model(provider: str) -> tuple[Optional[str], Optional[str]]:
     provider = _normalize_provider_for_summary(provider)
     models: Dict[str, tuple[str, str]] = {
-        "deepseek": ("deepseek-chat", "https://api.deepseek.com/chat/completions"),
+        "deepseek": ("deepseek-v4-flash", "https://api.deepseek.com/chat/completions"),
         "openai": ("gpt-4.1-mini-2025-04-14", "https://api.openai.com/v1/chat/completions"),
         "anthropic": ("claude-sonnet-4-20250514", "https://api.anthropic.com/v1/messages"),
         "gemini": ("gemini-flash-latest", "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"),

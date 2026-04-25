@@ -77,6 +77,10 @@ TOKENMAX_MAPPING = {
     "deepseek-v3.2": 131072,              # ~131K tokens context window :contentReference[oaicite:18]{index=18}
     "deepseek-v3.2-speciale": 131072,     # similar ~131K context :contentReference[oaicite:19]{index=19}
     "deepseek-r1": 131072,                # ~131K context (preview/hosted) :contentReference[oaicite:20]{index=20}
+    "deepseek-v4-flash": 1000000,         # 1M context per V4 launch (apr 2026)
+    "deepseek-v4-pro": 1000000,           # 1M context per V4 launch (apr 2026)
+    "deepseek-chat": 1000000,             # legacy alias → routes to v4-flash; retires 2026-07-24
+    "deepseek-reasoner": 1000000,         # legacy alias → routes to v4-flash thinking-mode; retires 2026-07-24
     # OpenRouter models (common defaults)
     "llama-3.1-70b": 131072,
     "llama-3.1-8b": 131072,

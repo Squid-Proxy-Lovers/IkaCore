@@ -1,5 +1,8 @@
+import hashlib
 import json
 import logging
+import os
+import time
 import uuid
 from typing import Any, Dict, Optional, List, Callable
 
@@ -35,6 +38,51 @@ from ..chat_helpers_common import (
 )
 
 LOG = logging.getLogger(__name__)
+
+
+# When IKA_DUMP_REQUESTS is set to a directory, every API request payload and
+# the corresponding response body get written there as one JSON file per call.
+# Filenames embed the agent name + timestamp + a content hash of the payload so
+# repeated identical requests are easy to spot when diagnosing context-loss
+# loops. Off by default (zero overhead when env var is unset).
+def _dump_api_round(
+    barebone_model: BareBoneModel,
+    payload: dict,
+    response_data: Optional[dict],
+    error: Optional[str] = None,
+) -> None:
+    out_dir = os.environ.get("IKA_DUMP_REQUESTS")
+    if not out_dir:
+        return
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        agent = getattr(barebone_model, "agent_name", "agent") or "agent"
+        agent_safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(agent))[:60]
+        # Hash the conversation portion so duplicate prompts collide on disk.
+        # Different providers use different field names: chat completions uses
+        # "messages", the OpenAI Responses API uses "input", Anthropic uses
+        # "messages" with its own shape. Hash whichever is present.
+        convo = payload.get("messages") or payload.get("input") or []
+        msg_repr = json.dumps(convo, sort_keys=True, default=str)
+        sig = hashlib.sha256(msg_repr.encode("utf-8", "replace")).hexdigest()[:12]
+        ts = f"{time.time():.3f}"
+        fname = f"{ts}__{agent_safe}__{sig}.json"
+        with open(os.path.join(out_dir, fname), "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "agent_name": agent,
+                    "model_id": getattr(barebone_model, "model_id", None),
+                    "payload": payload,
+                    "response": response_data,
+                    "error": error,
+                    "messages_sha256_12": sig,
+                },
+                f,
+                indent=2,
+                default=str,
+            )
+    except Exception as e:  # debug aid only — never fail the request
+        LOG.debug(f"_dump_api_round failed: {e}")
 
 
 def _record_model_message(message_history: dict, content: str, tokens: int, reasoning_content: Optional[str] = None) -> None:
@@ -104,15 +152,26 @@ def _api_request_with_context_fallback(
 ) -> httpx.Response:
     api_url, headers, payload = build_payload_fn()
     try:
-        return api_request_retry(api_url, headers, payload, timeout=timeout)
+        resp = api_request_retry(api_url, headers, payload, timeout=timeout)
+        try:
+            _dump_api_round(barebone_model, payload, resp.json())
+        except Exception:
+            _dump_api_round(barebone_model, payload, None, error="response not json")
+        return resp
     except Exception as e:
         if not _is_context_length_error(e):
+            _dump_api_round(barebone_model, payload, None, error=repr(e))
             raise
         LOG.warning("Context length exceeded. Forcing summarization and retrying.")
         get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
         summarise_message_history(barebone_model, message_history)
         api_url, headers, payload = build_payload_fn()
-        return api_request_retry(api_url, headers, payload, timeout=timeout)
+        resp = api_request_retry(api_url, headers, payload, timeout=timeout)
+        try:
+            _dump_api_round(barebone_model, payload, resp.json())
+        except Exception:
+            _dump_api_round(barebone_model, payload, None, error="response not json (post-summarization)")
+        return resp
 
 
 async def _api_request_with_context_fallback_async(
@@ -124,14 +183,26 @@ async def _api_request_with_context_fallback_async(
 ) -> httpx.Response:
     api_url, headers, payload = build_payload_fn()
     try:
-        return await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+        resp = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+        try:
+            _dump_api_round(barebone_model, payload, resp.json())
+        except Exception:
+            _dump_api_round(barebone_model, payload, None, error="response not json")
+        return resp
     except Exception as e:
         if not _is_context_length_error(e):
+            _dump_api_round(barebone_model, payload, None, error=repr(e))
             raise
         LOG.warning("Context length exceeded. Forcing summarization and retrying.")
         get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
         await async_summarise_message_history(barebone_model, message_history, client=client)
         api_url, headers, payload = build_payload_fn()
+        resp = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+        try:
+            _dump_api_round(barebone_model, payload, resp.json())
+        except Exception:
+            _dump_api_round(barebone_model, payload, None, error="response not json (post-summarization)")
+        return resp
 
 def chat(
     barebone_model: BareBoneModel,
@@ -208,12 +279,19 @@ def chat(
     tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
     rounds = 0
     total_tool_calls_in_cycle = 0
-    recent_tool_calls = []
+    # Persist signature history on the model so the 5-strike repeat-call guard
+    # sees calls across successive chat() invocations from the outer agent loop.
+    # Previously this was a per-chat-call local, which made loops invisible when
+    # the model emitted "1 identical call per chat() call" — the guard never
+    # saw 3+ in a row even after 25+ outer iterations.
+    if not hasattr(barebone_model, '_recent_tool_calls'):
+        barebone_model._recent_tool_calls = []
+    recent_tool_calls = barebone_model._recent_tool_calls
     hijacked = False
 
     if not hasattr(barebone_model, '_current_step'):
         barebone_model._current_step = 0
-    
+
     agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
 
     while tool_calls and tool_executors and rounds < max_tool_rounds:
@@ -238,8 +316,13 @@ def chat(
                 if recent_count >= 5:
                     LOG.error(f"Tool '{tool_name}' called {recent_count} times identically. Forcing agent termination with summarization.")
 
-                    # Use summarization to create a force_answer response
-                    from .summarization import run_summarization
+                    # Use summarization to create a force_answer response.
+                    # run_summarization lives in IkaModel.summarization (one
+                    # package up from chat_interface) — `from .summarization`
+                    # would look inside chat_interface/ where no such module
+                    # exists, raising ModuleNotFoundError exactly when the
+                    # loop guard most needs to recover. It's already imported
+                    # at the top of this module; reuse that.
                     force_answer = run_summarization(
                         barebone_model,
                         message_history,
@@ -581,7 +664,11 @@ async def async_chat(
         tool_call_counts = getattr(barebone_model, '_tool_call_counts', None) or {}
         rounds = 0
         total_tool_calls_in_cycle = 0
-        recent_tool_calls = []
+        # See note on the sync chat() above: persist signature history on the
+        # model so cross-chat() loops are detectable.
+        if not hasattr(barebone_model, '_recent_tool_calls'):
+            barebone_model._recent_tool_calls = []
+        recent_tool_calls = barebone_model._recent_tool_calls
         hijacked = False
 
         if not hasattr(barebone_model, '_current_step'):
@@ -611,8 +698,9 @@ async def async_chat(
                     if recent_count >= 5:
                         LOG.error(f"Tool '{tool_name}' called {recent_count} times identically. Forcing agent termination with summarization.")
 
-                        # Use summarization to create a force_answer response
-                        from .summarization import async_summarise_message_history
+                        # async_summarise_message_history is already imported
+                        # at the top of this module from IkaModel.summarization.
+                        # See note in the sync path above.
                         try:
                             force_answer = await async_summarise_message_history(
                                 barebone_model,
