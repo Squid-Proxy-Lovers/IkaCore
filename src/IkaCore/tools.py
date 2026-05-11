@@ -13,7 +13,7 @@ class IkaTools:
         description:str, 
         parameters:dict, 
         limit_calls:int = 0, 
-        required:bool = True, 
+        required:bool = False, 
         execute_function: Optional[Callable] = None,
         parallel: bool = True,
         id: Optional[str] = None

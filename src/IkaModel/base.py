@@ -4,22 +4,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, List
-import sys
-
-# add parent to path since imports assume it
-sys.path.insert(0, str(Path(__file__).parent.parent / "IkaMem"))
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from IkaCore.cli_output import get_cli_output, OutputType
 
 
 _LOG = logging.getLogger(__name__)
-
-class AgentEndException(Exception):
-    """Raised when agent_end is called to immediately stop execution."""
-    def __init__(self, final_text: str):
-        self.final_text = final_text
-        super().__init__(final_text)
 
 _GLOBAL_LONG_TERM_MEMORY: Optional["LTMemory"] = None 
 
@@ -27,9 +16,18 @@ _GLOBAL_LONG_TERM_MEMORY: Optional["LTMemory"] = None
 class AgentEndException(RuntimeError):
     """Raised when agent_end (or equivalent) signals immediate completion."""
 
-    def __init__(self, response: Optional[dict] = None):
+    def __init__(self, response: Optional[dict] = None, final_text: Optional[str] = None):
         super().__init__("agent_end requested termination")
         self.response = response or {}
+        self.final_text = final_text or (self.response.get("content") if isinstance(self.response, dict) else None)
+
+
+class HumanInputRequired(RuntimeError):
+    """Raised when HITL execution must pause for human input."""
+
+    def __init__(self, payload: Optional[dict] = None):
+        super().__init__("human input required")
+        self.payload = payload or {}
 
 
 def load_gemini_payload():
@@ -103,7 +101,7 @@ class ToolArgs:
 
 @dataclass
 class AgentTool:
-    def __init__(self, id:str, name: str, description: str, args: ToolArgs, required: bool = True, parallel: bool = False, limit_calls: int = 0): 
+    def __init__(self, id:str, name: str, description: str, args: ToolArgs, required: bool = False, parallel: bool = False, limit_calls: int = 0): 
         self.validate(name)
         self.id = id
         self.name = name

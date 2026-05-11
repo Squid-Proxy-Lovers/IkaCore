@@ -8,11 +8,13 @@ import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 src = Path(__file__).resolve().parent.parent
 if str(src) not in sys.path:
     sys.path.insert(0, str(src))
 
-from IkaModel.base import BareBoneModel, AgentTool, ToolArgs
+from IkaModel.base import BareBoneModel, AgentTool, ToolArgs, AgentEndException
 from IkaModel.request_interface import get_provider, get_max_tokens
 from IkaModel.chat_interface.chat_interface import (
     init_message_history,
@@ -445,7 +447,9 @@ class TestChatWithToolCallsFlow:
             "usage": {"total_tokens": 25},
         }
         with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=first_resp):
-            out = chat(model, messages, message_history=history, tool_executors=tool_executors)
+            with pytest.raises(AgentEndException) as excinfo:
+                chat(model, messages, message_history=history, tool_executors=tool_executors)
+        out = excinfo.value.response
         assert out["content_before_tools"] == ""
         assert len(out["executed_tool_calls"]) == 1
         assert out["executed_tool_calls"][0]["function"]["name"] == "agent_end"
@@ -595,11 +599,13 @@ class TestResponseParsingContract:
 
 class TestProviderAndTokenHelpers:
     def test_get_provider_maps_model_id(self):
-        assert get_provider("gpt-4o") == "openai"
+        assert get_provider("gpt-4o") == "openai_responses"
         assert get_provider("deepseek-chat") == "deepseek"
         assert get_provider("claude-3-sonnet") == "anthropic"
         assert get_provider("gemini-1.5-pro") == "gemini"
         assert get_provider("meta-llama/llama-3.1-70b-instruct") == "openrouter"
+        assert get_provider("gpt-4o", "https://api.openai.com/v1/chat/completions") == "openai"
+        assert get_provider("gpt-4o", "https://api.openai.com/v1/responses") == "openai_responses"
 
     def test_get_max_tokens_returns_positive(self):
         assert get_max_tokens("gpt-4o") > 0

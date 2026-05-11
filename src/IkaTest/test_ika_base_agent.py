@@ -44,8 +44,7 @@ class TestIkaBaseAgentInit:
         assert a.Stages == []
         assert a.subagents == []
         assert a.next_agent is None
-        assert a.feedback_agent is None
-        assert a.maxsteps == 10
+        assert a.maxsteps == 100
         assert a.message_history["system"]["message"] == ""
         assert a.max_tool_rounds == 5
 
@@ -56,13 +55,15 @@ class TestIkaBaseAgentInit:
 
     def test_init_api_url_default_from_model_id(self):
         a = _minimal_agent(model_id="gpt-4o")
-        assert "openai.com" in a.api_url
+        assert a.api_url.endswith("/v1/responses")
         a2 = _minimal_agent(model_id="claude-3-sonnet")
         assert "anthropic.com" in a2.api_url
         a3 = _minimal_agent(model_id="deepseek-chat")
         assert "deepseek.com" in a3.api_url
         a4 = _minimal_agent(model_id="gemini-1.5-pro")
         assert "generativelanguage.googleapis.com" in a4.api_url
+        a5 = _minimal_agent(model_id="gpt-4o", use_responses_api=False)
+        assert a5.api_url.endswith("/v1/chat/completions")
 
     def test_init_rejects_empty_name(self):
         with pytest.raises(ValueError, match="name is required"):
@@ -86,7 +87,7 @@ class TestIkaBaseAgentInit:
 
     def test_init_stages_with_subagents_raises(self):
         stage = IkaStage("s1", "Prompt", [])
-        with pytest.raises(ValueError, match="Subagents/next/feedback agents are not allowed when stages are defined"):
+        with pytest.raises(ValueError, match="Subagents or next_agent are not allowed when stages are defined"):
             _minimal_agent(Stages=[stage], subagents=[_minimal_agent(name="Sub")])
 
     def test_init_no_stages_both_subagents_and_next_raises(self):
@@ -95,11 +96,17 @@ class TestIkaBaseAgentInit:
         with pytest.raises(ValueError, match="Only one of subagents or next_agent may be set"):
             _minimal_agent(subagents=[sub], next_agent=nxt)
 
+    def test_removed_public_args_are_not_accepted(self):
+        with pytest.raises(TypeError):
+            _minimal_agent(feedback_agent=_minimal_agent(name="Feedback"))
+        with pytest.raises(TypeError):
+            _minimal_agent(Batch=True)
+
 
 class TestGetUrl:
     def test_openai(self):
         url = IkaBaseAgent.geturl("gpt-4o")
-        assert "openai.com" in url and "chat/completions" in url
+        assert url.endswith("/v1/responses")
 
     def test_deepseek(self):
         url = IkaBaseAgent.geturl("deepseek-chat")
@@ -116,11 +123,11 @@ class TestGetUrl:
 
     def test_gemini_with_slash_model(self):
         url = IkaBaseAgent.geturl("models/gemini-2.5-pro")
-        assert "gemini-2.5-pro" in url or "generateContent" in url
+        assert "openrouter.ai" in url
 
     def test_unknown_defaults_openai(self):
         url = IkaBaseAgent.geturl("unknown-model")
-        assert "openai.com" in url
+        assert url.endswith("/v1/responses")
 
 
 class TestGetBarebone:
@@ -220,5 +227,14 @@ class TestBuildStage:
         s1 = IkaStage("S1", "Step 1", [])
         a = _minimal_agent(Stages=[s0, s1])
         tools_s0 = a.build_stage(s0)
-        assert any(t.name == "stage_end" for t in tools_s0)
-        assert not any(t.name == "agent_end" for t in tools_s0)
+        stage_end = next(t for t in tools_s0 if t.name == "stage_end")
+        assert stage_end.required is False
+        assert any(t.name == "agent_end" for t in a.build_stage(s1))
+
+    def test_change_stage_is_optional_when_available(self):
+        s0 = IkaStage("S0", "Step 0", [], allowed_back_to=[0])
+        s1 = IkaStage("S1", "Step 1", [])
+        a = _minimal_agent(Stages=[s0, s1])
+        tools_s0 = a.build_stage(s0)
+        change_stage = next(t for t in tools_s0 if t.name == "change_stage")
+        assert change_stage.required is False

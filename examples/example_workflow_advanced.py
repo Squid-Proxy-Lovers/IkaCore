@@ -1,12 +1,7 @@
 import os
-import sys
-from pathlib import Path
 from typing import List
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-from IkaCore.agents import IkaBaseAgent
-from IkaCore.stages import IkaStage
+from IkaCore import IkaBaseAgent, IkaStage
 from IkaCore.workflow import (
     IkaWorkflow,
     WorkflowNode,

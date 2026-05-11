@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import logging
 import threading
@@ -6,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any, Dict, List, Optional, Callable
 
 from IkaCore.cli_output import get_cli_output
+from ..base import HumanInputRequired
 
 LOG = logging.getLogger(__name__)
 
@@ -147,6 +149,8 @@ def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Call
         if isinstance(result, str):
             return result
         return json.dumps(result)
+    except HumanInputRequired:
+        raise
     except FutureTimeoutError:
         if future is not None:
             future.cancel()
@@ -265,14 +269,15 @@ def execute_tool_calls(
     agent_hierarchy: Optional[List[str]] = None,
     step: int = 0,
     tool_call_counts: Optional[Dict[str, int]] = None
-) -> tuple[List[dict], List[str], Dict[str, int], List[dict]]:
+) -> tuple[List[dict], List[str], Dict[str, int], List[dict], Optional[dict]]:
     if not tool_calls or not tool_executors:
-        return [], [], tool_call_counts or {}, []
+        return [], [], tool_call_counts or {}, [], None
 
     tool_metadata = tool_metadata or {}
     tool_call_counts = tool_call_counts or {}
     tool_call_order = tool_calls.copy()
     tool_call_id_to_result: Dict[str, str] = {}
+    interrupt_data: Optional[dict] = None
 
     parallel_calls = []
     sequential_calls = []
@@ -346,6 +351,11 @@ def execute_tool_calls(
                     result = future.result(timeout=timeout + 5.0)
                     tool_call_id_to_result[tool_call_id] = result
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+                except HumanInputRequired as exc:
+                    interrupt_data = exc.payload
+                    tool_call_id_to_result[tool_call_id] = json.dumps({"__ika_interrupt__": True, **(exc.payload or {})})
+                    tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+                    break
                 except FutureTimeoutError:
                     future.cancel()
                     error_msg = f"Parallel tool execution timed out after {timeout + 5.0}s for '{tool_name}'"
@@ -360,10 +370,18 @@ def execute_tool_calls(
         finally:
             executor_pool.shutdown(wait=False, cancel_futures=True)
 
-    for tool_name, args, tool_call_id in sequential_calls:
-        result = execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
-        tool_call_id_to_result[tool_call_id] = result
-        tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+    if not interrupt_data:
+        for tool_name, args, tool_call_id in sequential_calls:
+            try:
+                result = execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
+            except HumanInputRequired as exc:
+                interrupt_data = exc.payload
+                result = json.dumps({"__ika_interrupt__": True, **(exc.payload or {})})
+                tool_call_id_to_result[tool_call_id] = result
+                tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+                break
+            tool_call_id_to_result[tool_call_id] = result
+            tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
 
     tool_results = []
     for idx, tool_call in enumerate(tool_call_order):
@@ -382,7 +400,7 @@ def execute_tool_calls(
     else:
         formatted_messages = []
 
-    return formatted_messages, tool_results, tool_call_counts, tool_call_order
+    return formatted_messages, tool_results, tool_call_counts, tool_call_order, interrupt_data
 
 
 async def async_execute_tool(
@@ -416,7 +434,7 @@ async def async_execute_tool(
 
     try:
         loop = asyncio.get_event_loop()
-        if asyncio.iscoroutinefunction(executor_fn):
+        if inspect.iscoroutinefunction(executor_fn):
             result = await asyncio.wait_for(executor_fn(validated_args), timeout=timeout)
         else:
             result = await asyncio.wait_for(
@@ -431,6 +449,8 @@ async def async_execute_tool(
         if isinstance(result, str):
             return result
         return json.dumps(result)
+    except HumanInputRequired:
+        raise
     except asyncio.TimeoutError:
         timeout_msg = f"Tool '{tool_name}' execution timed out after {timeout}s"
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
@@ -452,14 +472,15 @@ async def async_execute_tool_calls(
     agent_hierarchy: Optional[List[str]] = None,
     step: int = 0,
     tool_call_counts: Optional[Dict[str, int]] = None
-) -> tuple[List[dict], List[str], Dict[str, int], List[dict]]:
+) -> tuple[List[dict], List[str], Dict[str, int], List[dict], Optional[dict]]:
     if not tool_calls or not tool_executors:
-        return [], [], tool_call_counts or {}, []
+        return [], [], tool_call_counts or {}, [], None
 
     tool_metadata = tool_metadata or {}
     tool_call_counts = tool_call_counts or {}
     tool_call_order = tool_calls.copy()
     tool_call_id_to_result: Dict[str, str] = {}
+    interrupt_data: Optional[dict] = None
 
     parallel_calls = []
     sequential_calls = []
@@ -524,16 +545,27 @@ async def async_execute_tool_calls(
             tool_name = parallel_calls[i][0] if i < len(parallel_calls) else ""
             tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
             if isinstance(result, Exception):
+                if isinstance(result, HumanInputRequired):
+                    interrupt_data = result.payload
+                    tool_call_id_to_result[tool_call_id] = json.dumps({"__ika_interrupt__": True, **(result.payload or {})})
+                    break
                 error_msg = f"Parallel tool execution error: {str(result)}"
                 LOG.error(error_msg)
                 tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
             else:
                 tool_call_id_to_result[tool_call_id] = result if isinstance(result, str) else json.dumps(result)
 
-    for tool_name, args, tool_call_id in sequential_calls:
-        result = await async_execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
-        tool_call_id_to_result[tool_call_id] = result if isinstance(result, str) else json.dumps(result)
-        tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+    if not interrupt_data:
+        for tool_name, args, tool_call_id in sequential_calls:
+            try:
+                result = await async_execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
+            except HumanInputRequired as exc:
+                interrupt_data = exc.payload
+                tool_call_id_to_result[tool_call_id] = json.dumps({"__ika_interrupt__": True, **(exc.payload or {})})
+                tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+                break
+            tool_call_id_to_result[tool_call_id] = result if isinstance(result, str) else json.dumps(result)
+            tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
 
     tool_results = []
     for idx, tool_call in enumerate(tool_call_order):
@@ -552,4 +584,4 @@ async def async_execute_tool_calls(
     else:
         formatted_messages = []
 
-    return formatted_messages, tool_results, tool_call_counts, tool_call_order
+    return formatted_messages, tool_results, tool_call_counts, tool_call_order, interrupt_data

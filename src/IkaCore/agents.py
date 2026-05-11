@@ -1,6 +1,6 @@
-import sys
 import time
-from pathlib import Path
+import uuid
+from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
 from IkaCore.tools import IkaTools
@@ -9,11 +9,6 @@ from IkaCore.logging_utils import IkaLogger
 from IkaCore.checkpoint import CheckpointStore
 from IkaCore.cli_output import get_cli_output
 from IkaCore.prompts import *
-
-src_dir = Path(__file__).parent.parent
-if str(src_dir) not in sys.path:
-    sys.path.insert(0, str(src_dir))
-sys.path.insert(0, str(src_dir / "IkaMem")) 
 from IkaMem import STMemory, LTMemory  # type: ignore
 
 from IkaModel.base import *
@@ -42,13 +37,11 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         api_url: Optional[str] = None,
         max_tokens: int = 50000,
         temperature: float = 0.0,
+        use_responses_api: bool = True,
         checkpoint: bool = False,
-        Batch: bool = False,
-        BatchMax: int = 3,
         Stages: Optional[List[IkaStage]] = None,
         subagents: Optional[List["IkaBaseAgent"]] = None,
         next_agent: Optional["IkaBaseAgent"] = None,
-        feedback_agent: Optional["IkaBaseAgent"] = None,
         maxsteps: int = 100,
         step_timeout: int = 900,
         rate_limit_per_min: Optional[float] = None,
@@ -92,20 +85,18 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         self.tools = tools
         self.model_id = model_id
         self.api_key = api_key
-        self.api_url = api_url if api_url else self.geturl(model_id)
+        self.use_responses_api = use_responses_api
+        self.api_url = api_url if api_url else self.geturl(model_id, use_responses_api=self.use_responses_api)
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.reasoning_effort = reasoning_effort
         self.checkpoint = checkpoint
-        self.Batch = Batch
-        self.BatchMax = BatchMax
         self.Stages = Stages
         self.subagents = subagents
         self.next_agent = next_agent
-        self.feedback_agent = feedback_agent
         if self.Stages:
-            if self.subagents or self.next_agent or self.feedback_agent:
-                raise ValueError("Subagents/next/feedback agents are not allowed when stages are defined.")
+            if self.subagents or self.next_agent:
+                raise ValueError("Subagents or next_agent are not allowed when stages are defined.")
         else:
             if self.subagents and self.next_agent:
                 raise ValueError("Only one of subagents or next_agent may be set when no stages are provided.")
@@ -127,6 +118,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         self._last_api_call_ts: float = 0.0
         self.checkpoint_store = CheckpointStore(checkpoint_db_path) if checkpoint else None
         self._resume_checkpoint: Optional[dict] = None
+        self._last_interrupt: Optional[dict] = None
         self.short_term_memory: Optional[STMemory] = None
         self.long_term_memory: Optional[LTMemory] = get_global_long_term_memory()
         self.summarize_final = summarize_final
@@ -146,7 +138,12 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         if self.logger:
             self.logger.shutdown()
 
-    def execute_stage(self, stage_index: int, remaining_steps: int) -> tuple[int, str, bool, Optional[str], int]:
+    def execute_stage(
+        self,
+        stage_index: int,
+        remaining_steps: int,
+        resume_input: Optional[str] = None,
+    ) -> tuple[int, str, bool, Optional[str], int]:
 
         stage = self.Stages[stage_index]
         base_system = self.final_prompt(stage)
@@ -175,6 +172,13 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             parts.append(AGENT_END_INSTRUCTION)  # noqa: F405
         content_prompt = "\n\n".join(parts)
 
+        # Each stage should present its own prompt as the current first input.
+        # The prior stage transcript remains in message_history["messages"] so
+        # context is preserved, but the request builder should not keep replaying
+        # the original stage-0 prompt as the active user instruction.
+        self.message_history["first_input"]["message"] = content_prompt
+        self.message_history["first_input"]["tokens"] = 0
+
 
 
         # we use parent values if not set on the stage
@@ -186,7 +190,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         if getattr(stage, "api_url", None) is not None:
             model_overrides["api_url"] = stage.api_url
         elif model_overrides.get("model_id") is not None:
-            model_overrides["api_url"] = self.geturl(model_overrides["model_id"])
+            model_overrides["api_url"] = self.geturl(model_overrides["model_id"], use_responses_api=self.use_responses_api)
         if getattr(stage, "max_tokens", None) is not None:
             model_overrides["max_tokens"] = stage.max_tokens
         if getattr(stage, "temperature", None) is not None:
@@ -200,7 +204,18 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         if getattr(self, 'context_budget', None):
             barebone_model.context_budget = self.context_budget
 
-        messages: List[dict] = [{"role": "user", "content": content_prompt}]
+        if resume_input is not None:
+            if self.logger:
+                self.logger.log_hitl_input(stage.name, resume_input)
+            if resume_input.strip():
+                self.message_history["messages"][str(uuid.uuid4())] = {
+                    "message": resume_input,
+                    "tokens": 0,
+                    "type": "hitl_input",
+                }
+            messages = [{"role": "user", "content": resume_input}]
+        else:
+            messages = [{"role": "user", "content": content_prompt}]
         last_content = ""
 
         used_steps = 0
@@ -221,6 +236,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             subagents=getattr(stage, "subagents", None),
             parent_hierarchy=current_hierarchy,
             stage=stage,
+            stage_index=stage_index,
+            remaining_steps=remaining_steps,
         )
 
         if self.logger:
@@ -261,6 +278,35 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             used_steps += 1
             if hasattr(barebone_model, '_tool_call_counts'):
                 self._tool_call_counts.update(barebone_model._tool_call_counts)
+
+            if response.get("interrupted"):
+                interrupt_data = response.get("interrupt_data", {}) or {}
+                remaining_after = max(0, remaining_steps - used_steps)
+                checkpoint_uid = None
+                if self.logger:
+                    self.logger.log_hitl_prompt(stage.name)
+                if self.checkpoint:
+                    checkpoint_uid = self._save_stage_checkpoint(
+                        stage_index,
+                        remaining_after,
+                        last_content,
+                        scope="hitl",
+                        extra_payload={
+                            "interrupt_data": deepcopy(interrupt_data),
+                            "interrupt_status": response.get("status", "awaiting_user_input"),
+                        },
+                    )
+                self._last_interrupt = {
+                    "status": response.get("status", "awaiting_user_input"),
+                    "stage_index": stage_index,
+                    "stage_name": stage.name,
+                    "remaining_steps": remaining_after,
+                    "checkpoint_uid": checkpoint_uid,
+                    "interrupt_data": deepcopy(interrupt_data),
+                    "message_history": deepcopy(self.message_history),
+                    "last_content": last_content,
+                }
+                return stage_index, last_content, False, None, used_steps
 
             try:
                 target_stage, agent_end_called, agent_end_text = self.parse_control_calls(
@@ -587,8 +633,9 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         )
         return final_response, final_response
 
-    def execution(self, checkpoint_uid: Optional[str] = None) -> Dict[str, str]:
+    def execution(self, checkpoint_uid: Optional[str] = None, resume_input: Optional[str] = None) -> Dict[str, Any]:
         last_content = ""
+        self._last_interrupt = None
 
         if checkpoint_uid:
             self.load_checkpoint(checkpoint_uid)
@@ -599,14 +646,65 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             stage_idx = 0
             agent_end_text = None
             remaining_steps = self.maxsteps
+            resume_stage_input: Optional[str] = None
+            resumed_stage_index: Optional[int] = None
             if resume_cp and resume_cp.get("scope") == "stage":
                 stage_idx = min(resume_cp.get("stage_index", 0), len(self.Stages) - 1)
                 remaining_steps = max(1, resume_cp.get("remaining_steps", remaining_steps))
                 self.message_history = resume_cp.get("message_history", self.message_history)
                 last_content = resume_cp.get("last_content", "")
+            elif resume_cp and resume_cp.get("scope") == "hitl":
+                stage_idx = min(resume_cp.get("stage_index", 0), len(self.Stages) - 1)
+                remaining_steps = max(1, resume_cp.get("remaining_steps", remaining_steps))
+                self.message_history = resume_cp.get("message_history", self.message_history)
+                last_content = resume_cp.get("last_content", "")
+                resumed_stage_index = stage_idx
+                if resume_input is not None and resume_input.strip():
+                    resume_stage_input = resume_input
+                else:
+                    interrupt_payload = {
+                        "status": resume_cp.get("interrupt_status", "awaiting_user_input"),
+                        "stage_index": stage_idx,
+                        "stage_name": self.Stages[stage_idx].name if 0 <= stage_idx < len(self.Stages) else "unknown",
+                        "remaining_steps": remaining_steps,
+                        "checkpoint_uid": checkpoint_uid,
+                        "interrupt_data": deepcopy(resume_cp.get("interrupt_data", {})),
+                        "message_history": deepcopy(self.message_history),
+                        "last_content": last_content,
+                    }
+                    self._last_interrupt = interrupt_payload
+                    interrupt_content = interrupt_payload.get("last_content") or interrupt_payload.get("interrupt_data", {}).get("question", "")
+                    return {
+                        "status": interrupt_payload["status"],
+                        "final_message": interrupt_content,
+                        "summary": interrupt_content,
+                        "usage": getattr(self, "_total_usage", {}),
+                        "cost": getattr(self, "_total_cost", {}),
+                        "model_id": getattr(self, "model_id", ""),
+                        **interrupt_payload,
+                    }
             while 0 <= stage_idx < len(self.Stages):
-                stage_idx, last_content, agent_end_called, end_text, used = self.execute_stage(stage_idx, remaining_steps)
+                current_resume_input = resume_stage_input if resumed_stage_index is not None and stage_idx == resumed_stage_index else None
+                stage_idx, last_content, agent_end_called, end_text, used = self.execute_stage(
+                    stage_idx,
+                    remaining_steps,
+                    resume_input=current_resume_input,
+                )
+                if current_resume_input is not None:
+                    resume_stage_input = None
                 remaining_steps -= used
+                if self._last_interrupt:
+                    interrupt = self._last_interrupt
+                    interrupt_content = interrupt.get("last_content") or interrupt.get("interrupt_data", {}).get("question", "")
+                    return {
+                        "status": interrupt.get("status", "awaiting_user_input"),
+                        "final_message": interrupt_content,
+                        "summary": interrupt_content,
+                        "usage": getattr(self, "_total_usage", {}),
+                        "cost": getattr(self, "_total_cost", {}),
+                        "model_id": getattr(self, "model_id", ""),
+                        **interrupt,
+                    }
                 if agent_end_called:
                     agent_end_text = end_text
                     break

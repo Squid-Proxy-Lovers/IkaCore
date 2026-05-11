@@ -29,12 +29,11 @@ class TestOpenRouterProviderDetection:
         assert get_provider("qwen/qwen-2.5-72b-instruct") == "openrouter"
 
     def test_does_not_detect_direct_openai(self):
-        assert get_provider("gpt-4o") == "openai"
+        assert get_provider("gpt-4o") == "openai_responses"
 
     def test_claude_detected_as_anthropic(self):
-        # Note: "anthropic/claude" is detected as "anthropic" due to "claude" keyword
-        # This is expected behavior - specific providers are checked first
-        assert get_provider("anthropic/claude-3.5-sonnet") == "anthropic"
+        # Slash-delimited model ids are treated as OpenRouter routes.
+        assert get_provider("anthropic/claude-3.5-sonnet") == "openrouter"
 
 
 class TestOpenRouterPayloadBuilder:

@@ -83,6 +83,37 @@ class TestFinalPrompt:
         out = a.final_prompt(stage)
         assert a.description in out
 
+    def test_execute_stage_refreshes_first_input_for_each_stage(self):
+        stage0 = IkaStage("S0", "Stage 0 prompt", [])
+        stage1 = IkaStage("S1", "Stage 1 prompt", [])
+        a = _minimal_agent(Stages=[stage0, stage1])
+        a.logger = MagicMock(level=0)
+        a.message_history["first_input"]["message"] = "original stage prompt"
+
+        def fake_chat_wrapper(*args, **kwargs):
+            assert "Stage 1 prompt" in a.message_history["first_input"]["message"]
+            return {
+                "content": "final",
+                "message_history": a.message_history,
+                "tool_calls": [],
+                "executed_tool_calls": [
+                    {"function": {"name": "agent_end", "arguments": '{"input": "final"}'}}
+                ],
+                "content_before_tools": "final",
+                "usage": {},
+                "cost": {},
+                "hijacked": False,
+            }
+
+        a.chat_wrapper = MagicMock(side_effect=fake_chat_wrapper)
+        next_stage, last_content, agent_end_called, end_text, used = a.execute_stage(1, remaining_steps=5)
+        assert next_stage == 1
+        assert last_content == "final"
+        assert agent_end_called is True
+        assert end_text == "final"
+        assert used == 1
+        assert "Stage 1 prompt" in a.message_history["first_input"]["message"]
+
 
 class TestParseControlCalls:
     def test_agent_end_detected(self):

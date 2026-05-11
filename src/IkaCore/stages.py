@@ -44,7 +44,16 @@ class IkaStage:
                 id="stage_end",
                 name="stage_end",
                 description="Signals that the current stage has been completed successfully and the agent should proceed to the next stage in the workflow. Use this tool when you have accomplished all objectives for the current stage as defined in the stage prompt. Upon calling this tool, the agent will transition to the next stage with a fresh context. You can optionally provide a reason for ending the stage to help with tracking and debugging. This tool does not terminate the entire agent execution, only the current stage.",
-                args=ToolArgs(type="stage_end", description="Optional explanation of why the stage is complete and what was accomplished."),
+                args=ToolArgs(
+                    type="object",
+                    description="Optional explanation of why the stage is complete and what was accomplished.",
+                    properties={
+                        "reason": {
+                            "type": "string",
+                            "description": "Optional reason for ending the stage",
+                        },
+                    },
+                ),
                 required=False,
             )
         )
@@ -65,7 +74,7 @@ class IkaStage:
                             "__required__": ["stage_index", "reason"],
                         },
                     ),
-                    required=True,
+                    required=False,
                 )
             )
 

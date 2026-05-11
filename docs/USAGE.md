@@ -1,453 +1,300 @@
 ## IkaCore Usage Guide
 
-### 1. Overview
+IkaCore is a Python agent framework built around three primitives:
 
-IkaCore is an agent framework built around `IkaBaseAgent` plus modular mixins for tools, memory, execution, and stages. This guide shows how to configure agents, wire tools and memory, and run them in sync or async mode.
+- `IkaBaseAgent`: an agent with provider config, tools, checkpoints, and optional stages.
+- `IkaStage`: a bounded execution phase with its own tool set and optional model overrides.
+- `IkaWorkflow`: a graph runner for composing multiple agents.
 
-### 2. Core Concepts
+This guide documents the current API in `src/`.
 
-- **`IkaBaseAgent` (`src/IkaCore/agents.py`)**: main abstraction you instantiate. Wraps:
-  - Model configuration (provider, model id, API key, URL, temperature, max tokens)
-  - Tools and optional subagents
-  - Optional multi stage workflows (`Stages`)
-  - Optional memory (short term and long term)
-  - Optional output validation (`final_answer_checks`)
-  - Optional async execution (`use_async`)
-
-- **Models (`src/IkaModel`)**
-  - `BareBoneModel` in `base.py` is the minimal model descriptor.
-  - Provider specific payload builders now live in subfolders, e.g. `anthropic/claude.py`, `openai/openai.py`, `deepseek/deepseek.py`, `gemini/google.py`, `openrouter/openrouter.py`.
-  - `chat_interface/chat_interface.py` provides:
-    - `chat(...)`, `execute_tool_calls(...)` (sync)
-    - `async_chat(...)`, `async_execute_tool_calls(...)` (async)
-    - `summarise_message_history(...)` and `async_summarise_message_history(...)`.
-
-- **Tools (`IkaCore.tools` + `src/Adapter/adapter.py`)**
-  - Tools are represented as `IkaTools` and `AgentTool`.
-  - The adapter converts normal Python functions into tools and can create delegate tools that call other agents.
-
-- **Stages (`src/IkaCore/stages.py`)**
-  - `IkaStage` describes one step in a workflow: prompt, tools, step limits, HITL, memory access, and allowed back edges.
-
-- **Memory (`src/IkaMem`)**
-  - Short term memory: per run, for local context.
-  - Long term memory: cross run, backed by mem0 storage when configured.
-  - `AgentMemoryMixin` provides helper methods.
-
-### 3. Installation and API Keys
+### Install
 
 From the repo root:
 
 ```bash
-cd /Users/tarun/IkaCore
-pip install -r requirements.txt  # if you maintain one
+pip install -e .
 ```
 
-API keys are typically loaded from an `apikeys` file (see `src/IkaModel/test_base.py`):
+For test work:
 
-```text
-deepseek=YOUR_DEEPSEEK_KEY
-openai=YOUR_OPENAI_KEY
-claude=YOUR_ANTHROPIC_KEY
-gemini=YOUR_GEMINI_KEY
+```bash
+pip install -e .[test]
+pytest
 ```
 
-Your scripts (for example `Example/agents/run_recon_only.py`) choose the right key based on the selected model id.
-
-### 4. IkaBaseAgent Configuration
-
-Constructor (simplified):
+### Minimal Agent
 
 ```python
-from IkaCore.agents import IkaBaseAgent
+from IkaCore import IkaBaseAgent
 
 agent = IkaBaseAgent(
-    name="my_agent",
-    description="Does X",
-    prompt="User task prompt here",
-    system_prompt=None,
-    start_prompt=None,
-    end_prompt=None,
-    role="worker",
-    tools=my_tools,                 # Optional[List[IkaTools]]
-    model_id="deepseek-chat",
+    name="assistant",
+    description="Simple example agent",
+    prompt="Answer the user request concisely.",
+    model_id="gpt-4o-mini",
     api_key="...",
-    api_url=None,                   # auto derived from model_id if None
-    max_tokens=20000,
-    temperature=0.0,
-    checkpoint=False,
-    Batch=False,
-    BatchMax=3,
-    Stages=None,                    # or List[IkaStage]
-    subagents=None,                 # alternative to Stages / next_agent
-    next_agent=None,
-    feedback_agent=None,
-    maxsteps=100,
-    step_timeout=900,
-    rate_limit_per_min=None,
-    per_tool_rate_limit=None,
-    memory=False,
-    memory_access=None,
-    final_answer_check=None,        # list[callable] returning bool
-    logging_level=0,
-    logging_file="logs.txt",
-    show_usage_level0=True,
-    checkpoint_db_path="checkpoints.db",
-    enable_summarization=True,
-    use_async=False,                # True to use async_chat backend
-)
-```
-
-Notes:
-
-- Required fields: `name`, `description`, `prompt`, `role`, `model_id`, `api_key`. Missing any causes a `ValueError`.
-- If `Stages` is set you must not set `subagents`, `next_agent` or `feedback_agent`.
-- Without `Stages` you can have either `subagents` or `next_agent`, not both.
-
-### 5. Running Agents
-
-#### 5.1 Simple agents (no stages)
-
-When `Stages` is not set, the agent uses `run_simple()` internally:
-
-```python
-result = agent.execution()
-print(result["final_message"])
-print(result["summary"])
-```
-
-Flow:
-
-- Builds `AgentTool` list from `self.tools` plus memory tools and an `agent_end` control tool.
-- Creates a `BareBoneModel` with `get_barebone`.
-- Steps up to `maxsteps` using:
-  - `chat(...)` when `use_async=False`.
-  - `async_chat(...)` (via `asyncio.run`) when `use_async=True`.
-- Uses `parse_control_calls(...)` to detect `agent_end` and extract the final response.
-- Wraps the result via `_build_final_output(...)`, which may also summarise the conversation.
-
-#### 5.2 Staged agents
-
-Create one or more `IkaStage` instances and pass them as `Stages`:
-
-```python
-from IkaCore.stages import IkaStage
-
-stage = IkaStage(
-    name="analysis_stage",
-    prompt="Perform detailed analysis of the input.",
-    tools=my_stage_tools,
-    stage_max_step=5,
-    hitl=False,
-    memory_access={"short_term_save": True, "short_term_search": True},
-    allowed_back_to=[],
-)
-
-agent = IkaBaseAgent(
-    name="analysis_agent",
-    description="Multi-stage analysis agent",
-    prompt="Base prompt",
-    role="analyst",
-    tools=[],
-    model_id="deepseek-chat",
-    api_key="...",
-    Stages=[stage],
-    maxsteps=20,
-    memory=True,
-    use_async=True,
 )
 
 result = agent.execution()
+print(result["final_message"])
 ```
 
-Flow:
+Required constructor fields:
 
-- `execution()` iterates stages using `execute_stage(stage_index, remaining_steps)`.
-- Each `execute_stage`:
-  - Builds:
-    - Stage tools from `stage.tools`.
-    - Subagent tools from any `stage.subagents`.
-    - Stage specific memory tools based on `stage.memory_access` (falls back to agent level mask).
-  - Calls `chat` or `async_chat` per `use_async`.
-  - Processes control tools via `parse_control_calls`:
-    - `agent_end`: stop the entire agent and return a final result.
-    - `stage_end`: go to next stage in order.
-    - `change_stage`: jump to an earlier allowed stage index in `stage.allowed_back_to`.
-  - Optionally prompts the user for additional input on HITL stages (`stage.hitl=True`).
+- `name`
+- `description`
+- `prompt`
+- `model_id`
+- `api_key`
 
-Common `IkaStage` fields you can use:
+### Tools
 
-- `name`: human readable stage name, used in logs.
-- `prompt`: stage specific prompt; if empty, the agent’s main prompt is used.
-- `tools`: list of tools this stage can call.
-- `stage_max_step`: max tool/model steps for this stage (capped by agent `maxsteps`).
-- `hitl`: if `True`, the stage can pause and collect user input between steps.
-- `memory_access`: per stage override for memory tool access.
-- `long_term_filter`: optional filter applied when reading long term memory.
-- `subagents`: optional subagents that are converted into tools for this stage.
-- `allowed_back_to`: list of stage indices the agent is allowed to jump back to via `change_stage`.
-- Per-stage model overrides (when unset, the agent's values are used):
-  - `model_id`: model to use for this stage (e.g. `gpt-4o`, `claude-sonnet-4`). If set and `api_url` is not, `api_url` is derived from `model_id`.
-  - `api_key`: API key for this stage (required when switching provider, e.g. OpenAI to Anthropic).
-  - `api_url`: optional custom API base URL.
-  - `max_tokens`, `temperature`: overrides for this stage.
-
-#### 5.3 Chaining agents
-
-When not using `Stages`:
-
-- `subagents`: turned into tools and called from the parent agent like any other tool.
-- `next_agent`: after the current agent finishes:
-  - Its summary is placed into `next_agent.message_history["first_input"]["message"]`.
-  - Then `next_agent.execution()` is run.
-
-This is useful for linear multi agent flows.
-
-### 6. Workflows (IkaWorkflow)
-
-For multi agent flows you can use `IkaWorkflow` (`src/IkaCore/workflow.py`) to define a small graph of agents and their relationships.
-
-#### 6.1 Workflow building blocks
-
-- **`WorkflowNode`**
-  - `name`: node id in the graph.
-  - `agent`: an `IkaBaseAgent` instance.
-  - `stage_wiring`: optional mapping `stage_index -> {"subagents": [IkaBaseAgent, ...]}` used to inject subagents into specific stages.
-  - `instances`: how many parallel instances of the agent to run.
-  - `instance_inputs`: optional list of per instance prompts/inputs.
-
-- **`WorkflowEdge`**
-  - `source`, `target`: node names.
-  - `edge_type`:
-    - `"next"`: linear or branching progression; target runs after source and receives its summary as context.
-    - `"child"`: parent/child relationship; child runs as a helper and returns its summary back to the parent.
-  - `stage_index` (optional): if set on a `"child"` edge, the child agent is wired into that parent stage as a subagent.
-
-- **`IkaWorkflow`**
-  - Arguments:
-    - `name`, `description`.
-    - `nodes`: list of `WorkflowNode`.
-    - `edges`: list of `WorkflowEdge`.
-    - `compress_hook`: optional function `(List[str], IkaBaseAgent) -> str` to compress upstream summaries into a single context string.
-    - `start_node`: optional name of the first node; defaults to the first node in `nodes`.
-    - `async_executor`: optional `AsyncWorkflowExecutor`, otherwise a default is created.
-    - `max_parallel_workers`: max parallel threads used by the async executor.
-
-#### 6.2 How execution works
-
-There are two entry points:
-
-- **`run(initial_context: str | None = None, use_async: bool = False)`**
-  - When `use_async=False`:
-    - Calls internal `_run_node(start_node, upstream_contexts)`.
-    - For each node:
-      - Prepares context by compressing upstream summaries using `compress_hook`.
-      - Applies stage wiring so staged agents see their child agents as subagents.
-      - Calls `node.agent.execution()` and captures `final_message` + `summary`.
-      - For each `"child"` edge, immediately runs the child node and records its summary under `child_summaries`.
-      - For each `"next"` edge, passes a compressed combination of parent summary and child summaries downstream.
-    - Returns a dict of `node_name -> WorkflowResult`.
-
-  - When `use_async=True`:
-    - Delegates to `run_async(initial_context)`, which uses `AsyncWorkflowExecutor` to run nodes in parallel where dependencies allow.
-
-- **`run_async(initial_context: str | None = None)`**
-  - Maintains dependency sets so only nodes whose upstream `"next"` dependencies are complete can start.
-  - For each ready node:
-    - Optionally creates multiple instances (per `instances` / `instance_inputs`).
-    - Schedules them on `AsyncWorkflowExecutor.schedule_node(...)`, which:
-      - Runs each agent in a thread using `agent.execution()` or `agent.async_execution()` if present.
-    - Aggregates results:
-      - First instance becomes the primary `WorkflowResult`.
-      - Additional instances append their summaries to the primary summary.
-  - Updates upstream contexts for downstream `"next"` edges using node summaries.
-  - Ends by returning a dict of `node_name -> WorkflowResult`.
-
-#### 6.3 Example workflow usage
-
-Minimal example wiring two agents A -> B:
+Tools are defined with `IkaTools`.
 
 ```python
-from IkaCore.workflow import IkaWorkflow, WorkflowNode, WorkflowEdge
+from IkaCore import IkaBaseAgent, IkaTools
+import os
 
-node_a = WorkflowNode(name="analysis", agent=analysis_agent)
-node_b = WorkflowNode(name="report", agent=report_agent)
-
-edge = WorkflowEdge(source="analysis", target="report", edge_type="next")
-
-workflow = IkaWorkflow(
-    name="analysis_pipeline",
-    description="Two step pipeline: analysis then reporting",
-    nodes=[node_a, node_b],
-    edges=[edge],
-)
-
-results = workflow.run(initial_context="User request here", use_async=False)
-print(results["report"].final)
-print(results["report"].summary)
-```
-
-To wire a child helper agent into stage 0 of a staged parent:
-
-```python
-parent_node = WorkflowNode(name="parent", agent=parent_agent)
-child_node = WorkflowNode(name="helper", agent=helper_agent)
-
-edge = WorkflowEdge(source="parent", target="helper", edge_type="child", stage_index=0)
-
-workflow = IkaWorkflow(
-    name="parent_with_helper",
-    description="Parent staged agent that can call helper as a subagent",
-    nodes=[parent_node, child_node],
-    edges=[edge],
-)
-results = workflow.run()
-```
-
-The `child` edge with `stage_index=0` means:
-
-- `parent_agent` will receive `helper_agent` as a subagent in stage 0.
-- The helper’s summary is injected back into the parent and included in downstream context.
-
-### 7. Tools
-
-#### 6.1 Converting functions to tools
-
-Use the adapter patterns from `src/Adapter/adapter.py` and `test_adapter.py`:
-
-```python
-from IkaCore.tools import tool
-from Adapter.adapter import function_to_ika_tool
-
-@tool
-def add_numbers(a: int, b: int) -> int:
-    return a + b
-
-ika_tool = function_to_ika_tool(add_numbers)
-agent = IkaBaseAgent(..., tools=[ika_tool])
-```
-
-`function_to_ika_tool`:
-
-- Reads name and docstring.
-- Builds JSON schema for parameters from type hints.
-- Produces an `IkaTools` object usable by `IkaBaseAgent`.
-
-#### 6.2 Delegate tools to sub-agents
-
-From `Adapter/adapter.py`:
-
-```python
-from Adapter.adapter import make_delegate_tool
-
-delegate_tool = make_delegate_tool("sub_agent", sub_agent_instance, "Delegate to sub-agent")
-parent_agent = IkaBaseAgent(..., tools=[delegate_tool])
-```
-
-The model can then call `sub_agent` as a tool; the delegate forwards the task into the sub agent and returns its final result.
-
-### 8. Memory
-
-Enable memory at agent level:
-
-```python
-agent = IkaBaseAgent(
-    ...,
-    memory=True,
-    memory_access={
-        "short_term_save": True,
-        "short_term_search": True,
-        "long_term_save": False,
-        "long_term_search": False,
+list_files = IkaTools(
+    name="list_files",
+    description="List files in a directory",
+    parameters={
+        "directory_path": {
+            "type": "string",
+            "description": "Directory to inspect",
+            "required": True,
+        },
     },
+    execute_function=lambda args: os.listdir(args["directory_path"]),
+)
+
+agent = IkaBaseAgent(
+    name="file_agent",
+    description="Reads local files",
+    prompt="Inspect the requested directory and summarize what you find.",
+    tools=[list_files],
+    model_id="gpt-4o-mini",
+    api_key="...",
 )
 ```
 
-When memory is enabled:
+Important `IkaTools` fields:
 
-- Short term tools:
-  - `short_term_save(input)`
-  - `short_term_search({query, limit, score_threshold})`
-- Long term tools:
-  - `long_term_save(input)` with `"task|output"` format.
-  - `long_term_search({query, limit, score_threshold})`
+- `parameters`: JSON-schema-like argument metadata. If a property has `"required": True`, the generated tool schema marks it as required.
+- `limit_calls`: `0` means unlimited.
+- `required`: marks the tool as provider-required when the backend supports it. Use this sparingly.
+- `parallel`: controls whether the tool can be grouped with parallel tool calls.
 
-Stage specific `memory_access` overrides the agent level mask, so you can allow memory only for certain stages.
+Every agent automatically gets an `agent_end` control tool. Staged agents also get stage-control tools when applicable.
 
-### 9. Async vs Sync Execution
+### Stages
 
-Set `use_async=True` on the agent to opt into the async pipeline:
-
-- `execute_stage`:
-  - uses `async_chat` via `asyncio.run`.
-- `run_simple`:
-  - also uses `async_chat` when `use_async=True`.
-
-Async benefits:
-
-- Tools run via `async_execute_tool` and `async_execute_tool_calls`, which can:
-  - Await coroutine tools directly.
-  - Run sync tools in a thread pool without blocking the event loop.
-  - Execute parallel tools concurrently when configured.
-
-If `use_async=False`, everything runs through the original synchronous `chat` and `execute_tool_calls`.
-
-### 10. Control Tools and Final Outputs
-
-Control tools:
-
-- `agent_end`: signals final completion for the agent.
-- `stage_end`: moves to the next stage.
-- `change_stage`: jumps back to an earlier allowed stage.
-
-`agent_end` contract:
-
-- The model must provide the final answer in `input`, `final`, or `message` arguments.
-- The agent:
-  - Validates that the content is not empty, `"{}"`, `"[]"`, `"null"`, etc.
-  - Tries to use JSON content if present.
-  - Falls back to extracted JSON or raw model content via `_fallback_final_content` if arguments are weak.
-
-`execution()` always returns a dict:
+Stages let one agent execute in bounded phases with different tools and optional model overrides.
 
 ```python
-{
-    "final_message": "<string>",
-    "summary": "<string>",  # may be empty if summarisation is disabled
+from IkaCore import IkaBaseAgent, IkaStage, IkaTools
+
+list_stage = IkaStage(
+    name="discover",
+    prompt="List the relevant files.",
+    tools=[list_files],
+    stage_max_step=5,
+)
+
+read_stage = IkaStage(
+    name="read",
+    prompt="Read the most relevant files and extract the important details.",
+    tools=[read_file],
+    stage_max_step=10,
+)
+
+agent = IkaBaseAgent(
+    name="staged_agent",
+    description="Performs a staged file analysis",
+    prompt="Complete the staged workflow.",
+    Stages=[list_stage, read_stage],
+    model_id="gpt-4o-mini",
+    api_key="...",
+)
+```
+
+Current stage behavior:
+
+- Stage context is preserved through the shared transcript in `message_history["messages"]`.
+- The active stage prompt is refreshed per stage, so the model does not keep reusing stage 0's original user prompt.
+- `stage_end` advances to the next stage.
+- `change_stage` is optional and only available when `allowed_back_to` is defined.
+- `ask_user` is available only on HITL stages and now interrupts execution instead of blocking on `input()`.
+
+Useful `IkaStage` fields:
+
+- `tools`
+- `stage_max_step`
+- `subagents`
+- `allowed_back_to`
+- `hitl`
+- `memory_access`
+- `long_term_filter`
+- `checkpoint`
+- `model_id`, `api_key`, `api_url`, `max_tokens`, `temperature`
+
+### Human In The Loop
+
+HITL stages raise a resumable interrupt instead of reading from stdin.
+
+```python
+result = agent.execution()
+
+if result.get("status") == "interrupted":
+    resumed = agent.resume_execution(
+        result["checkpoint_id"],
+        resume_input="Use the stricter filtering option.",
+    )
+```
+
+The interrupt payload includes the stage name, question, and checkpoint identifier when checkpointing is enabled.
+
+### Memory
+
+Set `memory=True` to enable memory helpers. Memory access is controlled with `memory_access`.
+
+Supported access keys:
+
+- `short_term_save`
+- `short_term_search`
+- `long_term_save`
+- `long_term_search`
+
+Long-term save now expects structured arguments, not a pipe-delimited string.
+
+```python
+memory_access = {
+    "short_term_save": True,
+    "short_term_search": True,
+    "long_term_save": True,
+    "long_term_search": True,
 }
-```
 
-### 11. Example: Recon Agent
-
-Example runner: `Example/agents/run_recon_only.py`.
-
-High level steps:
-
-1. Parse CLI args (subnet, model, max steps, keys file).
-2. Load API keys and choose the key for `args.model`.
-3. Build recon tools via `get_recon_toolset()`.
-4. Create an `IkaStage` with recon prompt and tools.
-5. Instantiate `IkaBaseAgent`:
-
-```python
-recon_agent = IkaBaseAgent(
-    name="recon_agent",
-    description="Network reconnaissance agent",
-    prompt="You are a network reconnaissance agent. Perform comprehensive network analysis.",
-    role="recon",
-    tools=[],
-    model_id=args.model,
-    api_key=api_key,
-    maxsteps=args.max_steps,
-    Stages=[recon_stage],
-    enable_summarization=True,
-    logging_level=1,
-    show_usage_level0=True,
-    use_async=True,
+agent = IkaBaseAgent(
+    name="memory_agent",
+    description="Stores findings",
+    prompt="Analyze and remember relevant results.",
+    model_id="gpt-4o-mini",
+    api_key="...",
+    memory=True,
+    memory_access=memory_access,
 )
 ```
 
-6. Set `recon_agent.message_history["first_input"]["message"]` to a task prompt that contains subnet, objectives, and output file location.
-7. Call `recon_agent.execution()` and consume `final_message` plus any JSON/network artifacts written by the tools.
+`IkaMem` can operate without Mem0, but Mem0-backed storage is optional when the dependency is installed and configured.
 
-This pattern can be copied to build other specialized agents with stages, tools, and memory. 
+### Provider Selection
+
+Provider routing is derived from `model_id`, unless you override `api_url`.
+
+Default behavior:
+
+- OpenAI models use the Responses API by default.
+- Set `use_responses_api=False` to target OpenAI Chat Completions.
+- Anthropic, Gemini, DeepSeek, and OpenRouter URLs are inferred from `model_id`.
+- If you pass an explicit non-OpenAI `api_url`, that URL is respected.
+
+Example:
+
+```python
+agent = IkaBaseAgent(
+    name="chat_agent",
+    description="Uses OpenAI chat completions",
+    prompt="Reply briefly.",
+    model_id="gpt-4o-mini",
+    api_key="...",
+    use_responses_api=False,
+)
+```
+
+### Workflows
+
+`IkaWorkflow` runs multi-agent graphs.
+
+```python
+from IkaCore import IkaBaseAgent, IkaWorkflow, WorkflowEdge, WorkflowNode
+
+researcher = IkaBaseAgent(
+    name="researcher",
+    description="Collects context",
+    prompt="Expand the topic and extract the important details.",
+    model_id="gpt-4o-mini",
+    api_key="...",
+)
+
+writer = IkaBaseAgent(
+    name="writer",
+    description="Summarizes context",
+    prompt="Summarize the received context in a short paragraph.",
+    model_id="gpt-4o-mini",
+    api_key="...",
+)
+
+workflow = IkaWorkflow(
+    name="two_step",
+    description="Research then summarize",
+    nodes=[
+        WorkflowNode(name="research", agent=researcher),
+        WorkflowNode(name="write", agent=writer),
+    ],
+    edges=[
+        WorkflowEdge(source="research", target="write", edge_type="next"),
+    ],
+    start_node="research",
+)
+
+results = workflow.run(initial_context="The number 42 in popular culture.")
+```
+
+Current workflow semantics:
+
+- `"next"` edges pass summary context downstream.
+- `"child"` edges are tool-only. They wire a child agent into a specific parent stage with `stage_index`.
+- `"child"` edges do not auto-execute as standalone workflow nodes.
+- A `"child"` edge without `stage_index` is invalid.
+- Sync and async workflow execution now use the same child-edge semantics.
+
+### Checkpoints
+
+Checkpointing stores resumable state in SQLite through `CheckpointStore`.
+
+```python
+agent = IkaBaseAgent(
+    name="checkpointed",
+    description="Checkpointed agent",
+    prompt="Work through the task carefully.",
+    model_id="gpt-4o-mini",
+    api_key="...",
+    checkpoint=True,
+    checkpoint_db_path="state/checkpoints.db",
+)
+```
+
+Checkpoint payloads include stage/run state and HITL interrupts. Resume paths avoid replaying completed tool calls tracked in the checkpoint state.
+
+### Logging And Debugging
+
+Useful options:
+
+- `logging_level=1..3`
+- `logging_file="logs.txt"`
+- `show_usage_level0=True`
+- `IKA_DUMP_REQUESTS=/path/to/dir` to dump request/response payloads for debugging
+
+### Examples
+
+The repo includes runnable examples in `examples/`:
+
+- `example_fileagent.py`
+- `example_stages.py`
+- `example_hitl.py`
+- `example_workflow.py`
+- `example_workflow_advanced.py`
+
+These examples are source-checkout examples and currently add `src/` to `sys.path` directly.

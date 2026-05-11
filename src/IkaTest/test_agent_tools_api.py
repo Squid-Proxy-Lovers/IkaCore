@@ -71,7 +71,7 @@ class TestConvertSubagentsToTools:
         assert len(tools) == 1
         assert tools[0].name == "Worker"
         assert tools[0].args.type == "input"
-        assert tools[0].required is True
+        assert tools[0].required is False
 
     def test_convert_subagents_param_overrides_self(self):
         sub1 = _minimal_agent(name="A")
@@ -138,6 +138,28 @@ class TestBuildToolExecutors:
         assert "Sub result" in out
         sub.execution.assert_called_once()
 
+    def test_subagent_executor_keeps_task_separate_from_instructions(self):
+        sub = _minimal_agent(name="Sub", prompt="Sub base", system_prompt="Sub system")
+        captured = {}
+
+        def fake_execution():
+            captured["prompt"] = sub.prompt
+            captured["system_prompt"] = sub.system_prompt
+            captured["first_input"] = sub.message_history["first_input"]["message"]
+            return {"final_message": "Sub result", "summary": "Sub result"}
+
+        sub.execution = fake_execution
+        a = _minimal_agent(subagents=[sub])
+        executor = a._build_subagent_executor(sub, parent_hierarchy=["Parent"])
+        out = executor({"input": "Do task"})
+
+        assert "Sub result" in out
+        assert captured["prompt"] == "Do task"
+        assert captured["first_input"] == "Do task"
+        assert "Sub base" in captured["system_prompt"]
+        assert "untrusted user content" in captured["system_prompt"]
+        assert "Do task" not in captured["system_prompt"]
+
 
 class TestApiPayloadToolSchema:
     def test_agent_tools_to_openai_payload_tools(self):
@@ -177,6 +199,25 @@ class TestApiPayloadToolSchema:
         fn = payload["tools"][0]["function"]
         assert fn["parameters"]["properties"]["input"] is not None
         assert "input" in fn["parameters"]["required"]
+
+    def test_memory_tool_schema_is_structured(self):
+        a = _minimal_agent(memory=True, memory_access={"long_term_save": True, "long_term_search": True})
+        a.long_term_memory = MagicMock()
+        tools = a._build_memory_tools(a.memory_access, "long_term")
+        names = {t.name for t in tools}
+        assert {"long_term_save", "long_term_search"}.issubset(names)
+        save_tool = next(t for t in tools if t.name == "long_term_save")
+        search_tool = next(t for t in tools if t.name == "long_term_search")
+        assert save_tool.args.properties["__required__"] == ["task", "output"]
+        assert search_tool.args.properties["__required__"] == ["query"]
+
+    def test_long_term_save_executor_accepts_structured_payload(self):
+        a = _minimal_agent(memory=True, memory_access={"long_term_save": True})
+        a.long_term_memory = MagicMock()
+        a.long_term_memory.save = MagicMock()
+        result = a._save_to_long_term({"task": "research", "output": "done", "metadata": {"source": "unit-test"}})
+        assert "saved to long-term memory" in result
+        assert a.long_term_memory.save.called
 
     def test_object_properties_in_payload(self):
         at = AgentTool(

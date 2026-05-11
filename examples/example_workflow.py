@@ -1,11 +1,6 @@
 import os
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-from IkaCore.agents import IkaBaseAgent
-from IkaCore.workflow import IkaWorkflow, WorkflowNode, WorkflowEdge
+from IkaCore import IkaBaseAgent, IkaWorkflow, WorkflowNode, WorkflowEdge
 
 API_KEY = os.getenv("API_KEY")
 MODEL_ID = os.getenv("MODEL_ID", "deepseek-reasoner")

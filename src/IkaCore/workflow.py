@@ -199,6 +199,7 @@ class IkaWorkflow:
         self._validate_edges()
         self._bind_stage_wiring()
         self._build_dependency_graph()
+        self._next_reachable_nodes: Set[str] = self._compute_next_reachable_nodes()
 
     def __repr__(self) -> str:
         lines = []
@@ -270,6 +271,8 @@ class IkaWorkflow:
                 raise ValueError(f"Edge source '{edge.source}' is not in workflow nodes.")
             if edge.target not in self._node_index:
                 raise ValueError(f"Edge target '{edge.target}' is not in workflow nodes.")
+            if edge.edge_type == "child" and edge.stage_index is None:
+                raise ValueError(f"Child edge '{edge.source}' -> '{edge.target}' must define stage_index.")
 
     def _bind_stage_wiring(self) -> None:
         for edge in self.edges:
@@ -293,6 +296,19 @@ class IkaWorkflow:
             if edge.edge_type == "next":
                 self._node_dependencies[edge.target].add(edge.source)
                 self._node_dependents[edge.source].add(edge.target)
+
+    def _compute_next_reachable_nodes(self) -> Set[str]:
+        reachable: Set[str] = set()
+        stack: List[str] = [self.start_node]
+        while stack:
+            node_name = stack.pop()
+            if node_name in reachable:
+                continue
+            reachable.add(node_name)
+            for edge in self.edges:
+                if edge.source == node_name and edge.edge_type == "next":
+                    stack.append(edge.target)
+        return reachable
 
     def _default_compress_hook(self, contexts: List[str], agent: IkaBaseAgent) -> str:
         merged = "\n\n".join([c for c in contexts if c]) if contexts else ""
@@ -337,18 +353,7 @@ class IkaWorkflow:
         final_message = execution_output.get("final_message") or ""
         summary = execution_output.get("summary") or final_message
         child_summaries: Dict[str, str] = {}
-
-        for edge in self.edges:
-            if edge.source != node_name or edge.edge_type != "child":
-                continue
-            upstream_contexts.setdefault(edge.target, []).append(summary)
-            child_result = self._run_node(edge.target, upstream_contexts)
-            child_summaries[edge.target] = child_result.summary
-
-        downstream_context = self.compress_hook(
-            [summary] + list(child_summaries.values()),
-            node.agent,
-        )
+        downstream_context = self.compress_hook([summary], node.agent)
 
         result = WorkflowResult(
             name=node_name,
@@ -430,7 +435,7 @@ class IkaWorkflow:
         self._visiting = set()
         ready_nodes: Set[str] = {self.start_node}
         completed_nodes: Set[str] = set()
-        pending_nodes: Set[str] = set(node.name for node in self.nodes)
+        pending_nodes: Set[str] = set(self._next_reachable_nodes)
         pending_nodes.discard(self.start_node)
         node_futures: Dict[str, List[concurrent.futures.Future]] = {}
         cli = get_cli_output()
@@ -514,14 +519,14 @@ class IkaWorkflow:
                                 upstream_contexts.setdefault(edge.target, []).append(summary)
                                 target_deps = self._node_dependencies[edge.target]
                                 if target_deps.issubset(completed_nodes):
-                                    if edge.target not in completed_nodes and edge.target not in ready_nodes:
+                                    if edge.target in self._next_reachable_nodes and edge.target not in completed_nodes and edge.target not in ready_nodes:
                                         ready_nodes.add(edge.target)
                                         pending_nodes.discard(edge.target)
                 for n in {r["node_name"] for r in results}:
                     node_futures.pop(n, None)
             for node_name in list(pending_nodes):
                 node_deps = self._node_dependencies[node_name]
-                if node_deps.issubset(completed_nodes):
+                if node_name in self._next_reachable_nodes and node_deps.issubset(completed_nodes):
                     ready_nodes.add(node_name)
                     pending_nodes.discard(node_name)
 

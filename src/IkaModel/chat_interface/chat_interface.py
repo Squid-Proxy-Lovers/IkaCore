@@ -93,6 +93,31 @@ def _record_model_message(message_history: dict, content: str, tokens: int, reas
     message_history["messages"][msg_id] = history_entry
 
 
+def _build_tool_metadata(barebone_model: BareBoneModel) -> Dict[str, Dict[str, Any]]:
+    tool_metadata: Dict[str, Dict[str, Any]] = {}
+    if not hasattr(barebone_model, "agent_tools"):
+        return tool_metadata
+
+    for agent_tool in barebone_model.agent_tools or []:
+        params: Dict[str, Any] = {}
+        if hasattr(agent_tool, "args") and agent_tool.args:
+            tool_args = agent_tool.args
+            if hasattr(tool_args, "properties") and tool_args.properties:
+                required = list(tool_args.properties.get("__required__", []))
+                properties = {
+                    key: value
+                    for key, value in tool_args.properties.items()
+                    if key != "__required__" and isinstance(value, dict)
+                }
+                params = {"properties": properties, "required": required}
+        tool_metadata[agent_tool.name] = {
+            "parallel": agent_tool.parallel if hasattr(agent_tool, "parallel") else True,
+            "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, "limit_calls") else 0,
+            "parameters": params,
+        }
+    return tool_metadata
+
+
 def _build_chat_response(
     content: str,
     reasoning_content: Optional[str],
@@ -103,6 +128,8 @@ def _build_chat_response(
     usage_info: Optional[dict],
     cost_info: Optional[dict],
     hijacked: bool,
+    interrupted: bool = False,
+    interrupt_data: Optional[dict] = None,
 ) -> Dict[str, Any]:
     return {
         "content": content,
@@ -114,6 +141,8 @@ def _build_chat_response(
         "usage": usage_info,
         "cost": cost_info,
         "hijacked": hijacked,
+        "interrupted": interrupted,
+        "interrupt_data": interrupt_data,
     }
 
 
@@ -356,24 +385,9 @@ def chat(
                         "hijacked": True,
                     }
 
-        tool_metadata = {}
-        if hasattr(barebone_model, 'agent_tools'):
-            for agent_tool in barebone_model.agent_tools:
-                _tool_params = {}
-                if hasattr(agent_tool, 'args') and agent_tool.args:
-                    _ta = agent_tool.args
-                    if hasattr(_ta, 'properties') and _ta.properties:
-                        _req = list(_ta.properties.get("__required__", []))
-                        _props = {k: v for k, v in _ta.properties.items() if k != "__required__" and isinstance(v, dict)}
-                        _tool_params = {"properties": _props, "required": _req}
-                tool_metadata[agent_tool.name] = {
-                    "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
-                    "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0,
-                    "parameters": _tool_params,
-                }
+        tool_metadata = _build_tool_metadata(barebone_model)
         step = getattr(barebone_model, '_current_step', 0)
-        print("tool_calls_from_llm:", tool_calls)
-        tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+        tool_messages, tool_results, updated_counts, executed_tool_call_list, interrupt_data = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
         if hasattr(barebone_model, '_tool_call_counts'):
             barebone_model._tool_call_counts.update(updated_counts)
         all_executed_tool_call_list.extend(executed_tool_call_list)
@@ -402,7 +416,33 @@ def chat(
         
         if logger:
             logger.log_tool_results(executed_tool_call_list, tool_results)
-        
+
+        if interrupt_data:
+            interrupt_content = interrupt_data.get("question") or content or "Awaiting human input"
+            if logger:
+                logger.log_hitl_prompt(interrupt_data.get("stage_name") or getattr(barebone_model, "agent_name", "Agent") or "Agent")
+            append_provider_tool_messages(
+                provider, messages, message_history, content, reasoning_content,
+                executed_tool_call_list, tool_messages, tool_results, tokens,
+                "", format_gemini_results
+            )
+            cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
+            if logger:
+                logger.log_output(interrupt_content, total_usage, cost_info, message_history)
+            return _build_chat_response(
+                interrupt_content,
+                reasoning_content,
+                [],
+                all_executed_tool_call_list,
+                content_before_tools,
+                message_history,
+                total_usage,
+                cost_info,
+                hijacked,
+                interrupted=True,
+                interrupt_data=interrupt_data,
+            )
+
         LOG.debug("[TRACE] chat: Checking agent_end")
         agent_end_called = False
         stage_end_called = False
@@ -500,30 +540,39 @@ def chat(
                 total_usage[key] = total_usage.get(key, 0) + ((usage_info.get(key, 0)) or 0)
 
     if tool_calls and tool_executors:
-        tool_metadata = {}
-        if hasattr(barebone_model, 'agent_tools'):
-            for agent_tool in barebone_model.agent_tools:
-                _tool_params = {}
-                if hasattr(agent_tool, 'args') and agent_tool.args:
-                    _ta = agent_tool.args
-                    if hasattr(_ta, 'properties') and _ta.properties:
-                        _req = list(_ta.properties.get("__required__", []))
-                        _props = {k: v for k, v in _ta.properties.items() if k != "__required__" and isinstance(v, dict)}
-                        _tool_params = {"properties": _props, "required": _req}
-                tool_metadata[agent_tool.name] = {
-                    "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
-                    "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0,
-                    "parameters": _tool_params,
-                }
+        tool_metadata = _build_tool_metadata(barebone_model)
         agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
         step = getattr(barebone_model, '_current_step', 0)
-        print("tool_calls_from_llm:", tool_calls)
-        tool_messages, tool_results, updated_counts, executed_tool_call_list = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+        tool_messages, tool_results, updated_counts, executed_tool_call_list, interrupt_data = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
         if hasattr(barebone_model, '_tool_call_counts'):
             barebone_model._tool_call_counts.update(updated_counts)
         all_executed_tool_call_list.extend(executed_tool_call_list)
         if logger:
             logger.log_tool_results(executed_tool_call_list, tool_results)
+
+        if interrupt_data:
+            interrupt_content = interrupt_data.get("question") or content or "Awaiting human input"
+            append_provider_tool_messages(
+                provider, messages, message_history, content, reasoning_content,
+                executed_tool_call_list, tool_messages, tool_results, tokens,
+                "", format_gemini_results
+            )
+            cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
+            if logger:
+                logger.log_output(interrupt_content, total_usage, cost_info, message_history)
+            return _build_chat_response(
+                interrupt_content,
+                reasoning_content,
+                [],
+                all_executed_tool_call_list,
+                content_before_tools,
+                message_history,
+                total_usage,
+                cost_info,
+                hijacked,
+                interrupted=True,
+                interrupt_data=interrupt_data,
+            )
         
         agent_end_called = False
         stage_end_called = False
@@ -747,16 +796,9 @@ async def async_chat(
                     + ", ".join(seen_async) + ". Do not repeat these calls. Proceed to the next step (e.g. use submit_discovery or other tools, then agent_end when done)."
                 )
 
-            tool_metadata = {}
-            if hasattr(barebone_model, 'agent_tools'):
-                for agent_tool in barebone_model.agent_tools:
-                    tool_metadata[agent_tool.name] = {
-                        "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
-                        "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
-                    }
+            tool_metadata = _build_tool_metadata(barebone_model)
             step = getattr(barebone_model, '_current_step', 0)
-            print("tool_calls_from_llm:", tool_calls)
-            tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+            tool_messages, tool_results, updated_counts, executed_tool_call_list, interrupt_data = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
             if hasattr(barebone_model, '_tool_call_counts'):
                 barebone_model._tool_call_counts.update(updated_counts)
             all_executed_tool_call_list.extend(executed_tool_call_list)
@@ -782,6 +824,31 @@ async def async_chat(
             
             if logger:
                 logger.log_tool_results(executed_tool_call_list, tool_results)
+
+            if interrupt_data:
+                interrupt_content = interrupt_data.get("question") or content or "Awaiting human input"
+                append_provider_tool_messages(
+                    provider, messages, message_history, content, reasoning_content,
+                    executed_tool_call_list, tool_messages, tool_results, tokens,
+                    "", format_gemini_results
+                )
+                cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
+                if logger:
+                    logger.log_output(interrupt_content, total_usage, cost_info, message_history)
+                response_payload = _build_chat_response(
+                    interrupt_content,
+                    reasoning_content,
+                    [],
+                    all_executed_tool_call_list,
+                    content_before_tools,
+                    message_history,
+                    total_usage,
+                    cost_info,
+                    hijacked,
+                    interrupted=True,
+                    interrupt_data=interrupt_data,
+                )
+                return response_payload
             
             LOG.debug("[TRACE] async_chat: Checking agent_end")
             agent_end_called = False
@@ -872,22 +939,40 @@ async def async_chat(
                     total_usage[key] = total_usage.get(key, 0) + ((usage_info.get(key, 0)) or 0)
 
         if tool_calls and tool_executors:
-            tool_metadata = {}
-            if hasattr(barebone_model, 'agent_tools'):
-                for agent_tool in barebone_model.agent_tools:
-                    tool_metadata[agent_tool.name] = {
-                        "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
-                        "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0
-                    }
+            tool_metadata = _build_tool_metadata(barebone_model)
             agent_hierarchy = getattr(barebone_model, 'agent_hierarchy', None)
             step = getattr(barebone_model, '_current_step', 0)
-            print("tool_calls_from_llm:", tool_calls)
-            tool_messages, tool_results, updated_counts, executed_tool_call_list = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
+            tool_messages, tool_results, updated_counts, executed_tool_call_list, interrupt_data = await async_execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
             if hasattr(barebone_model, '_tool_call_counts'):
                 barebone_model._tool_call_counts.update(updated_counts)
             all_executed_tool_call_list.extend(executed_tool_call_list)
             if logger:
                 logger.log_tool_results(executed_tool_call_list, tool_results)
+
+            if interrupt_data:
+                interrupt_content = interrupt_data.get("question") or content or "Awaiting human input"
+                append_provider_tool_messages(
+                    provider, messages, message_history, content, reasoning_content,
+                    executed_tool_call_list, tool_messages, tool_results, tokens,
+                    "", format_gemini_results
+                )
+                cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
+                if logger:
+                    logger.log_output(interrupt_content, total_usage, cost_info, message_history)
+                response_payload = _build_chat_response(
+                    interrupt_content,
+                    reasoning_content,
+                    [],
+                    all_executed_tool_call_list,
+                    content_before_tools,
+                    message_history,
+                    total_usage,
+                    cost_info,
+                    hijacked,
+                    interrupted=True,
+                    interrupt_data=interrupt_data,
+                )
+                return response_payload
             
             agent_end_called = False
             stage_end_called = False

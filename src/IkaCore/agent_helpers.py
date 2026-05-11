@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import builtins
 import json
 import re
 import time
@@ -16,7 +15,7 @@ from IkaCore.checkpoint import CheckpointStore
 from IkaCore.cli_output import get_cli_output, OutputType
 from IkaCore.prompts import *
 
-from IkaModel.base import BareBoneModel, AgentTool, ToolArgs, AgentEndException
+from IkaModel.base import BareBoneModel, AgentTool, ToolArgs, AgentEndException, HumanInputRequired
 from IkaModel.chat_interface.chat_interface import chat, async_chat, summarise_message_history
 
 if TYPE_CHECKING:
@@ -38,12 +37,9 @@ class AgentHelpersMixin:
     max_tokens: int
     temperature: float
     checkpoint: bool
-    Batch: bool
-    BatchMax: int
     Stages: List[IkaStage]
     subagents: List["IkaBaseAgent"]
     next_agent: Optional["IkaBaseAgent"]
-    feedback_agent: Optional["IkaBaseAgent"]
     maxsteps: int
     step_timeout: int
     memory: bool
@@ -99,7 +95,7 @@ class AgentHelpersMixin:
         }
 
     @staticmethod
-    def geturl(model_id: str) -> str:
+    def geturl(model_id: str, use_responses_api: bool = True) -> str:
         """
         Get the API URL for a model.
 
@@ -117,7 +113,7 @@ class AgentHelpersMixin:
         if "deepseek" in model_id_lower:
             return "https://api.deepseek.com/chat/completions"
         if "gpt" in model_id_lower or "o1" in model_id_lower or "o3" in model_id_lower:
-            return "https://api.openai.com/v1/responses"
+            return "https://api.openai.com/v1/responses" if use_responses_api else "https://api.openai.com/v1/chat/completions"
         if "claude" in model_id_lower:
             return "https://api.anthropic.com/v1/messages"
         if "gemini" in model_id_lower:
@@ -125,7 +121,7 @@ class AgentHelpersMixin:
             return f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent"
 
         # Default to OpenAI-compatible
-        return "https://api.openai.com/v1/chat/completions"
+        return "https://api.openai.com/v1/responses" if use_responses_api else "https://api.openai.com/v1/chat/completions"
 
     def _validate_final_answer_checks(
         self,
@@ -196,19 +192,24 @@ class AgentHelpersMixin:
         last_attr = f"_last_tool_ts_{tool_name}"
         self._enforce_rate_limit(effective, last_attr)
 
-    def _prompt_hitl_question(self, stage_name: str, question: str) -> str:
+    def _prompt_hitl_question(
+        self,
+        stage_name: str,
+        question: str,
+        stage_index: Optional[int] = None,
+        remaining_steps: Optional[int] = None,
+    ) -> str:
         if self.logger:
             self.logger.log_hitl_question(stage_name, question)
-        try:
-            prompt = f"[HITL] {question}\nYour answer: "
-            if self.logger and self.logger.use_colors and self.logger.level == 0:
-                prompt = self.logger._color(prompt, "orange")
-            user_text = builtins.input(prompt).strip()
-            if self.logger and user_text:
-                self.logger.log_hitl_answer(stage_name, user_text)
-            return user_text or ""
-        except EOFError:
-            return ""
+        payload = {
+            "kind": "hitl",
+            "agent_name": self.name,
+            "stage_name": stage_name,
+            "stage_index": stage_index,
+            "remaining_steps": remaining_steps,
+            "question": question,
+        }
+        raise HumanInputRequired(payload)
 
     def inject_workflow_context(self, context: str) -> None:
         if not context:
@@ -229,18 +230,25 @@ class AgentHelpersMixin:
                 if "subagents" in wiring:
                     stage.subagents = wiring["subagents"]
 
-    def _save_stage_checkpoint(self, stage_index: int, remaining_steps: int, last_content: str) -> Optional[str]:
+    def _save_stage_checkpoint(
+        self,
+        stage_index: int,
+        remaining_steps: int,
+        last_content: str,
+        scope: str = "stage",
+        extra_payload: Optional[dict] = None,
+    ) -> Optional[str]:
         if not self.checkpoint_store:
             return None
         
         if stage_index < len(self.Stages):
             stage = self.Stages[stage_index]
             stage_checkpoint_enabled = getattr(stage, "checkpoint", False)
-            if not stage_checkpoint_enabled:
+            if scope == "stage" and not stage_checkpoint_enabled:
                 return None
         
         payload = {
-            "scope": "stage",
+            "scope": scope,
             "agent_name": self.name,
             "stage_index": stage_index,
             "remaining_steps": remaining_steps,
@@ -250,8 +258,10 @@ class AgentHelpersMixin:
             "memory_access": deepcopy(self.memory_access),
             "timestamp": time.time(),
         }
+        if extra_payload:
+            payload.update(extra_payload)
         
-        checkpoint_uid = self.checkpoint_store.save_checkpoint(scope="stage", payload=payload)
+        checkpoint_uid = self.checkpoint_store.save_checkpoint(scope=scope, payload=payload)
         
         if checkpoint_uid:
             stage_name = self.Stages[stage_index].name if stage_index < len(self.Stages) else "unknown"
@@ -259,17 +269,17 @@ class AgentHelpersMixin:
                 if self.logger.level == 2:
                     self.logger.log_json({
                         "event": "checkpoint_saved",
-                        "scope": "stage",
+                        "scope": scope,
                         "stage_index": stage_index,
                         "stage_name": stage_name,
                         "checkpoint_uid": checkpoint_uid,
                         "remaining_steps": remaining_steps,
                     })
                 else:
-                    self.logger.write_line(f"[CHECKPOINT] scope=stage stage_index={stage_index} stage_name={stage_name} uid={checkpoint_uid} remaining={remaining_steps}")
+                    self.logger.write_line(f"[CHECKPOINT] scope={scope} stage_index={stage_index} stage_name={stage_name} uid={checkpoint_uid} remaining={remaining_steps}")
             cli = get_cli_output()
             current_hierarchy = getattr(self, "_parent_hierarchy", []) + [self.name, f"Stage {stage_index}: {stage_name}"]
-            checkpoint_msg = f"Checkpoint saved at Stage {stage_index}: {stage_name}\nCheckpoint UID: {checkpoint_uid}\nRemaining steps: {remaining_steps}"
+            checkpoint_msg = f"Checkpoint saved at {scope.upper()} Stage {stage_index}: {stage_name}\nCheckpoint UID: {checkpoint_uid}\nRemaining steps: {remaining_steps}"
             cli.emit(
                 OutputType.AGENT_INIT,
                 checkpoint_msg,
@@ -341,8 +351,17 @@ class AgentHelpersMixin:
                     AgentTool(
                         id=save_key,
                         name=save_key,
-                        description="Saves a task-output pair to long-term memory for permanent storage across all agent executions. The data persists beyond the current session and can be accessed by any future agent runs with long-term memory access. Use this tool when you complete a task that produces reusable knowledge or results that should be remembered for future executions. The input must follow the format 'task|output' where task describes what was done and output contains the result. The tool returns a confirmation message upon successful save.",
-                        args=ToolArgs(type="input", description="The task and output to save permanently, formatted as 'task|output'. Example: 'Calculate sales total|$45,231.50'", data="task|output"),
+                        description="Saves a structured task result to long-term memory for permanent storage across all agent executions. The data persists beyond the current session and can be accessed by any future agent runs with long-term memory access. Use this tool when you complete a task that produces reusable knowledge or results that should be remembered for future executions. Provide a task description, the output, and optional metadata.",
+                        args=ToolArgs(
+                            type="object",
+                            description="Structured long-term memory entry",
+                            properties={
+                                "task": {"type": "string", "description": "Task description"},
+                                "output": {"type": "string", "description": "Task output or result"},
+                                "metadata": {"type": "object", "description": "Optional metadata for the memory item"},
+                                "__required__": ["task", "output"],
+                            },
+                        ),
                         required=False,
                     )
                 )
@@ -356,24 +375,24 @@ class AgentHelpersMixin:
                 desc = "Search parameters for querying long-term memory"
                 tool_desc = "Searches long-term memory for task-output pairs relevant to a given query using semantic similarity. Searches across all permanently stored data from previous agent executions, not just the current session. Returns a list of matching task-output pairs sorted by relevance score, with the most relevant entries first. Use this tool when you need to recall information or results from past executions that might help with the current task. The tool will not search short-term memory or any external sources."
                 prop_desc = "The search query string to find relevant task-output pairs from past executions"
-            tools.append(
-                AgentTool(
-                    id=search_key,
-                    name=search_key,
+                tools.append(
+                    AgentTool(
+                        id=search_key,
+                        name=search_key,
                     description=tool_desc,
-                    args=ToolArgs(
-                        type="object",
-                        description=desc,
-                        properties={
-                            "query": {"type": "string", "description": prop_desc},
-                            "limit": {"type": "integer", "description": "Maximum number of results to return (default: 5)", "default": 5},
-                            "score_threshold": {"type": "number", "description": "Minimum similarity score from 0.0 to 1.0, where 1.0 is perfect match (default: 0.6)", "default": 0.6},
-                        },
-                        required=["query"],
-                    ),
-                    required=False,
+                        args=ToolArgs(
+                            type="object",
+                            description=desc,
+                            properties={
+                                "query": {"type": "string", "description": prop_desc},
+                                "limit": {"type": "integer", "description": "Maximum number of results to return (default: 5)", "default": 5},
+                                "score_threshold": {"type": "number", "description": "Minimum similarity score from 0.0 to 1.0, where 1.0 is perfect match (default: 0.6)", "default": 0.6},
+                                "__required__": ["query"],
+                            },
+                        ),
+                        required=False,
+                    )
                 )
-            )
         return tools
 
     def _build_stage_memory_tools(self, stage_memory_access: Dict[str, bool]) -> List[AgentTool]:
@@ -464,6 +483,7 @@ class AgentHelpersMixin:
             agent_hierarchy=agent_hierarchy,
             suppress_init_output=suppress_init_output,
             reasoning_effort=reasoning_effort,
+            use_responses_api=getattr(self, "use_responses_api", True),
         )
         model.agent_tools = agent_tools
         model._current_step = 0
@@ -560,48 +580,6 @@ class AgentHelpersMixin:
             "agent_end was called but no output was provided. "
             "The agent MUST provide a final answer when calling agent_end."
         )
-
-    def parse_control_calls(self, tool_calls: List[dict], stage: Optional[IkaStage], current_stage_idx: int = 0, response_content: Optional[str] = None) -> tuple[Optional[int], bool, Optional[str]]:
-        target_stage = None
-        agent_end_called = False
-        agent_end_text = None
-
-        allowed_back = getattr(stage, "allowed_back_to", []) if stage else []
-        for call in tool_calls:
-            fn = call.get("function", {})
-            name = fn.get("name") or call.get("name")
-            args_raw = fn.get("arguments") or "{}"
-            try:
-                args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
-            except Exception:
-                args = {}
-
-            if name in ["short_term_save", "short_term_search", "long_term_save", "long_term_search"]:
-                self.logger.log_action(f"{name} called")
-                continue
-
-            if name == "agent_end":
-                agent_end_called = True
-                agent_end_text = self._get_end_text(args)
-
-                if not agent_end_text or agent_end_text.strip() in [".", ""]:
-                    if response_content and len(response_content.strip()) > 10:
-                        agent_end_text = response_content.strip()
-
-                agent_end_text = self._validate_final(agent_end_text or "")
-
-                break
-            if name == "stage_end" and stage is not None:
-                target_stage = "next"
-            if name == "change_stage" and stage is not None:
-                stage_idx = args.get("stage_index") or args.get("stage") or args.get("to")
-                try:
-                    stage_idx = int(stage_idx)
-                except Exception:
-                    stage_idx = None
-                if stage_idx is not None and stage_idx in allowed_back and stage_idx < current_stage_idx:
-                    target_stage = stage_idx
-        return target_stage, agent_end_called, agent_end_text
 
     def chat_wrapper(
         self,

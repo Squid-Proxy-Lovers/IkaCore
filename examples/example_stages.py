@@ -1,16 +1,7 @@
-import sys
 import os
-from pathlib import Path
-from typing import final
 from time import time
 
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))  # Add src to sys.path
-
-from IkaCore.agents import IkaBaseAgent
-from IkaCore.stages import IkaStage
-from IkaCore.tools import IkaTools
-from IkaCore.workflow import IkaWorkflow
+from IkaCore import IkaBaseAgent, IkaStage, IkaTools
 
 API_KEY = os.getenv("API_KEY")
 MODEL_ID = os.getenv("MODEL_ID", "deepseek-chat")

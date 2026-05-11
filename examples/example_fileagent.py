@@ -1,14 +1,6 @@
-import sys
 import os
-from pathlib import Path
 
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))  # Add src to sys.path
-
-from IkaCore.agents import IkaBaseAgent
-from IkaCore.stages import IkaStage
-from IkaCore.tools import IkaTools
-from IkaCore.workflow import IkaWorkflow
+from IkaCore import IkaBaseAgent, IkaTools
 
 MODEL_ID = "qwen/qwen3-coder-next"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"

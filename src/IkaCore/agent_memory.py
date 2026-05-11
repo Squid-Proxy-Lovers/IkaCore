@@ -1,16 +1,6 @@
 from __future__ import annotations
 
 from typing import Optional, Dict, Callable, Any
-
-from pathlib import Path
-import sys
-
-# Ensure IkaMem is importable (same pattern as in agents.py)
-src_dir = Path(__file__).parent.parent
-if str(src_dir) not in sys.path:
-    sys.path.insert(0, str(src_dir))
-sys.path.insert(0, str(src_dir / "IkaMem"))
-
 from IkaMem import STMemory, LTMemory, LTMemItem  # type: ignore
 
 
@@ -33,19 +23,24 @@ class AgentMemoryMixin:
         except Exception as e:
             return f"error saving to short-term memory: {str(e)}"
     
-    def _save_to_long_term(self, task: str, output: str) -> str:
+    def _save_to_long_term(self, payload: Dict[str, Any]) -> str:
         if not self.long_term_memory:
             return "error: long-term memory not initialized"
         
         try:
             from datetime import datetime
+            task = str(payload.get("task") or "").strip()
+            output = str(payload.get("output") or "").strip()
+            metadata = payload.get("metadata") or {}
+            if not task or not output:
+                return "error: long_term_save requires 'task' and 'output'"
             item = LTMemItem(
                 agent=self.name,
                 task=task,
                 expected_output=output,
                 datetime=datetime.now().isoformat(),
                 quality=1.0,  # default quality
-                metadata={}
+                metadata=metadata if isinstance(metadata, dict) else {"metadata": metadata},
             )
             self.long_term_memory.save(item)
             return f"saved to long-term memory - task: {task[:30]}..."
@@ -127,4 +122,3 @@ class AgentMemoryMixin:
             }
         except Exception as e:
             return {"error": f"error searching long-term memory: {str(e)}"}
-
