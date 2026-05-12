@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any, Dict, List, Optional, Callable
 
 from IkaCore.cli_output import get_cli_output
-from ..base import HumanInputRequired
+from ..base import AgentEndException, HumanInputRequired
 
 LOG = logging.getLogger(__name__)
 
@@ -149,6 +149,8 @@ def execute_tool(tool_name: str, tool_args: dict, tool_executors: Dict[str, Call
         if isinstance(result, str):
             return result
         return json.dumps(result)
+    except AgentEndException:
+        raise
     except HumanInputRequired:
         raise
     except FutureTimeoutError:
@@ -351,6 +353,8 @@ def execute_tool_calls(
                     result = future.result(timeout=timeout + 5.0)
                     tool_call_id_to_result[tool_call_id] = result
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+                except AgentEndException:
+                    raise
                 except HumanInputRequired as exc:
                     interrupt_data = exc.payload
                     tool_call_id_to_result[tool_call_id] = json.dumps({"__ika_interrupt__": True, **(exc.payload or {})})
@@ -449,6 +453,8 @@ async def async_execute_tool(
         if isinstance(result, str):
             return result
         return json.dumps(result)
+    except AgentEndException:
+        raise
     except HumanInputRequired:
         raise
     except asyncio.TimeoutError:
@@ -545,6 +551,8 @@ async def async_execute_tool_calls(
             tool_name = parallel_calls[i][0] if i < len(parallel_calls) else ""
             tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
             if isinstance(result, Exception):
+                if isinstance(result, AgentEndException):
+                    raise result
                 if isinstance(result, HumanInputRequired):
                     interrupt_data = result.payload
                     tool_call_id_to_result[tool_call_id] = json.dumps({"__ika_interrupt__": True, **(result.payload or {})})

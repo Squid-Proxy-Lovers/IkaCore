@@ -80,7 +80,9 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
 
     if model.agent_tools:
         function_declarations = []
+        tool_names = set()
         for tool in model.agent_tools:
+            tool_names.add(tool.name)
             # For agent_end and subagent tools with type="input", always use input parameter
             if tool.name == "agent_end" and tool.args.type == "input":
                 parameters = {
@@ -153,5 +155,13 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
             })
 
         payload["tools"] = [{"functionDeclarations": function_declarations}]
+        forced_tool_name = getattr(model, "forced_tool_name", None)
+        if forced_tool_name and forced_tool_name in tool_names:
+            payload["toolConfig"] = {
+                "functionCallingConfig": {
+                    "mode": "ANY",
+                    "allowedFunctionNames": [forced_tool_name],
+                }
+            }
     
     return payload

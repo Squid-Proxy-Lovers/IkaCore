@@ -243,7 +243,9 @@ def openai_responses_fill_payload(
     # Tools — flatter schema: no nested "function" key
     if model.agent_tools:
         tools = []
+        tool_names = set()
         for tool in model.agent_tools:
+            tool_names.add(tool.name)
             parameters = _build_parameters(tool)
             tools.append({
                 "type": "function",
@@ -253,13 +255,17 @@ def openai_responses_fill_payload(
             })
         payload["tools"] = tools
 
-        required_tools = [t for t in model.agent_tools if t.required]
-        if len(required_tools) == 1:
-            payload["tool_choice"] = {"type": "function", "name": required_tools[0].name}
-        elif len(required_tools) > 1:
-            payload["tool_choice"] = "required"
+        forced_tool_name = getattr(model, "forced_tool_name", None)
+        if forced_tool_name and forced_tool_name in tool_names:
+            payload["tool_choice"] = {"type": "function", "name": forced_tool_name}
         else:
-            payload["tool_choice"] = "auto"
+            required_tools = [t for t in model.agent_tools if t.required]
+            if len(required_tools) == 1:
+                payload["tool_choice"] = {"type": "function", "name": required_tools[0].name}
+            elif len(required_tools) > 1:
+                payload["tool_choice"] = "required"
+            else:
+                payload["tool_choice"] = "auto"
 
         if hasattr(model, "parallel_tool_calls") and model.parallel_tool_calls:
             payload["parallel_tool_calls"] = True

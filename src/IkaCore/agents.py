@@ -56,6 +56,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         summarize_final: bool = False,
         use_async: bool = False,
         max_tool_rounds: Optional[int] = None,
+        max_tool_calls: Optional[int] = None,
         max_step_extensions: int = 2,
         extend_steps_by: int = 3,
         max_stage_extensions: int = 2,
@@ -124,6 +125,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         self.summarize_final = summarize_final
         self.use_async = use_async
         self.max_tool_rounds = max_tool_rounds if max_tool_rounds is not None else 5
+        self.max_tool_calls = max_tool_calls if max_tool_calls is not None else maxsteps
         self.final_answer_checks = self._validate_final_answer_checks(final_answer_check)
         self._tool_call_counts: Dict[str, int] = {}
         self._total_usage: Dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "input_cached_tokens": 0}
@@ -259,7 +261,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     logger=self.logger,
                     timeout=self.step_timeout,
                     max_tool_rounds=self.max_tool_rounds,
-                    max_tool_calls=self.maxsteps,
+                    max_tool_calls=self.max_tool_calls,
                     current_stage_index=stage_index,
                     total_stages=len(self.Stages) if self.Stages else 0,
                     client=self.client,
@@ -439,7 +441,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     logger=self.logger,
                     timeout=self.step_timeout,
                     max_tool_rounds=self.max_tool_rounds,
-                    max_tool_calls=self.maxsteps,
+                    max_tool_calls=self.max_tool_calls,
                     current_stage_index=None,
                     total_stages=0,
                     client=self.client,

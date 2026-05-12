@@ -92,7 +92,6 @@ def _record_model_message(message_history: dict, content: str, tokens: int, reas
         history_entry["reasoning_content"] = reasoning_content
     message_history["messages"][msg_id] = history_entry
 
-
 def _build_tool_metadata(barebone_model: BareBoneModel) -> Dict[str, Dict[str, Any]]:
     tool_metadata: Dict[str, Dict[str, Any]] = {}
     if not hasattr(barebone_model, "agent_tools"):
@@ -116,6 +115,130 @@ def _build_tool_metadata(barebone_model: BareBoneModel) -> Dict[str, Dict[str, A
             "parameters": params,
         }
     return tool_metadata
+
+
+def _clear_forced_tool_choice(barebone_model: BareBoneModel) -> None:
+    if hasattr(barebone_model, "forced_tool_name"):
+        barebone_model.forced_tool_name = None
+
+
+def _build_synthetic_agent_end(summary_text: str) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": "agent_end",
+            "arguments": json.dumps({"input": summary_text}),
+        },
+    }
+
+
+def _fallback_force_completion_text(
+    reason: str,
+    content_before_tools: str,
+    content: str,
+) -> str:
+    for candidate in (content_before_tools, content):
+        if candidate and candidate.strip() not in {"", "{}", "."}:
+            return candidate.strip()
+    return reason
+
+
+def _force_complete_with_summary(
+    barebone_model: BareBoneModel,
+    message_history: dict,
+    total_usage: dict,
+    logger: Optional[Any],
+    all_executed_tool_call_list: List[dict],
+    content_before_tools: str,
+    content: str,
+    reason: str,
+    hijacked: bool = True,
+) -> None:
+    try:
+        summary_text = run_summarization(
+            barebone_model,
+            message_history,
+            prompt_kind="force_answer",
+            write_to_history=False,
+            use_same_model=True,
+        )
+    except Exception as e:
+        LOG.error(f"Failed to generate force completion summary: {e}")
+        summary_text = ""
+
+    final_text = (summary_text or "").strip()
+    if not final_text:
+        final_text = _fallback_force_completion_text(reason, content_before_tools, content)
+
+    _clear_forced_tool_choice(barebone_model)
+    _record_model_message(message_history, final_text, _estimate_tokens(final_text))
+    synthetic_end = _build_synthetic_agent_end(final_text)
+    executed_tool_calls = list(all_executed_tool_call_list) + [synthetic_end]
+    cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
+    if logger:
+        logger.log_output(final_text, total_usage, cost_info, message_history)
+    response_payload = _build_chat_response(
+        final_text,
+        None,
+        [],
+        executed_tool_calls,
+        final_text,
+        message_history,
+        total_usage,
+        cost_info,
+        hijacked,
+    )
+    raise AgentEndException(response_payload)
+
+
+async def _async_force_complete_with_summary(
+    barebone_model: BareBoneModel,
+    message_history: dict,
+    total_usage: dict,
+    logger: Optional[Any],
+    all_executed_tool_call_list: List[dict],
+    content_before_tools: str,
+    content: str,
+    reason: str,
+    client: Optional[httpx.AsyncClient] = None,
+    hijacked: bool = True,
+) -> None:
+    try:
+        summary_text = await async_summarise_message_history(
+            barebone_model,
+            message_history,
+            client=client,
+            use_same_model=True,
+            prompt_kind="force_answer",
+            write_to_history=False,
+        )
+    except Exception as e:
+        LOG.error(f"Failed to generate async force completion summary: {e}")
+        summary_text = ""
+
+    final_text = (summary_text or "").strip()
+    if not final_text:
+        final_text = _fallback_force_completion_text(reason, content_before_tools, content)
+
+    _clear_forced_tool_choice(barebone_model)
+    _record_model_message(message_history, final_text, _estimate_tokens(final_text))
+    synthetic_end = _build_synthetic_agent_end(final_text)
+    executed_tool_calls = list(all_executed_tool_call_list) + [synthetic_end]
+    cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
+    if logger:
+        logger.log_output(final_text, total_usage, cost_info, message_history)
+    response_payload = _build_chat_response(
+        final_text,
+        None,
+        [],
+        executed_tool_calls,
+        final_text,
+        message_history,
+        total_usage,
+        cost_info,
+        hijacked,
+    )
+    raise AgentEndException(response_payload)
 
 
 def _build_chat_response(
@@ -341,10 +464,8 @@ def chat(
                 repeated_tool_names.append(tool_name)
                 LOG.error(f"Tool '{tool_name}' has been called {recent_count} times with identical arguments. Agent may be stuck in a loop.")
 
-                # Force termination after 5 identical calls
                 if recent_count >= 5:
                     LOG.error(f"Tool '{tool_name}' called {recent_count} times identically. Forcing agent termination with summarization.")
-
                     # Use summarization to create a force_answer response.
                     # run_summarization lives in IkaModel.summarization (one
                     # package up from chat_interface) — `from .summarization`
@@ -385,7 +506,21 @@ def chat(
                         "hijacked": True,
                     }
 
-        tool_metadata = _build_tool_metadata(barebone_model)
+        tool_metadata = {}
+        if hasattr(barebone_model, 'agent_tools'):
+            for agent_tool in barebone_model.agent_tools:
+                _tool_params = {}
+                if hasattr(agent_tool, 'args') and agent_tool.args:
+                    _ta = agent_tool.args
+                    if hasattr(_ta, 'properties') and _ta.properties:
+                        _req = list(_ta.properties.get("__required__", []))
+                        _props = {k: v for k, v in _ta.properties.items() if k != "__required__" and isinstance(v, dict)}
+                        _tool_params = {"properties": _props, "required": _req}
+                tool_metadata[agent_tool.name] = {
+                    "parallel": agent_tool.parallel if hasattr(agent_tool, 'parallel') else True,
+                    "limit_calls": agent_tool.limit_calls if hasattr(agent_tool, 'limit_calls') else 0,
+                    "parameters": _tool_params,
+                }
         step = getattr(barebone_model, '_current_step', 0)
         tool_messages, tool_results, updated_counts, executed_tool_call_list, interrupt_data = execute_tool_calls(tool_calls, tool_executors, provider, timeout, tool_metadata, agent_hierarchy, step, tool_call_counts)
         if hasattr(barebone_model, '_tool_call_counts'):
@@ -454,6 +589,7 @@ def chat(
                 stage_end_called = True
 
         if agent_end_called:
+            _clear_forced_tool_choice(barebone_model)
             if logger:
                 cost_info = logger.compute_cost(barebone_model.model_id, total_usage)
                 logger.log_output(content, total_usage, cost_info, message_history)
@@ -472,33 +608,29 @@ def chat(
             raise AgentEndException(response_payload)
 
         if stage_end_called:
+            _clear_forced_tool_choice(barebone_model)
             tool_calls = []
             break
         
+        force_control_round = False
         if max_tool_calls and barebone_model._current_step >= max_tool_calls:
             LOG.debug("[TRACE] chat: Max tool calls reached")
-            is_last_stage = (total_stages > 0 and current_stage_index is not None 
-                           and current_stage_index == total_stages - 1)
-            has_stages = total_stages > 0
-            
-            if has_stages and not is_last_stage:
-                control_tool = "stage_end"
-                hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call stage_end to advance to the next stage."
-            else:
-                control_tool = "agent_end"
-                hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call agent_end with your final answer."
-            
-            msg_id = str(uuid.uuid4())
-            message_history["messages"][msg_id] = {
-                "message": hijack_message,
-                "tokens": 0,
-                "type": "system_directive",
-            }
-            
-            LOG.warning(f"Max tool calls ({max_tool_calls}) reached. Injected {control_tool} directive.")
-            hijacked = True
-            tool_calls = []
-            break
+            LOG.warning(f"Max tool calls ({max_tool_calls}) reached. Force-completing agent locally.")
+            _async = False  # clarity for logs/debugging
+            _force_complete_with_summary(
+                barebone_model=barebone_model,
+                message_history=message_history,
+                total_usage=total_usage,
+                logger=logger,
+                all_executed_tool_call_list=all_executed_tool_call_list,
+                content_before_tools=content_before_tools,
+                content=content,
+                reason=(
+                    f"Maximum tool call limit ({max_tool_calls}) reached at step "
+                    f"{barebone_model._current_step}."
+                ),
+                hijacked=True,
+            )
 
         repeated_warning_msg = ""
         if repeated_tool_names:
@@ -516,7 +648,7 @@ def chat(
         )
 
         rounds += 1
-        if rounds >= max_tool_rounds:
+        if rounds >= max_tool_rounds and not force_control_round:
             LOG.debug("[TRACE] chat: Max tool rounds reached")
             tool_calls = []
             break
@@ -584,6 +716,7 @@ def chat(
                 stage_end_called = True
 
         if agent_end_called:
+            _clear_forced_tool_choice(barebone_model)
             if logger:
                 cost_info = logger.compute_cost(barebone_model.model_id, total_usage)
                 logger.log_output(content, total_usage, cost_info, message_history)
@@ -608,6 +741,7 @@ def chat(
                 "", format_gemini_results
             )
         else:
+            _clear_forced_tool_choice(barebone_model)
             tool_calls = []
 
         tool_calls = []
@@ -743,10 +877,8 @@ async def async_chat(
                     repeated_tool_names_async.append(tool_name)
                     LOG.error(f"Tool '{tool_name}' has been called {recent_count} times with identical arguments. Agent may be stuck in a loop.")
 
-                    # Force termination after 5 identical calls
                     if recent_count >= 5:
                         LOG.error(f"Tool '{tool_name}' called {recent_count} times identically. Forcing agent termination with summarization.")
-
                         # async_summarise_message_history is already imported
                         # at the top of this module from IkaModel.summarization.
                         # See note in the sync path above.
@@ -774,19 +906,6 @@ async def async_chat(
                             "Auto-terminated and generated final response.\n\n"
                             f"{force_answer}"
                         )
-
-                        cost_info = logger.compute_cost(barebone_model.model_id, total_usage) if logger else None
-                        return {
-                            "content": force_content,
-                            "reasoning_content": None,
-                            "tool_calls": [],
-                            "executed_tool_calls": all_executed_tool_call_list,
-                            "content_before_tools": content_before_tools,
-                            "message_history": message_history,
-                            "usage": total_usage,
-                            "cost": cost_info,
-                            "hijacked": True,
-                        }
 
             repeated_warning_msg_async = ""
             if repeated_tool_names_async:
@@ -861,6 +980,7 @@ async def async_chat(
                     stage_end_called = True
 
             if agent_end_called:
+                _clear_forced_tool_choice(barebone_model)
                 if logger:
                     cost_info = logger.compute_cost(barebone_model.model_id, total_usage)
                     logger.log_output(content, total_usage, cost_info, message_history)
@@ -879,33 +999,29 @@ async def async_chat(
                 raise AgentEndException(response_payload)
 
             if stage_end_called:
+                _clear_forced_tool_choice(barebone_model)
                 tool_calls = []
                 break
             
+            force_control_round = False
             if max_tool_calls and barebone_model._current_step >= max_tool_calls:
                 LOG.debug("[TRACE] async_chat: Max tool calls reached")
-                is_last_stage = (total_stages > 0 and current_stage_index is not None 
-                               and current_stage_index == total_stages - 1)
-                has_stages = total_stages > 0
-                
-                if has_stages and not is_last_stage:
-                    control_tool = "stage_end"
-                    hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call stage_end to advance to the next stage."
-                else:
-                    control_tool = "agent_end"
-                    hijack_message = f"CRITICAL: Maximum tool call limit ({max_tool_calls}) reached at step {barebone_model._current_step}. You MUST call agent_end with your final answer."
-                
-                msg_id = str(uuid.uuid4())
-                message_history["messages"][msg_id] = {
-                    "message": hijack_message,
-                    "tokens": 0,
-                    "type": "system_directive",
-                }
-                
-                LOG.warning(f"Max tool calls ({max_tool_calls}) reached. Injected {control_tool} directive.")
-                hijacked = True
-                tool_calls = []
-                break
+                LOG.warning(f"Max tool calls ({max_tool_calls}) reached. Force-completing agent locally.")
+                await _async_force_complete_with_summary(
+                    barebone_model=barebone_model,
+                    message_history=message_history,
+                    total_usage=total_usage,
+                    logger=logger,
+                    all_executed_tool_call_list=all_executed_tool_call_list,
+                    content_before_tools=content_before_tools,
+                    content=content,
+                    reason=(
+                        f"Maximum tool call limit ({max_tool_calls}) reached at step "
+                        f"{barebone_model._current_step}."
+                    ),
+                    client=client,
+                    hijacked=True,
+                )
 
             LOG.debug("[TRACE] async_chat: Appending tool messages")
             append_provider_tool_messages(
@@ -915,7 +1031,7 @@ async def async_chat(
             )
 
             rounds += 1
-            if rounds >= max_tool_rounds:
+            if rounds >= max_tool_rounds and not force_control_round:
                 LOG.debug("[TRACE] async_chat: Max tool rounds reached")
                 tool_calls = []
                 break
@@ -984,6 +1100,7 @@ async def async_chat(
                     stage_end_called = True
 
             if agent_end_called:
+                _clear_forced_tool_choice(barebone_model)
                 if logger:
                     cost_info = logger.compute_cost(barebone_model.model_id, total_usage)
                     logger.log_output(content, total_usage, cost_info, message_history)
@@ -1008,6 +1125,7 @@ async def async_chat(
                     "", format_gemini_results
                 )
             else:
+                _clear_forced_tool_choice(barebone_model)
                 tool_calls = []
 
             tool_calls = []

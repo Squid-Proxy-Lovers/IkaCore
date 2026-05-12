@@ -33,6 +33,8 @@ def get_provider(model_id: str, api_url: Optional[str] = None, use_responses_api
         api_url_lower = api_url.lower()
         if "openrouter.ai" in api_url_lower:
             return "openrouter"
+        if "deepseek.com" in api_url_lower:
+            return "deepseek"
         if api_url_lower.rstrip("/").endswith("/v1/responses"):
             return "openai_responses"
         if api_url_lower.rstrip("/").endswith("/v1/chat/completions"):
@@ -41,8 +43,6 @@ def get_provider(model_id: str, api_url: Optional[str] = None, use_responses_api
             return "gemini"
         if "anthropic.com" in api_url_lower:
             return "anthropic"
-        if "deepseek.com" in api_url_lower:
-            return "deepseek"
         if "openai.com" in api_url_lower:
             return "openai_responses" if use_responses_api else "openai"
 

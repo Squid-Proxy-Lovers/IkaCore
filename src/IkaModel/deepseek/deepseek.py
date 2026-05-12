@@ -107,7 +107,9 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
     
     if model.agent_tools:
         tools = []
+        tool_names = set()
         for tool in model.agent_tools:
+            tool_names.add(tool.name)
             # Ensure we always have a valid JSON schema
             # tool.args.properties can be None, empty dict {}, or a dict with properties
             # For agent_end, always use type-based conversion to ensure correct parameters
@@ -207,18 +209,11 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
             })
         payload["tools"] = tools
         
-        model_id_lower = (model.model_id or "").lower()
-        is_reasoner = "reasoner" in model_id_lower
-
-        # NOTE: AgentTool.required means "this tool is expected to be used at
-        # some point during the run" — NOT "every API turn must emit a tool
-        # call". Mapping it to OpenAI tool_choice="required" or to a forced
-        # function pin traps the model in an infinite tool-call loop on
-        # providers that strictly honor tool_choice (e.g. DeepSeek V4), because
-        # the model can never emit a natural-language finish. Termination is
-        # already enforced by the agent loop (agent_end + max_tool_calls +
-        # repeat-call guard), so always let the provider choose freely.
-        if not is_reasoner:
-            payload["tool_choice"] = "auto"
+        # Do not send tool_choice to DeepSeek. The OpenAI-compatible API
+        # defaults to auto tool choice when tools are present, and some
+        # DeepSeek V4 routes reject even tool_choice="auto" with a legacy
+        # "deepseek-reasoner does not support this tool_choice" error.
+        # Termination is enforced by the agent loop, not by provider-level
+        # forced tool choice.
     
     return payload

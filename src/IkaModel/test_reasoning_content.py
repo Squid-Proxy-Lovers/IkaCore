@@ -365,16 +365,15 @@ def test_deepseek_reasoner_no_tool_choice():
     assert payload["thinking"]["type"] == "enabled"
 
 
-def test_deepseek_chat_has_tool_choice():
-    """Non-reasoner DeepSeek payloads should advertise tools with tool_choice="auto".
+def test_deepseek_v4_omits_tool_choice():
+    """DeepSeek V4 payloads should omit provider-level tool_choice.
 
-    We deliberately do NOT pin tool_choice to a specific function or set it to
-    "required" — DeepSeek V4 honors those strictly and the model gets stuck in
-    an infinite tool-call loop because it can never emit a natural-language
-    finish. Termination is enforced by the agent loop instead.
+    DeepSeek defaults to auto tool choice when tools are present. Some V4
+    routes reject even tool_choice="auto" with a legacy reasoner error, so
+    termination stays enforced by the agent loop instead.
     """
     model = Mock()
-    model.model_id = "deepseek-chat"
+    model.model_id = "deepseek-v4-pro"
     model.max_tokens = 4096
     model.temperature = 0.0
     model.deepthinking = False
@@ -396,7 +395,8 @@ def test_deepseek_chat_has_tool_choice():
 
     payload = deepseek_fill_payload(model, [], {})
 
-    assert payload.get("tool_choice") == "auto"
+    assert "tools" in payload
+    assert "tool_choice" not in payload
 
 
 def run_all_tests():
@@ -414,7 +414,7 @@ def run_all_tests():
         test_deepseek_multiple_messages_with_reasoning,
         test_deepseek_reasoner_model_id_variations,
         test_deepseek_reasoner_no_tool_choice,
-        test_deepseek_chat_has_tool_choice,
+        test_deepseek_v4_omits_tool_choice,
     ]
 
     passed = 0

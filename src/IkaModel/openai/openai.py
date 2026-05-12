@@ -111,7 +111,9 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
 
     if model.agent_tools:
         tools = []
+        tool_names = set()
         for tool in model.agent_tools:
+            tool_names.add(tool.name)
             parameters = None
             # Ensure we always have a valid JSON schema
             # tool.args.properties can be None, empty dict {}, or a dict with properties
@@ -230,13 +232,17 @@ def openai_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
             })
         payload["tools"] = tools
         
-        required_tools = [t for t in model.agent_tools if t.required]
-        if len(required_tools) == 1:
-            payload["tool_choice"] = {"type": "function", "function": {"name": required_tools[0].name}}
-        elif len(required_tools) > 1:
-            payload["tool_choice"] = "required"
+        forced_tool_name = getattr(model, "forced_tool_name", None)
+        if forced_tool_name and forced_tool_name in tool_names:
+            payload["tool_choice"] = {"type": "function", "function": {"name": forced_tool_name}}
         else:
-            payload["tool_choice"] = "auto"
+            required_tools = [t for t in model.agent_tools if t.required]
+            if len(required_tools) == 1:
+                payload["tool_choice"] = {"type": "function", "function": {"name": required_tools[0].name}}
+            elif len(required_tools) > 1:
+                payload["tool_choice"] = "required"
+            else:
+                payload["tool_choice"] = "auto"
         
         # Enable parallel tool calls if the model supports it
         if hasattr(model, 'parallel_tool_calls') and model.parallel_tool_calls:

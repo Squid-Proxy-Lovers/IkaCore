@@ -21,6 +21,7 @@ from IkaModel.chat_interface.chat_interface import (
     get_total_tokens,
     chat,
 )
+from IkaCore.logging_utils import IkaLogger
 from IkaModel.chat_helpers_common import (
     build_provider_request,
     parse_provider_response,
@@ -223,6 +224,30 @@ class TestApiResponseParsing:
         assert content == "Answer"
         assert reasoning == "Think step by step"
         assert tokens == 15
+
+
+class TestModelCostResolution:
+    def test_deepseek_v4_flash_has_pricing(self):
+        assert IkaLogger.get_model_cost("deepseek-v4-flash") == IkaLogger.get_model_cost("deepseek-chat")
+
+    def test_provider_prefixed_minimax_pricing(self):
+        assert IkaLogger.get_model_cost("minimax/minimax-m2.7") == (0.30, 0.30, 1.20)
+
+    def test_compute_cost_uses_cached_token_rate(self):
+        logger = IkaLogger(level=0)
+        cost = logger.compute_cost(
+            "deepseek-v4-flash",
+            {
+                "input_tokens": 1_000_000,
+                "input_cached_tokens": 250_000,
+                "output_tokens": 100_000,
+            },
+        )
+        assert cost == {
+            "input_cost": 0.217,
+            "output_cost": 0.042,
+            "total_cost": 0.259,
+        }
 
     def test_parse_gemini_usage(self):
         data = {

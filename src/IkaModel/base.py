@@ -166,6 +166,7 @@ class BareBoneModel:
         suppress_init_output: bool = False,
         reasoning_effort: Optional[str] = None,
         use_responses_api: bool = True,
+        force_control_tool_on_max_tool_calls: bool = True,
         ):
 
         # User MUST provide the following:
@@ -192,6 +193,8 @@ class BareBoneModel:
         self.agent_hierarchy = agent_hierarchy or []
         self.reasoning_effort = reasoning_effort
         self.use_responses_api = use_responses_api
+        self.force_control_tool_on_max_tool_calls = force_control_tool_on_max_tool_calls
+        self.forced_tool_name: Optional[str] = None
 
         # Display prompts using CLI output (unless suppressed)
         if not suppress_init_output:

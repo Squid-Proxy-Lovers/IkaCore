@@ -265,6 +265,15 @@ class IkaLogger:
             # ── DeepSeek (direct API) ──────────────────────────────────
             "deepseek-chat": (0.280, 0.028, 0.420),
             "deepseek-reasoner": (0.280, 0.028, 0.420),
+            # DeepSeek's explicit v4 ids currently replace the legacy
+            # deepseek-chat alias in this repo's configuration. Until we carry
+            # a separate published table here, price them identically instead
+            # of silently reporting $0.
+            "deepseek-v4": (0.280, 0.028, 0.420),
+            "deepseek-v4-flash": (0.280, 0.028, 0.420),
+            # As of May 11, 2026, DeepSeek lists a temporary discounted
+            # deepseek-v4-pro rate through May 31, 2026.
+            "deepseek-v4-pro": (0.435, 0.003625, 0.870),
             # ── Google ─────────────────────────────────────────────────
             "gemini-1.5-pro": (3.50, 3.50, 10.50),
             "gemini-2.0-flash": (0.10, 0.025, 0.40),
@@ -305,8 +314,15 @@ class IkaLogger:
         # Strip provider prefixes like "openai/gpt-5.4" — covers every
         # OpenRouter `<provider>/<model>` slug (kwaipilot/kat-coder-pro-v2,
         # qwen/qwen3.6-plus, z-ai/glm-5.1, deepseek/deepseek-v3.2, …).
+        alias_map = {
+            "deepseek": "deepseek-chat",
+            "deepseek-v4-thinking": "deepseek-reasoner",
+            "deepseek-v4-reasoner": "deepseek-reasoner",
+        }
         if "/" in mid:
             mid = mid.split("/", 1)[1]
+
+        mid = alias_map.get(mid, mid)
 
         result = cost_map.get(mid)
         if result:
@@ -333,6 +349,7 @@ class IkaLogger:
                 seen.add(c)
 
         for cand in normalized:
+            cand = alias_map.get(cand, cand)
             result = cost_map.get(cand)
             if result:
                 return result
