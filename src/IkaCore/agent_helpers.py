@@ -428,12 +428,30 @@ class AgentHelpersMixin:
         return stage_tools + subagent_tools + memory_tools
 
     def build_simple_tools(self)-> List[AgentTool]:
+        submit_tools = [
+            getattr(t, "name", "") for t in (self.tools or [])
+            if getattr(t, "name", "").startswith("submit_")
+        ]
+        if submit_tools:
+            agent_end_description = (
+                "Terminates the agent execution and returns the final answer to the "
+                "calling system. This tool is only valid after the task-specific "
+                f"structured submission tool has succeeded. Available structured "
+                f"submission tools in this task: {', '.join(submit_tools)}. If you "
+                "have not called the correct submit_* tool yet, do that before "
+                "agent_end. The final answer should be a short summary of the "
+                "structured submission."
+            )
+            agent_end_required = False
+        else:
+            agent_end_description = "Terminates the agent execution and returns the final answer to the user or calling system. This tool must be called when you have completed the task specified in your initial prompt. The final answer should be comprehensive, addressing all requirements from the original task. It should be based on your initial prompt and any context you have gathered throughout execution. This tool will immediately end the agent loop, so ensure your answer is complete before calling it. The tool can only be called once per execution."
+            agent_end_required = True
         agent_end_tool = AgentTool(
             id="agent_end",
             name="agent_end",
-            description="Terminates the agent execution and returns the final answer to the user or calling system. This tool must be called when you have completed the task specified in your initial prompt. The final answer should be comprehensive, addressing all requirements from the original task. It should be based on your initial prompt and any context you have gathered throughout execution. This tool will immediately end the agent loop, so ensure your answer is complete before calling it. The tool can only be called once per execution.",
+            description=agent_end_description,
             args=ToolArgs(type="input", description="Your complete final answer addressing the original task. This parameter is required and cannot be empty."),
-            required=True,
+            required=agent_end_required,
             limit_calls=1,
         )
         memory_tools = self._build_stage_memory_tools(self.memory_access)

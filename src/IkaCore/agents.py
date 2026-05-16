@@ -399,7 +399,22 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         cli.set_step(self.name, 1)
 
         first_msg = (self.message_history.get("first_input") or {}).get("message") or ""
-        start_prompt = (first_msg or self.prompt or "") + "\n\n" + AGENT_END_INSTRUCTION
+        submit_tools = [
+            getattr(t, "name", "") for t in (self.tools or [])
+            if getattr(t, "name", "").startswith("submit_")
+        ]
+        if submit_tools:
+            end_instruction = (
+                "CRITICAL: This task uses a structured submission tool. You MUST "
+                f"call the correct submit_* tool first ({', '.join(submit_tools)} "
+                "are available in this task). Only after that submit_* tool returns "
+                "success may you call agent_end with a short final summary.\n\n"
+                "DO NOT call agent_end before the structured submit_* tool. That is "
+                "a premature finish and fails the task."
+            )
+        else:
+            end_instruction = AGENT_END_INSTRUCTION
+        start_prompt = (first_msg or self.prompt or "") + "\n\n" + end_instruction
         barebone_model = self.get_barebone(
             system_prompt,
             dynamic_tools,

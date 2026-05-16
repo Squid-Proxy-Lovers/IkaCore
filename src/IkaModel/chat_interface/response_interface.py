@@ -350,7 +350,8 @@ def execute_tool_calls(
                 tool_name, tool_call_id = futures[future]
                 try:
                     # Guard against wrapper-level hangs as well.
-                    result = future.result(timeout=timeout + 5.0)
+                    wrapper_timeout = None if timeout is None else timeout + 5.0
+                    result = future.result(timeout=wrapper_timeout)
                     tool_call_id_to_result[tool_call_id] = result
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
                 except AgentEndException:
@@ -362,7 +363,8 @@ def execute_tool_calls(
                     break
                 except FutureTimeoutError:
                     future.cancel()
-                    error_msg = f"Parallel tool execution timed out after {timeout + 5.0}s for '{tool_name}'"
+                    timeout_label = "the configured timeout" if timeout is None else f"{timeout + 5.0}s"
+                    error_msg = f"Parallel tool execution timed out after {timeout_label} for '{tool_name}'"
                     LOG.warning(error_msg)
                     tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
                     tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
