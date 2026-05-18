@@ -31,6 +31,8 @@ def get_provider(model_id: str, api_url: Optional[str] = None, use_responses_api
     # PRIORITY 1: Check API URL if provided (most reliable)
     if api_url:
         api_url_lower = api_url.lower()
+        if "chatgpt.com/backend-api/codex" in api_url_lower:
+            return "codex"
         if "openrouter.ai" in api_url_lower:
             return "openrouter"
         if "deepseek.com" in api_url_lower:
@@ -54,6 +56,12 @@ def get_provider(model_id: str, api_url: Optional[str] = None, use_responses_api
     if "/" in model_id_lower:
         # OpenRouter models: "meta-llama/llama-3.1-70b-instruct", "google/gemini-pro"
         return "openrouter"
+
+    # Unambiguous codex slugs (suffix "-codex"). Bare gpt-5.x slugs overlap
+    # with the standard OpenAI Responses API and are NOT inferred as codex —
+    # callers must set api_url=CODEX_API_URL explicitly for those.
+    if model_id_lower.endswith("-codex"):
+        return "codex"
 
     # Then check for specific provider names in model_id
     if "deepseek" in model_id_lower:
@@ -150,6 +158,18 @@ def api_request_retry(
     wait_seconds: int = 10,
     timeout: float = 900.0
 ) -> httpx.Response:
+    # codex backend forces streaming (rejects stream:false). Dispatch into the
+    # codex client, which drains the SSE stream and returns a Response-shaped
+    # shim so callers continue to call .json() / .status_code as usual.
+    if api_url and "chatgpt.com/backend-api/codex" in api_url.lower():
+        from .codex.chat_helpers_codex import request_codex
+        return request_codex(
+            api_url, headers, payload,
+            timeout=timeout,
+            max_retries=max_retries,
+            wait_seconds=wait_seconds,
+        )
+
     last_exception = None
     debug_enabled = LOG.isEnabledFor(logging.DEBUG)
 
@@ -291,6 +311,15 @@ async def async_api_request_retry(
     timeout: float = 900.0,
     client: Optional[httpx.AsyncClient] = None
 ) -> httpx.Response:
+    # codex backend requires streaming — defer to the sync codex client via a
+    # threadpool. We don't have an async SSE collector yet; running the sync
+    # path off-loop avoids blocking the event loop in async callers.
+    if api_url and "chatgpt.com/backend-api/codex" in api_url.lower():
+        from .codex.chat_helpers_codex import request_codex
+        return await asyncio.to_thread(
+            request_codex, api_url, headers, payload, timeout, max_retries, wait_seconds
+        )
+
     last_exception = None
     should_close_client = client is None
     debug_enabled = LOG.isEnabledFor(logging.DEBUG)

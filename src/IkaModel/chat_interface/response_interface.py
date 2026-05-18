@@ -47,7 +47,7 @@ def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
         if not cached:
             cached = raw_usage.get("prompt_cache_hit_tokens", 0) or 0
         usage["input_cached_tokens"] = cached
-    elif provider == "openai_responses":
+    elif provider in ("openai_responses", "codex"):
         usage["input_tokens"] = raw_usage.get("input_tokens", 0)
         usage["output_tokens"] = raw_usage.get("output_tokens", 0)
         usage["total_tokens"] = raw_usage.get("total_tokens", usage["input_tokens"] + usage["output_tokens"])
@@ -397,7 +397,8 @@ def execute_tool_calls(
 
     if provider in ("deepseek", "openai", "openrouter"):
         formatted_messages = format_openai_results(tool_call_order, tool_results)
-    elif provider == "openai_responses":
+    elif provider in ("openai_responses", "codex"):
+        # codex speaks the Responses API shape — same role=tool with tool_call_id
         formatted_messages = format_openai_responses_results(tool_call_order, tool_results)
     elif provider == "anthropic":
         formatted_messages = format_anthropic_results(tool_call_order, tool_results)
@@ -585,7 +586,8 @@ async def async_execute_tool_calls(
 
     if provider in ("deepseek", "openai", "openrouter"):
         formatted_messages = format_openai_results(tool_call_order, tool_results)
-    elif provider == "openai_responses":
+    elif provider in ("openai_responses", "codex"):
+        # codex speaks the Responses API shape — same role=tool with tool_call_id
         formatted_messages = format_openai_responses_results(tool_call_order, tool_results)
     elif provider == "anthropic":
         formatted_messages = format_anthropic_results(tool_call_order, tool_results)

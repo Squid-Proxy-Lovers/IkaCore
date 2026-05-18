@@ -5,6 +5,7 @@ from typing import Dict, Optional, Tuple
 import httpx
 
 from .base import BareBoneModel
+from .codex_constants import CODEX_API_URL
 from .request_interface import get_provider, api_request_retry, async_api_request_retry
 
 _LOG = logging.getLogger(__name__)
@@ -59,10 +60,12 @@ def _get_prompts_for_kind(prompt_kind: str) -> Tuple[str, str]:
 
 
 def _normalize_provider_for_summary(provider: str) -> str:
-    """Normalize provider for summarization (which always uses Chat Completions).
+    """Normalize provider for summarization.
 
-    The Responses API provider is only relevant for the main agent loop;
-    summarization always uses a standard chat/completions call.
+    Historically summarization always used Chat Completions, so ``openai_responses``
+    was collapsed onto ``openai``. The codex backend has no Chat Completions
+    surface — it speaks Responses-only — so ``codex`` stays as itself and gets
+    its own payload/parse paths below.
     """
     if provider == "openai_responses":
         return "openai"
@@ -77,6 +80,8 @@ def get_summary_model(provider: str) -> tuple[Optional[str], Optional[str]]:
         "anthropic": ("claude-sonnet-4-20250514", "https://api.anthropic.com/v1/messages"),
         "gemini": ("gemini-flash-latest", "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"),
         "openrouter": ("openai/gpt-4o-mini", "https://openrouter.ai/api/v1/chat/completions"),
+        # codex backend only accepts codex slugs; gpt-5.4-mini is the cheapest.
+        "codex": ("gpt-5.4-mini", CODEX_API_URL),
     }
     result = models.get(provider.lower())
     return result if result is not None else (None, None)
@@ -153,6 +158,24 @@ def create_summary_payload(
                 "maxOutputTokens": 2000
             }
         }
+    elif provider == "codex":
+        # codex Responses endpoint: streaming-only, structured input list,
+        # no max_output_tokens (rejected with 400). The SSE collection
+        # happens inside request_codex via api_request_retry's dispatcher,
+        # so this payload looks like a normal Responses call.
+        headers["Authorization"] = f"Bearer {api_key}"
+        headers["Accept"] = "text/event-stream"
+        payload = {
+            "model": model_name,
+            "instructions": sys_prompt,
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": user_content}],
+            }],
+            "stream": True,
+            "store": False,
+        }
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
@@ -170,6 +193,15 @@ def parse_summary_response(provider: str, response: httpx.Response) -> str:
         return "".join(text_parts)
     elif provider == "gemini":
         return data["candidates"][0]["content"]["parts"][0]["text"]
+    elif provider == "codex":
+        # Responses-shaped payload: walk output[] for message items, glue output_text together.
+        parts = []
+        for item in data.get("output", []) or []:
+            if item.get("type") == "message":
+                for block in item.get("content", []) or []:
+                    if block.get("type") == "output_text":
+                        parts.append(block.get("text", ""))
+        return "".join(parts) or (data.get("output_text") or "")
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
@@ -206,8 +238,11 @@ def run_summarization(
     if use_same_model:
         model_name = barebone_model.model_id
         api_url = barebone_model.api_url
-        # openai_responses models need Chat Completions URL for summarization
-        if not api_url or "responses" in (api_url or ""):
+        # openai_responses models need Chat Completions URL for summarization.
+        # codex stays on its Responses-only URL — it has no chat/completions surface.
+        if not api_url:
+            api_url = "https://api.openai.com/v1/chat/completions"
+        elif "responses" in api_url and provider != "codex":
             api_url = "https://api.openai.com/v1/chat/completions"
     else:
         model_name, api_url = get_summary_model(provider)
@@ -240,6 +275,9 @@ def run_summarization(
         elif provider == "gemini":
             usage = data.get("usageMetadata", {})
             summary_tokens = usage.get("totalTokenCount", 0)
+        elif provider == "codex":
+            usage = data.get("usage", {})
+            summary_tokens = usage.get("total_tokens", (usage.get("input_tokens", 0) or 0) + (usage.get("output_tokens", 0) or 0))
 
         if write_to_history:
             message_history["summary"]["message"] = f"[SUMMARY]\n{summary}"
@@ -282,7 +320,12 @@ async def async_summarise_message_history(
     if use_same_model:
         model_name = barebone_model.model_id
         api_url = barebone_model.api_url
-        if not api_url or "responses" in (api_url or ""):
+        # codex stays on its Responses-only URL; everything else with /responses in
+        # the URL gets rewritten to Chat Completions because summarization for
+        # non-codex providers traditionally uses chat/completions.
+        if not api_url:
+            api_url = "https://api.openai.com/v1/chat/completions"
+        elif "responses" in api_url and provider != "codex":
             api_url = "https://api.openai.com/v1/chat/completions"
     else:
         model_name, api_url = get_summary_model(provider)
@@ -315,6 +358,9 @@ async def async_summarise_message_history(
         elif provider == "gemini":
             usage = data.get("usageMetadata", {})
             summary_tokens = usage.get("totalTokenCount", 0)
+        elif provider == "codex":
+            usage = data.get("usage", {})
+            summary_tokens = usage.get("total_tokens", (usage.get("input_tokens", 0) or 0) + (usage.get("output_tokens", 0) or 0))
 
         if write_to_history:
             message_history["summary"]["message"] = f"[SUMMARY]\n{summary}"

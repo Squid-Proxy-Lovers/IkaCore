@@ -28,6 +28,11 @@ from .openrouter.chat_helpers_openrouter import (
     parse_openrouter_response,
     append_openrouter_tool_messages,
 )
+from .codex.chat_helpers_codex import (
+    build_codex_request,
+    parse_codex_response,
+    append_codex_tool_messages,
+)
 
 
 def build_provider_request(
@@ -48,6 +53,8 @@ def build_provider_request(
         return build_gemini_request(barebone_model, messages, message_history)
     elif provider == "openrouter":
         return build_openrouter_request(barebone_model, messages, message_history)
+    elif provider == "codex":
+        return build_codex_request(barebone_model, messages, message_history)
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
@@ -69,6 +76,8 @@ def parse_provider_response(
         return parse_gemini_response(data, model_id)
     elif provider == "openrouter":
         return parse_openrouter_response(data, model_id)
+    elif provider == "codex":
+        return parse_codex_response(data, model_id)
     else:
         return "", None, [], 0
 
@@ -114,6 +123,11 @@ def append_provider_tool_messages(
         )
     elif provider == "openrouter":
         append_openrouter_tool_messages(
+            messages, message_history, content, reasoning_content,
+            executed_tool_call_list, tool_messages, tokens, repeated_warning_msg
+        )
+    elif provider == "codex":
+        append_codex_tool_messages(
             messages, message_history, content, reasoning_content,
             executed_tool_call_list, tool_messages, tokens, repeated_warning_msg
         )

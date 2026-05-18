@@ -109,7 +109,17 @@ class AgentHelpersMixin:
         if "/" in model_id_lower:
             return "https://openrouter.ai/api/v1/chat/completions"
 
-        # PRIORITY 2: Then check for provider-specific patterns
+        # PRIORITY 2: Unambiguous Codex model IDs (e.g. "gpt-5.3-codex",
+        # "gpt-5.2-codex"). These slugs only exist on the codex backend, so
+        # auto-routing them to CODEX_API_URL is safe. Bare gpt-5.x slugs
+        # (gpt-5.5, gpt-5.4, gpt-5.4-mini) overlap with the standard OpenAI
+        # Responses API and are NOT auto-routed — callers wanting codex with
+        # those models must pass api_url=CODEX_API_URL explicitly.
+        if model_id_lower.endswith("-codex"):
+            from IkaModel.codex_constants import CODEX_API_URL
+            return CODEX_API_URL
+
+        # PRIORITY 3: Then check for provider-specific patterns
         if "deepseek" in model_id_lower:
             return "https://api.deepseek.com/chat/completions"
         if "gpt" in model_id_lower or "o1" in model_id_lower or "o3" in model_id_lower:
