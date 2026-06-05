@@ -1,105 +1,15 @@
 import json
 from typing import Any, Dict, List, Optional
 
-
-def _build_parameters(tool) -> dict:
-    """Reuse the parameter-building logic from openai.py but standalone."""
-    parameters = None
-    if tool.name == "agent_end" and getattr(tool.args, "type", "") == "input":
-        parameters = {
-            "type": "object",
-            "properties": {
-                "input": {
-                    "type": "string",
-                    "description": getattr(tool.args, "description", None) or "Final response content. This is REQUIRED - provide your complete final answer here."
-                }
-            },
-            "required": ["input"]
-        }
-    elif getattr(tool.args, "type", "") == "input":
-        parameters = {
-            "type": "object",
-            "properties": {
-                "input": {
-                    "type": "string",
-                    "description": getattr(tool.args, "description", None) or f"Input for {tool.name}"
-                }
-            },
-            "required": ["input"]
-        }
-    elif tool.args.properties is not None and isinstance(tool.args.properties, dict):
-        if len(tool.args.properties) > 0:
-            if "type" in tool.args.properties and tool.args.properties["type"] == "object":
-                parameters = {
-                    "type": "object",
-                    "properties": tool.args.properties.get("properties", {}),
-                    "required": tool.args.properties.get("required", [])
-                }
-            elif "type" not in tool.args.properties:
-                required_list = list(tool.args.properties.get("__required__", []))
-                props = {k: v for k, v in tool.args.properties.items() if k != "__required__" and isinstance(v, dict)}
-                parameters = {
-                    "type": "object",
-                    "properties": props,
-                    "required": required_list
-                }
-            else:
-                parameters = tool.args.properties
-        else:
-            parameters = {"type": "object", "properties": {}, "required": []}
-    else:
-        arg_name = getattr(tool.args, "type", "string")
-        json_type = "string"
-        if arg_name in ["stage_index"]:
-            json_type = "integer"
-            parameters = {
-                "type": "object",
-                "properties": {
-                    arg_name: {
-                        "type": json_type,
-                        "description": getattr(tool.args, "description", None) or f"Parameter for {tool.name}"
-                    }
-                },
-                "required": []
-            }
-        elif arg_name == "input":
-            parameters = {
-                "type": "object",
-                "properties": {
-                    "input": {
-                        "type": "string",
-                        "description": getattr(tool.args, "description", None) or "Final response content."
-                    }
-                },
-                "required": ["input"]
-            }
-        elif arg_name == "object":
-            parameters = {"type": "object", "properties": {}, "required": []}
-        else:
-            parameters = {
-                "type": "object",
-                "properties": {
-                    arg_name: {
-                        "type": json_type,
-                        "description": getattr(tool.args, "description", None) or f"Parameter for {tool.name}"
-                    }
-                },
-                "required": []
-            }
-
-    if parameters is None or parameters.get("type") != "object":
-        parameters = {
-            "type": "object",
-            "properties": parameters.get("properties", {}) if isinstance(parameters, dict) else {},
-            "required": parameters.get("required", []) if isinstance(parameters, dict) else []
-        }
-    return parameters
+from ..model_metadata import supports_custom_temperature
+from ..tool_schema import build_provider_tool_payload
 
 
 def openai_responses_fill_payload(
     model,
     messages: List[Dict[str, Any]],
-    message_history: Optional[Dict[str, Any]] = None
+    message_history: Optional[Dict[str, Any]] = None,
+    agent_tools: Optional[list[Any]] = None,
 ) -> Dict[str, Any]:
     """Build a payload for the OpenAI Responses API (POST /v1/responses)."""
     message_history = message_history or {
@@ -230,39 +140,27 @@ def openai_responses_fill_payload(
     max_tokens_value = model.max_tokens if model.max_tokens and model.max_tokens > 0 else 4096
     payload["max_output_tokens"] = max_tokens_value
 
-    # Temperature (not supported for reasoning models)
-    is_reasoning_model = any(x in model.model_id.lower() for x in ["o1", "o3", "o4"])
-    is_gpt5_family = "gpt-5" in model.model_id.lower()
-    if not is_reasoning_model and not is_gpt5_family:
+    if supports_custom_temperature(model.model_id):
         payload["temperature"] = model.temperature
 
     # reasoning_effort
     if getattr(model, "reasoning_effort", None):
         payload["reasoning"] = {"effort": model.reasoning_effort}
 
+    agent_tools = model.agent_tools if agent_tools is None else agent_tools
+
     # Tools — flatter schema: no nested "function" key
-    if model.agent_tools:
-        tools = []
-        tool_names = set()
-        for tool in model.agent_tools:
-            tool_names.add(tool.name)
-            parameters = _build_parameters(tool)
-            tools.append({
-                "type": "function",
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": parameters
-            })
-        payload["tools"] = tools
+    if agent_tools:
+        tool_payload = build_provider_tool_payload("openai_responses", agent_tools)
+        payload["tools"] = tool_payload.tools
 
         forced_tool_name = getattr(model, "forced_tool_name", None)
-        if forced_tool_name and forced_tool_name in tool_names:
+        if forced_tool_name and forced_tool_name in tool_payload.names:
             payload["tool_choice"] = {"type": "function", "name": forced_tool_name}
         else:
-            required_tools = [t for t in model.agent_tools if t.required]
-            if len(required_tools) == 1:
-                payload["tool_choice"] = {"type": "function", "name": required_tools[0].name}
-            elif len(required_tools) > 1:
+            if len(tool_payload.required_names) == 1:
+                payload["tool_choice"] = {"type": "function", "name": tool_payload.required_names[0]}
+            elif len(tool_payload.required_names) > 1:
                 payload["tool_choice"] = "required"
             else:
                 payload["tool_choice"] = "auto"

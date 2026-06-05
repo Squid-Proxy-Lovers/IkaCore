@@ -2,8 +2,8 @@ import json
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..request_interface import agent_tools_for_payload
 from .deepseek import deepseek_fill_payload
-from ..request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
 
 
 def build_deepseek_request(
@@ -11,9 +11,12 @@ def build_deepseek_request(
     messages: List[dict],
     message_history: dict
 ) -> Tuple[str, Dict[str, str], dict]:
-    _apply_tools_filter_for_payload(barebone_model)
-    payload = deepseek_fill_payload(barebone_model, messages, message_history)
-    _restore_tools_after_payload(barebone_model)
+    payload = deepseek_fill_payload(
+        barebone_model,
+        messages,
+        message_history,
+        agent_tools=agent_tools_for_payload(barebone_model),
+    )
     
     api_url = barebone_model.api_url
     headers = {

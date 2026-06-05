@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Optional, Dict, Callable, Any
-from IkaMem import STMemory, LTMemory, LTMemItem  # type: ignore
+from typing import Any, Callable, Dict, Optional
+
+from IkaMem import LTMemItem, LTMemory, STMemory  # type: ignore
 
 
 class AgentMemoryMixin:
@@ -95,8 +96,8 @@ class AgentMemoryMixin:
             if filter_func:
                 try:
                     results = filter_func(results)
-                except Exception:
-                    pass
+                except Exception as e:
+                    return {"error": f"long-term memory filter failed: {str(e)}"}
             structured = []
             for result in results or []:
                 if hasattr(result, "task") and hasattr(result, "expected_output"):

@@ -1,22 +1,16 @@
 """
 Tests for IkaBaseAgent: init, validation, geturl, get_barebone, and API-facing tool/stage build.
 """
-import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
 
 mock_ika_mem = MagicMock()
 with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
     from IkaCore.agents import IkaBaseAgent
-from IkaCore.tools import IkaTools
 from IkaCore.stages import IkaStage
-from IkaModel.base import BareBoneModel, AgentTool, ToolArgs
+from IkaCore.tools import IkaTools
+from IkaModel.base import AgentTool, ToolArgs
 
 
 def _minimal_agent(**kwargs):

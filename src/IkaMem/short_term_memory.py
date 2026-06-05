@@ -1,9 +1,12 @@
+import logging
 import time
 from typing import Any, Optional
 
 from IkaMem.memory import Memory
 from IkaMem.memory_items import STMemItem
 from IkaMem.storage.mem0_storage import Mem0Store
+
+LOG = logging.getLogger(__name__)
 
 
 class STMemory(Memory):
@@ -61,10 +64,10 @@ class STMemory(Memory):
             super().save(value=item.data, metadata=item.metadata)
             
             elapsed = (time.time() - start_time) * 1000
-            print(f"[STMemory] saved in {elapsed:.2f}ms")
+            LOG.debug("short-term memory saved in %.2fms", elapsed)
             
-        except Exception as e:
-            print(f"[STMemory] save failed: {str(e)}")
+        except Exception:
+            LOG.exception("short-term memory save failed")
             raise
 
 
@@ -93,11 +96,10 @@ class STMemory(Memory):
             )
             
             elapsed = (time.time() - start_time) * 1000
-            print(f"[STMemory] search completed in {elapsed:.2f}ms, found {len(results)} results")
+            LOG.debug("short-term memory search completed in %.2fms, found %d results", elapsed, len(results))
             
             return list(results)
             
-        except Exception as e:
-            print(f"[STMemory] search failed: {str(e)}")
+        except Exception:
+            LOG.exception("short-term memory search failed")
             raise
-

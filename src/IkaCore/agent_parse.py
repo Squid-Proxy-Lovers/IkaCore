@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Optional, List, Tuple
+from typing import List, Optional, Tuple
 
 from IkaCore.stages import IkaStage
 
@@ -118,7 +118,10 @@ class AgentParseMixin:
                             and isinstance(parsed["functions"], list)
                             and len(parsed["functions"]) == 0
                         ):
-                            pass
+                            raise ValueError(
+                                f"agent_end was called with empty functions list: '{stripped_text}'. "
+                                "You MUST provide a meaningful final answer."
+                            )
                     elif isinstance(parsed, list) and len(parsed) == 0:
                         raise ValueError(
                             f"agent_end was called with empty JSON array: '{stripped_text}'. "
@@ -143,4 +146,3 @@ class AgentParseMixin:
         # target_stage can be an int or the literal string "next"; type ignore for that union here,
         # callers already handle both cases.
         return target_stage, agent_end_called, agent_end_text
-

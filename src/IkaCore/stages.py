@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Callable, Any
+from typing import Any, Callable, Dict, List, Optional
 
 from IkaCore.tools import IkaTools
 from IkaModel.base import AgentTool, ToolArgs

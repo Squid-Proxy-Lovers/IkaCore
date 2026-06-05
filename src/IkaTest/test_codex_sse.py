@@ -14,14 +14,8 @@ Covers:
     .status_code / .headers / .raise_for_status.
 """
 import json
-import sys
-from pathlib import Path
 
 import pytest
-
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
 
 from IkaModel.codex.chat_helpers_codex import (
     _CodexResponseShim,

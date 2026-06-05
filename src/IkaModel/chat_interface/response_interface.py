@@ -3,16 +3,20 @@ import inspect
 import json
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
-from typing import Any, Dict, List, Optional, Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from typing import Any, Callable, Dict, List, Optional
 
 from IkaCore.cli_output import get_cli_output
+
 from ..base import AgentEndException, HumanInputRequired
 
 LOG = logging.getLogger(__name__)
 
 _TOOL_EXECUTOR_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool-exec")
 _TOOL_EXECUTOR_LOCK = threading.Lock()
+UsageExtractorFn = Callable[[dict, dict], Dict[str, Any]]
+ToolResultFormatterFn = Callable[[List[dict], List[str]], List[dict]]
 
 
 def _ensure_tool_executor_pool() -> ThreadPoolExecutor:
@@ -32,42 +36,69 @@ def _reset_tool_executor_pool() -> ThreadPoolExecutor:
         _TOOL_EXECUTOR_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool-exec")
     return _TOOL_EXECUTOR_POOL
 
-def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
+def _empty_usage() -> Dict[str, Any]:
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "input_cached_tokens": 0}
-    raw_usage = data.get("usage", {}) or {}
-
-    if provider in ["deepseek", "openai", "openrouter"]:
-        usage["input_tokens"] = raw_usage.get("prompt_tokens", raw_usage.get("input_tokens", 0))
-        usage["output_tokens"] = raw_usage.get("completion_tokens", raw_usage.get("output_tokens", 0))
-        usage["total_tokens"] = raw_usage.get("total_tokens", usage["input_tokens"] + usage["output_tokens"])
-        # OpenAI: usage.prompt_tokens_details.cached_tokens
-        ptd = raw_usage.get("prompt_tokens_details") or {}
-        cached = ptd.get("cached_tokens", 0) or 0
-        # DeepSeek: usage.prompt_cache_hit_tokens
-        if not cached:
-            cached = raw_usage.get("prompt_cache_hit_tokens", 0) or 0
-        usage["input_cached_tokens"] = cached
-    elif provider in ("openai_responses", "codex"):
-        usage["input_tokens"] = raw_usage.get("input_tokens", 0)
-        usage["output_tokens"] = raw_usage.get("output_tokens", 0)
-        usage["total_tokens"] = raw_usage.get("total_tokens", usage["input_tokens"] + usage["output_tokens"])
-        # Responses API: usage.input_tokens_details.cached_tokens
-        itd = raw_usage.get("input_tokens_details") or {}
-        usage["input_cached_tokens"] = itd.get("cached_tokens", 0) or 0
-    elif provider == "anthropic":
-        usage["input_tokens"] = raw_usage.get("input_tokens", 0)
-        usage["output_tokens"] = raw_usage.get("output_tokens", 0)
-        usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
-    elif provider == "gemini":
-        meta = data.get("usageMetadata", {}) or raw_usage
-        usage["input_tokens"] = meta.get("promptTokenCount", 0)
-        usage["output_tokens"] = meta.get("candidatesTokenCount", meta.get("totalTokenCount", 0))
-        usage["total_tokens"] = meta.get("totalTokenCount", usage["input_tokens"] + usage["output_tokens"])
-        usage["input_cached_tokens"] = meta.get("cachedContentTokenCount", 0)
-    else:
-        usage["total_tokens"] = raw_usage.get("total_tokens", 0)
-
     return usage
+
+
+def _extract_chat_usage(raw_usage: dict, data: dict) -> Dict[str, Any]:
+    usage = _empty_usage()
+    usage["input_tokens"] = raw_usage.get("prompt_tokens", raw_usage.get("input_tokens", 0))
+    usage["output_tokens"] = raw_usage.get("completion_tokens", raw_usage.get("output_tokens", 0))
+    usage["total_tokens"] = raw_usage.get("total_tokens", usage["input_tokens"] + usage["output_tokens"])
+    ptd = raw_usage.get("prompt_tokens_details") or {}
+    cached = ptd.get("cached_tokens", 0) or raw_usage.get("prompt_cache_hit_tokens", 0) or 0
+    usage["input_cached_tokens"] = cached
+    return usage
+
+
+def _extract_responses_usage(raw_usage: dict, data: dict) -> Dict[str, Any]:
+    usage = _empty_usage()
+    usage["input_tokens"] = raw_usage.get("input_tokens", 0)
+    usage["output_tokens"] = raw_usage.get("output_tokens", 0)
+    usage["total_tokens"] = raw_usage.get("total_tokens", usage["input_tokens"] + usage["output_tokens"])
+    itd = raw_usage.get("input_tokens_details") or {}
+    usage["input_cached_tokens"] = itd.get("cached_tokens", 0) or 0
+    return usage
+
+
+def _extract_anthropic_usage(raw_usage: dict, data: dict) -> Dict[str, Any]:
+    usage = _empty_usage()
+    usage["input_tokens"] = raw_usage.get("input_tokens", 0)
+    usage["output_tokens"] = raw_usage.get("output_tokens", 0)
+    usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
+    return usage
+
+
+def _extract_gemini_usage(raw_usage: dict, data: dict) -> Dict[str, Any]:
+    usage = _empty_usage()
+    meta = data.get("usageMetadata", {}) or raw_usage
+    usage["input_tokens"] = meta.get("promptTokenCount", 0)
+    usage["output_tokens"] = meta.get("candidatesTokenCount", meta.get("totalTokenCount", 0))
+    usage["total_tokens"] = meta.get("totalTokenCount", usage["input_tokens"] + usage["output_tokens"])
+    usage["input_cached_tokens"] = meta.get("cachedContentTokenCount", 0)
+    return usage
+
+
+USAGE_EXTRACTORS: Dict[str, UsageExtractorFn] = {
+    "anthropic": _extract_anthropic_usage,
+    "codex": _extract_responses_usage,
+    "deepseek": _extract_chat_usage,
+    "gemini": _extract_gemini_usage,
+    "openai": _extract_chat_usage,
+    "openai_responses": _extract_responses_usage,
+    "openrouter": _extract_chat_usage,
+}
+
+
+def extract_usage(provider: str, data: dict) -> Dict[str, Any]:
+    raw_usage = data.get("usage", {}) or {}
+    extractor = USAGE_EXTRACTORS.get(provider)
+    if extractor is None:
+        usage = _empty_usage()
+        usage["total_tokens"] = raw_usage.get("total_tokens", 0)
+        return usage
+    return extractor(raw_usage, data)
 
 
 def validate_tool_args(tool_name: str, tool_args: dict, max_size: int = 10000, max_keys: int = 50) -> dict:
@@ -78,7 +109,7 @@ def validate_tool_args(tool_name: str, tool_args: dict, max_size: int = 10000, m
         raise ValueError(f"Tool '{tool_name}' arguments must be a JSON object, got {type(tool_args).__name__}")
 
     try:
-        serialized = json.dumps(tool_args)
+        json.dumps(tool_args)
     except TypeError as e:
         raise ValueError(f"Tool '{tool_name}' arguments must be JSON-serializable: {e}")
 
@@ -217,10 +248,7 @@ def format_gemini_results(tool_calls: List[dict], tool_results: List[str]) -> Li
     function_responses = []
     for i, tool_call in enumerate(tool_calls):
         tool_name = tool_call.get("name") or tool_call.get("function", {}).get("name", "")
-        try:
-            result_data = json.loads(tool_results[i]) if i < len(tool_results) else {"error": "No result"}
-        except Exception:
-            result_data = {"result": tool_results[i]} if i < len(tool_results) else {"error": "No result"}
+        result_data = _coerce_gemini_tool_result(tool_results[i] if i < len(tool_results) else None)
         if not isinstance(result_data, dict):
             result_data = {"result": result_data}
         function_responses.append({
@@ -230,6 +258,45 @@ def format_gemini_results(tool_calls: List[dict], tool_results: List[str]) -> Li
             }
         })
     return function_responses
+
+
+def _coerce_gemini_tool_result(result: Any) -> Any:
+    if result is None:
+        return {"error": "No result"}
+    if isinstance(result, dict):
+        return result
+    if not isinstance(result, str):
+        return result
+
+    stripped = result.strip()
+    if stripped == "{}":
+        return {}
+    if not stripped:
+        return {"result": result}
+    if stripped[0] not in "{[\"-0123456789tfn":
+        return {"result": result}
+    try:
+        return json.loads(stripped)
+    except Exception:
+        return {"result": result}
+
+
+TOOL_RESULT_FORMATTERS: Dict[str, ToolResultFormatterFn] = {
+    "anthropic": format_anthropic_results,
+    "codex": format_openai_responses_results,
+    "deepseek": format_openai_results,
+    "gemini": format_gemini_results,
+    "openai": format_openai_results,
+    "openai_responses": format_openai_responses_results,
+    "openrouter": format_openai_results,
+}
+
+
+def format_provider_tool_results(provider: str, tool_calls: List[dict], tool_results: List[str]) -> List[dict]:
+    formatter = TOOL_RESULT_FORMATTERS.get(provider)
+    if formatter is None:
+        return []
+    return formatter(tool_calls, tool_results)
 
 
 def _build_empty_args_error(tool_name: str, tool_metadata: dict, tool_executors: dict) -> Optional[str]:
@@ -260,6 +327,22 @@ def _build_empty_args_error(tool_name: str, tool_metadata: dict, tool_executors:
         "error": f"Tool '{tool_name}' was called with empty arguments {{}}. "
                  f"You MUST provide the required parameters. Expected schema:\n{schema_hint}"
     })
+
+
+def _handle_empty_required_args(
+    tool_name: str,
+    args: Any,
+    tool_metadata: dict,
+    tool_executors: Dict[str, Callable],
+    tool_call_counts: Dict[str, int],
+) -> Optional[str]:
+    if (not args or args == {}) and tool_name != "agent_end":
+        empty_err = _build_empty_args_error(tool_name, tool_metadata, tool_executors)
+        if empty_err:
+            LOG.warning(f"Empty args for tool '{tool_name}', returning schema hint")
+            tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+            return empty_err
+    return None
 
 
 def execute_tool_calls(
@@ -302,15 +385,12 @@ def execute_tool_calls(
             tool_call_id_to_result[tool_call_id] = error_msg
             continue
 
-        # Detect empty args when tool has required parameters — give the model
-        # a clear schema hint so it knows what to provide on retry.
-        if (not args or args == {}) and tool_name != "agent_end":
-            empty_err = _build_empty_args_error(tool_name, tool_metadata, tool_executors)
-            if empty_err:
-                LOG.warning(f"Empty args for tool '{tool_name}', returning schema hint")
-                tool_call_id_to_result[tool_call_id] = empty_err
-                tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
-                continue
+        empty_err = _handle_empty_required_args(
+            tool_name, args, tool_metadata, tool_executors, tool_call_counts
+        )
+        if empty_err:
+            tool_call_id_to_result[tool_call_id] = empty_err
+            continue
 
         tool_signature = (tool_name, json.dumps(args, sort_keys=True))
         if tool_signature in seen_tool_signatures:
@@ -395,17 +475,7 @@ def execute_tool_calls(
         tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
         tool_results.append(tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})))
 
-    if provider in ("deepseek", "openai", "openrouter"):
-        formatted_messages = format_openai_results(tool_call_order, tool_results)
-    elif provider in ("openai_responses", "codex"):
-        # codex speaks the Responses API shape — same role=tool with tool_call_id
-        formatted_messages = format_openai_responses_results(tool_call_order, tool_results)
-    elif provider == "anthropic":
-        formatted_messages = format_anthropic_results(tool_call_order, tool_results)
-    elif provider == "gemini":
-        formatted_messages = format_gemini_results(tool_call_order, tool_results)
-    else:
-        formatted_messages = []
+    formatted_messages = format_provider_tool_results(provider, tool_call_order, tool_results)
 
     return formatted_messages, tool_results, tool_call_counts, tool_call_order, interrupt_data
 
@@ -515,6 +585,13 @@ async def async_execute_tool_calls(
             tool_call_id_to_result[tool_call_id] = error_msg
             continue
 
+        empty_err = _handle_empty_required_args(
+            tool_name, args, tool_metadata, tool_executors, tool_call_counts
+        )
+        if empty_err:
+            tool_call_id_to_result[tool_call_id] = empty_err
+            continue
+
         tool_signature = (tool_name, json.dumps(args, sort_keys=True))
         if tool_signature in seen_tool_signatures:
             LOG.warning(f"Duplicate tool call detected: {tool_name} with same arguments. Skipping duplicate.")
@@ -584,16 +661,6 @@ async def async_execute_tool_calls(
         tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
         tool_results.append(tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})))
 
-    if provider in ("deepseek", "openai", "openrouter"):
-        formatted_messages = format_openai_results(tool_call_order, tool_results)
-    elif provider in ("openai_responses", "codex"):
-        # codex speaks the Responses API shape — same role=tool with tool_call_id
-        formatted_messages = format_openai_responses_results(tool_call_order, tool_results)
-    elif provider == "anthropic":
-        formatted_messages = format_anthropic_results(tool_call_order, tool_results)
-    elif provider == "gemini":
-        formatted_messages = format_gemini_results(tool_call_order, tool_results)
-    else:
-        formatted_messages = []
+    formatted_messages = format_provider_tool_results(provider, tool_call_order, tool_results)
 
     return formatted_messages, tool_results, tool_call_counts, tool_call_order, interrupt_data

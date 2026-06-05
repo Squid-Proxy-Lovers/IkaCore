@@ -1,13 +1,13 @@
 import atexit
 import json
 import queue
-import sys
 import threading
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from IkaCore.cli_output import _stdout_lock
+from IkaModel.model_metadata import resolve_model_cost
 
 # Type alias for queue items
 _WriteItem = Tuple[str, Union[str, Dict[str, Any]]]  # ("line", str) or ("json", dict)
@@ -23,33 +23,46 @@ class IkaLogger:
         self.show_usage_level0 = show_usage_level0
         self.log_input_enabled = log_input_enabled
 
-        # Queue-based async writer
-        self._queue: queue.Queue[Optional[_WriteItem]] = queue.Queue()
+        self._queue: Optional[queue.Queue[Optional[_WriteItem]]] = None
         self._shutdown = threading.Event()
+        self._writer_thread: Optional[threading.Thread] = None
+        self._atexit_registered = False
+
+        if self.level != 0:
+            self._ensure_writer()
+
+    def _ensure_writer(self) -> None:
+        if self._writer_thread is not None:
+            return
+        self._queue = queue.Queue()
+        self._shutdown.clear()
         self._writer_thread = threading.Thread(target=self._writer_loop, daemon=True, name="IkaLogger-Writer")
         self._writer_thread.start()
-
-        # Register shutdown handler to flush on exit
-        atexit.register(self.shutdown)
+        if not self._atexit_registered:
+            atexit.register(self.shutdown)
+            self._atexit_registered = True
 
     def _writer_loop(self) -> None:
+        q = self._queue
+        if q is None:
+            return
         while not self._shutdown.is_set():
             try:
-                item = self._queue.get(timeout=0.1)
+                item = q.get(timeout=0.1)
                 if item is None:  # Shutdown signal
                     break
                 self._process_item(item)
-                self._queue.task_done()
+                q.task_done()
             except queue.Empty:
                 continue
 
         # Drain remaining items on shutdown
         while True:
             try:
-                item = self._queue.get_nowait()
+                item = q.get_nowait()
                 if item is not None:
                     self._process_item(item)
-                self._queue.task_done()
+                q.task_done()
             except queue.Empty:
                 break
 
@@ -96,30 +109,42 @@ class IkaLogger:
         """Queue a line for writing (non-blocking). No-op when level is 0."""
         if self.level == 0:
             return
+        self._ensure_writer()
+        assert self._queue is not None
         self._queue.put(("line", line))
 
     def log_json(self, payload: Dict[str, Any]) -> None:
         """Queue a JSON payload for writing (non-blocking)."""
         if self.level != 2:
             return
+        self._ensure_writer()
+        assert self._queue is not None
         self._queue.put(("json", payload))
 
     def flush(self) -> None:
         """Block until all queued writes are complete."""
-        self._queue.join()
+        if self._queue is not None:
+            self._queue.join()
 
     def shutdown(self) -> None:
         """Gracefully shutdown the writer thread."""
+        if self._writer_thread is None:
+            return
         if self._shutdown.is_set():
             return
         self._shutdown.set()
-        self._queue.put(None)  # Signal writer to exit
+        if self._queue is not None:
+            self._queue.put(None)  # Signal writer to exit
         if self._writer_thread.is_alive() and self._writer_thread != threading.current_thread():
             self._writer_thread.join(timeout=1.0)
-        try:
-            atexit.unregister(self.shutdown)
-        except (AttributeError, ValueError):
-            pass
+        self._writer_thread = None
+        self._queue = None
+        if self._atexit_registered:
+            try:
+                atexit.unregister(self.shutdown)
+            except (AttributeError, ValueError):
+                pass
+            self._atexit_registered = False
 
     def __deepcopy__(self, memo: Dict[int, Any]) -> "IkaLogger":
         """Return self on deepcopy - all copies share the same writer thread."""
@@ -227,140 +252,9 @@ class IkaLogger:
             self.log_json({"event": "hitl_answer", "stage": stage_name, "user_text": user_text})
 
     @staticmethod
+    @lru_cache(maxsize=4096)
     def get_model_cost(model_id: str) -> Optional[tuple[float, float, float]]:
-        # Prices are (input_per_1M, cached_input_per_1M, output_per_1M) USD.
-        # Native provider slugs live first; OpenRouter `provider/model` slugs
-        # are ALSO accepted — the lookup normalizes the id below.
-        cost_map = {
-            # ── OpenAI ─────────────────────────────────────────────────
-            "gpt-4o": (2.50, 1.25, 10.00),
-            "gpt-4.1": (2.00, 0.50, 8.00),
-            "gpt-4.1-mini": (0.40, 0.10, 1.60),
-            "gpt-4.1-nano": (0.10, 0.025, 0.40),
-            "gpt-5": (2.50, 0.25, 20.00),
-            "gpt-5-mini": (0.45, 0.045, 3.60),
-            "gpt-5-nano": (0.10, 0.01, 0.40),
-            "gpt-5.2": (1.75, 0.175, 14.00),
-            "gpt-5.3-codex": (1.75, 0.175, 14.00),
-            "gpt-5.4": (2.50, 0.25, 15.00),
-            "gpt-5.4-mini": (0.75, 0.075, 4.50),
-            "gpt-5.4-nano": (0.20, 0.02, 1.25),
-            "gpt-5.4-pro": (30.00, 30.00, 180.00),
-            # ── Anthropic ──────────────────────────────────────────────
-            "claude-3-opus": (15.00, 1.50, 75.00),
-            "claude-3-sonnet": (3.00, 0.30, 15.00),
-            "claude-3-haiku": (0.250, 0.03, 1.250),
-            "claude-3-5-haiku": (0.80, 0.08, 4.00),
-            "claude-3-5-sonnet": (3.00, 0.30, 15.00),
-            "claude-3-7-sonnet": (3.00, 0.30, 15.00),
-            "claude-sonnet-4": (3.00, 0.30, 15.00),
-            "claude-sonnet-4-5": (3.00, 0.30, 15.00),
-            "claude-sonnet-4-6": (3.00, 0.30, 15.00),
-            "claude-opus-4": (15.00, 1.50, 75.00),
-            "claude-opus-4-1": (15.00, 1.50, 75.00),
-            "claude-opus-4-5": (5.00, 0.50, 25.00),
-            "claude-opus-4-6": (5.00, 0.50, 25.00),
-            "claude-haiku-4": (0.80, 0.08, 4.00),
-            "claude-haiku-4-5": (1.00, 0.10, 5.00),
-            # ── DeepSeek (direct API) ──────────────────────────────────
-            "deepseek-chat": (0.280, 0.028, 0.420),
-            "deepseek-reasoner": (0.280, 0.028, 0.420),
-            # DeepSeek's explicit v4 ids currently replace the legacy
-            # deepseek-chat alias in this repo's configuration. Until we carry
-            # a separate published table here, price them identically instead
-            # of silently reporting $0.
-            "deepseek-v4": (0.280, 0.028, 0.420),
-            "deepseek-v4-flash": (0.280, 0.028, 0.420),
-            # As of May 11, 2026, DeepSeek lists a temporary discounted
-            # deepseek-v4-pro rate through May 31, 2026.
-            "deepseek-v4-pro": (0.435, 0.003625, 0.870),
-            # ── Google ─────────────────────────────────────────────────
-            "gemini-1.5-pro": (3.50, 3.50, 10.50),
-            "gemini-2.0-flash": (0.10, 0.025, 0.40),
-            "gemini-2.5-flash-preview-05-20": (0.15, 0.0375, 0.60),
-            "gemini-3-flash": (0.50, 0.05, 3.00),
-            "gemini-3-flash-preview": (0.50, 0.05, 3.00),
-            "gemini-3-pro": (2.00, 0.20, 12.00),
-            "gemini-3.1-pro": (2.00, 0.20, 12.00),
-            "gemini-3.1-pro-preview": (2.00, 0.20, 12.00),
-            "gemini-3.1-pro-preview-customtools": (2.00, 0.20, 12.00),
-            # ── MiniMax (direct / Released Mar 18, 2026, 196k context) ─
-            "minimax-m2.7": (0.30, 0.30, 1.20),
-            # ── OpenRouter-only models ─────────────────────────────────
-            # Slug form `<provider>/<model>` strips to these bare names via
-            # the `/` split below. Cached rates default to 10% of input when
-            # the provider doesn't publish an explicit cache discount — the
-            # same convention Anthropic / OpenAI use.
-            "kat-coder-pro-v2":  (0.30, 0.03, 1.20),   # KwaiKAT / Kwaipilot
-            "qwen3.6-plus":      (0.50, 0.05, 3.00),
-            "qwen3.5-35b-a3b":   (0.30, 0.03, 1.50),   # estimated
-            "qwen3-coder":       (0.20, 0.02, 0.80),
-            "qwen3-coder-next":  (0.20, 0.02, 0.80),
-            "deepseek-v3.2":     (0.28, 0.028, 0.42),
-            "deepseek-v3.1":     (0.27, 0.027, 0.42),
-            "glm-5.1":           (1.40, 0.14, 4.40),   # Z.ai
-            "glm-5":             (1.40, 0.14, 4.40),
-            "glm-4.6":           (0.50, 0.05, 1.75),
-            "kimi-k2-5":         (0.60, 0.06, 3.00),   # Moonshot
-            "mimo-v2-pro":       (1.00, 0.10, 3.00),   # MiniMax
-            "minimax-m2.5":      (1.20, 0.12, 3.60),   # estimated
-            "nemotron-3":        (0.60, 0.06, 2.40),   # estimated
-            "gpt-oss-120b":      (0.30, 0.03, 1.00),
-        }
-        mid = (model_id or "").lower().strip()
-        if not mid:
-            return None
-
-        # Strip provider prefixes like "openai/gpt-5.4" — covers every
-        # OpenRouter `<provider>/<model>` slug (kwaipilot/kat-coder-pro-v2,
-        # qwen/qwen3.6-plus, z-ai/glm-5.1, deepseek/deepseek-v3.2, …).
-        alias_map = {
-            "deepseek": "deepseek-chat",
-            "deepseek-v4-thinking": "deepseek-reasoner",
-            "deepseek-v4-reasoner": "deepseek-reasoner",
-        }
-        if "/" in mid:
-            mid = mid.split("/", 1)[1]
-
-        mid = alias_map.get(mid, mid)
-
-        result = cost_map.get(mid)
-        if result:
-            return result
-
-        # Resolve provider-specific model IDs, for example:
-        # "anthropic.claude-sonnet-4-6", "us.anthropic.claude-opus-4-6-v1:0",
-        # "claude-opus-4-5@20251101", "deepseek-v3.2:thinking".
-        candidates = [mid]
-        if "anthropic." in mid:
-            candidates.append(mid.split("anthropic.", 1)[1])
-        if "." in mid:
-            candidates.append(mid.split(".")[-1])
-        for delim in ("@", ":"):
-            if delim in mid:
-                candidates.append(mid.split(delim, 1)[0])
-        # De-duplicate while preserving order.
-        seen = set()
-        normalized = []
-        for c in candidates:
-            c = c.strip()
-            if c and c not in seen:
-                normalized.append(c)
-                seen.add(c)
-
-        for cand in normalized:
-            cand = alias_map.get(cand, cand)
-            result = cost_map.get(cand)
-            if result:
-                return result
-
-        # Try prefix matching for versioned model IDs.
-        sorted_keys = sorted(cost_map.keys(), key=len, reverse=True)
-        for cand in normalized:
-            for key in sorted_keys:
-                if cand.startswith(key):
-                    return cost_map[key]
-        return None
+        return resolve_model_cost(model_id)
 
     def compute_cost(self, model_id: str, usage: Dict[str, Any]) -> Dict[str, float]:
         model_cost = self.get_model_cost(model_id)

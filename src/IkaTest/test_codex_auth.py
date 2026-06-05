@@ -18,20 +18,13 @@ user's real ~/.codex/auth.json.
 """
 import base64
 import json
-import os
-import sys
 import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
-
 from IkaModel.codex import auth as codex_auth
-
 
 # ----------------------------------------------------------------------
 # Helpers
@@ -175,7 +168,6 @@ class TestGetBearer:
         # On disk: still-expired token (what we read pre-lock)
         _write_auth_json(isolated_codex_home, exp_offset_sec=60)
         read_calls = {"n": 0}
-        real_seconds = codex_auth._seconds_until_expiry
 
         def fake_seconds(tok):
             # Pre-lock check: expired (force slow path).

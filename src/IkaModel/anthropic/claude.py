@@ -1,6 +1,9 @@
 import json
 from typing import Any, Dict, List, Optional
 
+from ..model_metadata import is_anthropic_haiku_model, supports_anthropic_parallel_tool_use
+from ..tool_schema import build_provider_tool_payload
+
 
 def _ensure_anthropic_assistant_content(msg: Dict[str, Any]) -> Dict[str, Any]:
     if msg.get("role") != "assistant":
@@ -15,7 +18,12 @@ def _ensure_anthropic_assistant_content(msg: Dict[str, Any]) -> Dict[str, Any]:
     return msg
 
 
-def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_history: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def anthropic_fill_payload(
+    model,
+    messages: List[Dict[str, Any]],
+    message_history: Optional[Dict[str, Any]] = None,
+    agent_tools: Optional[list[Any]] = None,
+) -> Dict[str, Any]:
     message_history = message_history or {
         "system": {"message": "", "tokens": 0},
         "first_input": {"message": "", "tokens": 0},
@@ -94,10 +102,7 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
     
     max_tokens_value = model.max_tokens if model.max_tokens and model.max_tokens > 0 else 4096
     
-    # Cap max_tokens for models with lower limits
-    model_id_lower = model.model_id.lower()
-    if "haiku" in model_id_lower:
-        # Claude Haiku has a max of 4096 tokens
+    if is_anthropic_haiku_model(model.model_id):
         if max_tokens_value > 4096:
             max_tokens_value = 4096
     
@@ -111,7 +116,7 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
     
     # Add parallel tool use prompt for Claude 4 models if enabled
     if hasattr(model, 'parallel_tool_calls') and model.parallel_tool_calls:
-        if "opus-4" in model_id_lower or "sonnet-4" in model_id_lower or "claude-4" in model_id_lower:
+        if supports_anthropic_parallel_tool_use(model.model_id):
             parallel_prompt = "\n\n<use_parallel_tool_calls>\nFor maximum efficiency, whenever you perform multiple independent operations, invoke all relevant tools simultaneously rather than sequentially. Prioritize calling tools in parallel whenever possible. For example, when reading 3 files, run 3 tool calls in parallel to read all 3 files into context at the same time. When running multiple read-only commands like `ls` or `list_dir`, always run all of the commands in parallel. Err on the side of maximizing parallel tool calls rather than running too many tools sequentially.\n</use_parallel_tool_calls>"
             current_system = payload.get("system", "")
             if parallel_prompt not in current_system:
@@ -120,77 +125,21 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
     if system_prompt:
         payload["system"] = system_prompt
     
-    if model.agent_tools:
-        tools = []
-        tool_names = set()
-        for tool in model.agent_tools:
-            tool_names.add(tool.name)
-            if tool.name == "agent_end" and tool.args.type == "input":
-                input_schema = {
-                    "type": "object",
-                    "properties": {
-                        "input": {
-                            "type": "string",
-                            "description": tool.args.description or "Final response content. This is REQUIRED - provide your complete final answer here."
-                        }
-                    },
-                    "required": ["input"]
-                }
-            elif tool.args.type == "input":
-                input_schema = {
-                    "type": "object",
-                    "properties": {
-                        "input": {
-                            "type": "string",
-                            "description": tool.args.description or f"Input for {tool.name}"
-                        }
-                    },
-                    "required": ["input"]
-                }
-            elif tool.args.properties and len(tool.args.properties) > 0:
-                required_list = list(tool.args.properties.get("__required__", []))
-                props = {k: v for k, v in tool.args.properties.items() if k != "__required__" and isinstance(v, dict)}
-                input_schema = {
-                    "type": "object",
-                    "properties": props,
-                    "required": required_list
-                }
-            else:
-                arg_name = tool.args.type
-                json_type = "string"
-                if arg_name in ["stage_index"]:
-                    json_type = "integer"
-                elif arg_name == "input":
-                    json_type = "string"
-                
-                input_schema = {
-                    "type": "object",
-                    "properties": {
-                        arg_name: {
-                            "type": json_type,
-                            "description": tool.args.description
-                        }
-                    },
-                    "required": []
-                }
+    agent_tools = model.agent_tools if agent_tools is None else agent_tools
 
-            tools.append({
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": input_schema
-            })
-        payload["tools"] = tools
+    if agent_tools:
+        tool_payload = build_provider_tool_payload("anthropic", agent_tools)
+        payload["tools"] = tool_payload.tools
 
         # Set tool_choice with optional parallel tool use control
         # disable_parallel_tool_use must be inside tool_choice, not at top level
         forced_tool_name = getattr(model, "forced_tool_name", None)
-        if forced_tool_name and forced_tool_name in tool_names:
+        if forced_tool_name and forced_tool_name in tool_payload.names:
             tool_choice = {"type": "tool", "name": forced_tool_name}
         else:
-            required_tools = [t for t in model.agent_tools if t.required]
-            if len(required_tools) == 1:
-                tool_choice = {"type": "tool", "name": required_tools[0].name}
-            elif len(required_tools) > 1:
+            if len(tool_payload.required_names) == 1:
+                tool_choice = {"type": "tool", "name": tool_payload.required_names[0]}
+            elif len(tool_payload.required_names) > 1:
                 tool_choice = {"type": "required"}
             else:
                 tool_choice = {"type": "auto"}
@@ -198,9 +147,8 @@ def anthropic_fill_payload(model, messages: List[Dict[str, Any]], message_histor
         # Disable parallel tool use if the model doesn't support it
         # Only available for Claude 4 models (opus-4, sonnet-4)
         # By default Claude allows parallel, so we disable it if parallel_tool_calls is False
-        model_id_lower = model.model_id.lower()
         if hasattr(model, 'parallel_tool_calls') and not model.parallel_tool_calls:
-            if "opus-4" in model_id_lower or "sonnet-4" in model_id_lower or "claude-4" in model_id_lower:
+            if supports_anthropic_parallel_tool_use(model.model_id):
                 if isinstance(tool_choice, dict) and tool_choice.get("type") in ["auto", "required"]:
                     tool_choice["disable_parallel_tool_use"] = True
 

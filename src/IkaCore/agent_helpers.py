@@ -1,22 +1,19 @@
 from __future__ import annotations
 
-import json
-import re
+import asyncio
 import time
 import typing
-from copy import deepcopy
+from copy import copy, deepcopy
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Optional, get_type_hints
-import asyncio
 
-from IkaCore.tools import IkaTools
-from IkaCore.stages import IkaStage
-from IkaCore.logging_utils import IkaLogger
 from IkaCore.checkpoint import CheckpointStore
-from IkaCore.cli_output import get_cli_output, OutputType
-from IkaCore.prompts import *
-
-from IkaModel.base import BareBoneModel, AgentTool, ToolArgs, AgentEndException, HumanInputRequired
-from IkaModel.chat_interface.chat_interface import chat, async_chat, summarise_message_history
+from IkaCore.cli_output import OutputType, get_cli_output
+from IkaCore.logging_utils import IkaLogger
+from IkaCore.stages import IkaStage
+from IkaCore.tools import IkaTools
+from IkaModel.base import AgentEndException, AgentTool, BareBoneModel, HumanInputRequired, ToolArgs
+from IkaModel.chat_interface.chat_interface import async_chat, chat, summarise_message_history
+from IkaModel.model_metadata import get_api_url_for_model
 
 if TYPE_CHECKING:
     from IkaCore.agents import IkaBaseAgent
@@ -102,36 +99,7 @@ class AgentHelpersMixin:
         IMPORTANT: Check for OpenRouter format (/) BEFORE checking provider names
         to handle cases like "google/gemini-3-flash-preview" on OpenRouter.
         """
-        model_id_lower = model_id.lower()
-
-        # PRIORITY 1: Check for OpenRouter format (has slash) FIRST
-        # This catches "google/gemini-pro", "anthropic/claude-sonnet", etc.
-        if "/" in model_id_lower:
-            return "https://openrouter.ai/api/v1/chat/completions"
-
-        # PRIORITY 2: Unambiguous Codex model IDs (e.g. "gpt-5.3-codex",
-        # "gpt-5.2-codex"). These slugs only exist on the codex backend, so
-        # auto-routing them to CODEX_API_URL is safe. Bare gpt-5.x slugs
-        # (gpt-5.5, gpt-5.4, gpt-5.4-mini) overlap with the standard OpenAI
-        # Responses API and are NOT auto-routed — callers wanting codex with
-        # those models must pass api_url=CODEX_API_URL explicitly.
-        if model_id_lower.endswith("-codex"):
-            from IkaModel.codex_constants import CODEX_API_URL
-            return CODEX_API_URL
-
-        # PRIORITY 3: Then check for provider-specific patterns
-        if "deepseek" in model_id_lower:
-            return "https://api.deepseek.com/chat/completions"
-        if "gpt" in model_id_lower or "o1" in model_id_lower or "o3" in model_id_lower:
-            return "https://api.openai.com/v1/responses" if use_responses_api else "https://api.openai.com/v1/chat/completions"
-        if "claude" in model_id_lower:
-            return "https://api.anthropic.com/v1/messages"
-        if "gemini" in model_id_lower:
-            # Only reached if no slash (direct Google API)
-            return f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent"
-
-        # Default to OpenAI-compatible
-        return "https://api.openai.com/v1/responses" if use_responses_api else "https://api.openai.com/v1/chat/completions"
+        return get_api_url_for_model(model_id, use_responses_api)
 
     def _validate_final_answer_checks(
         self,
@@ -179,6 +147,14 @@ class AgentHelpersMixin:
 
     def _reset_tool_call_counts(self):
         self._tool_call_counts = {}
+
+    def _get_chat_client(self) -> Optional[Any]:
+        if self.use_async:
+            return self.client
+        if self.client is None:
+            import httpx
+            self.client = httpx.Client(timeout=self.step_timeout)
+        return self.client
 
     def _enforce_rate_limit(self, per_minute: Optional[float], last_ts_attr: str) -> None:
         if not per_minute or per_minute <= 0:
@@ -239,6 +215,87 @@ class AgentHelpersMixin:
                 stage = self.Stages[stage_idx]
                 if "subagents" in wiring:
                     stage.subagents = wiring["subagents"]
+
+    @staticmethod
+    def _clone_stage_for_run(stage: IkaStage) -> IkaStage:
+        cloned = copy(stage)
+        cloned.tools = list(getattr(stage, "tools", []))
+        cloned.subagents = list(getattr(stage, "subagents", []))
+        cloned.allowed_back_to = list(getattr(stage, "allowed_back_to", []))
+        cloned.memory_access = deepcopy(getattr(stage, "memory_access", None))
+        return cloned
+
+    def clone_for_run(
+        self,
+        *,
+        name: Optional[str] = None,
+        prompt: Optional[str] = None,
+        include_history: bool = False,
+    ) -> "IkaBaseAgent":
+        checkpoint_db_path = (
+            getattr(self.checkpoint_store, "db_path", "checkpoints.db")
+            if self.checkpoint_store is not None
+            else "checkpoints.db"
+        )
+        clone = self.__class__(
+            name=name or self.name,
+            description=self.description,
+            prompt=self.prompt if prompt is None else prompt,
+            system_prompt=self.system_prompt,
+            start_prompt=self.start_prompt,
+            end_prompt=self.end_prompt,
+            tools=list(self.tools),
+            model_id=self.model_id,
+            api_key=self.api_key,
+            api_url=self.api_url,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            use_responses_api=getattr(self, "use_responses_api", True),
+            checkpoint=self.checkpoint,
+            Stages=[self._clone_stage_for_run(stage) for stage in self.Stages],
+            subagents=list(self.subagents),
+            next_agent=self.next_agent,
+            maxsteps=self.maxsteps,
+            step_timeout=self.step_timeout,
+            rate_limit_per_min=self.rate_limit_per_min,
+            per_tool_rate_limit=dict(self.per_tool_rate_limit),
+            memory=self.memory,
+            memory_access=deepcopy(self.memory_access),
+            final_answer_check=None,
+            logging_level=0,
+            logging_file=self.logging_file,
+            checkpoint_db_path=checkpoint_db_path,
+            summarize_final=self.summarize_final,
+            use_async=self.use_async,
+            max_tool_rounds=self.max_tool_rounds,
+            max_tool_calls=getattr(self, "max_tool_calls", None),
+            max_step_extensions=getattr(self, "max_step_extensions", 2),
+            extend_steps_by=getattr(self, "extend_steps_by", 3),
+            max_stage_extensions=getattr(self, "max_stage_extensions", 2),
+            extend_stage_steps_by=getattr(self, "extend_stage_steps_by", 3),
+            reasoning_effort=getattr(self, "reasoning_effort", None),
+        )
+        clone.logging_level = self.logging_level
+        clone.logger = self.logger
+        clone.final_answer_checks = list(self.final_answer_checks)
+        clone.message_history = (
+            deepcopy(self.message_history)
+            if include_history
+            else self._initial_message_history(clone.system_prompt)
+        )
+        clone.short_term_memory = self.short_term_memory
+        clone.long_term_memory = self.long_term_memory
+        clone.client = None
+        if hasattr(self, "context_budget"):
+            clone.context_budget = self.context_budget
+        if hasattr(self, "_base_prompt"):
+            clone._base_prompt = self._base_prompt
+        if hasattr(self, "_parent_hierarchy"):
+            clone._parent_hierarchy = list(getattr(self, "_parent_hierarchy", []))
+        for override_name in ("execution", "async_execution"):
+            if override_name in getattr(self, "__dict__", {}):
+                setattr(clone, override_name, getattr(self, override_name))
+        return clone
 
     def _save_stage_checkpoint(
         self,
@@ -385,24 +442,24 @@ class AgentHelpersMixin:
                 desc = "Search parameters for querying long-term memory"
                 tool_desc = "Searches long-term memory for task-output pairs relevant to a given query using semantic similarity. Searches across all permanently stored data from previous agent executions, not just the current session. Returns a list of matching task-output pairs sorted by relevance score, with the most relevant entries first. Use this tool when you need to recall information or results from past executions that might help with the current task. The tool will not search short-term memory or any external sources."
                 prop_desc = "The search query string to find relevant task-output pairs from past executions"
-                tools.append(
-                    AgentTool(
-                        id=search_key,
-                        name=search_key,
+            tools.append(
+                AgentTool(
+                    id=search_key,
+                    name=search_key,
                     description=tool_desc,
-                        args=ToolArgs(
-                            type="object",
-                            description=desc,
-                            properties={
-                                "query": {"type": "string", "description": prop_desc},
-                                "limit": {"type": "integer", "description": "Maximum number of results to return (default: 5)", "default": 5},
-                                "score_threshold": {"type": "number", "description": "Minimum similarity score from 0.0 to 1.0, where 1.0 is perfect match (default: 0.6)", "default": 0.6},
-                                "__required__": ["query"],
-                            },
-                        ),
-                        required=False,
-                    )
+                    args=ToolArgs(
+                        type="object",
+                        description=desc,
+                        properties={
+                            "query": {"type": "string", "description": prop_desc},
+                            "limit": {"type": "integer", "description": "Maximum number of results to return (default: 5)", "default": 5},
+                            "score_threshold": {"type": "number", "description": "Minimum similarity score from 0.0 to 1.0, where 1.0 is perfect match (default: 0.6)", "default": 0.6},
+                            "__required__": ["query"],
+                        },
+                    ),
+                    required=False,
                 )
+            )
         return tools
 
     def _build_stage_memory_tools(self, stage_memory_access: Dict[str, bool]) -> List[AgentTool]:
@@ -517,71 +574,6 @@ class AgentHelpersMixin:
         model._current_step = 0
         return model
 
-    def _extract_json_from_text(self, text: str) -> Optional[str]:
-        if not text or not text.strip():
-            return None
-        
-        stripped = text.strip()
-        
-        try:
-            json.loads(stripped)
-            return stripped
-        except Exception:
-            pass
-        
-        patterns = [
-            r'```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```',
-            r'(\{.*?\}|\[.*?\])',
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, stripped, re.DOTALL)
-            for match in matches:
-                try:
-                    json.loads(match)
-                    return match
-                except Exception:
-                    continue
-        
-        return None
-
-    def _get_end_text(self, args: Dict) -> str:
-        agent_end_text = args.get("input", "")
-        if agent_end_text and agent_end_text.strip() not in [".", ""]:
-            return agent_end_text
-
-        for value in args.values():
-            if isinstance(value, str):
-                stripped = value.strip()
-                if stripped.startswith("{") or stripped.startswith("["):
-                    return value
-                if len(stripped) > 10 and stripped != ".":
-                    return value
-            elif value and not isinstance(value, (dict, list)) and str(value).strip() not in [".", ""]:
-                return str(value)
-
-        return ""
-
-    def _validate_final(self, agent_end_text: str) -> str:
-        if not agent_end_text or agent_end_text.strip() in [".", ""]:
-            return (
-                "agent_end was called with empty or invalid arguments. "
-                "The agent MUST provide a final answer/output when calling agent_end. "
-                "Use the 'input' parameter to pass your response."
-            )
-        stripped_text = agent_end_text.strip()
-        if stripped_text in ["{}", "[]", "null", '""', "''"]:
-            return (
-                f"agent_end was called with invalid/empty content: '{stripped_text}'. "
-                "You MUST provide a meaningful final answer."
-            )
-        if len(stripped_text) < 3:
-            return (
-                f"agent_end was called with content that is too short: '{stripped_text}'. "
-                "You MUST provide a meaningful final answer."
-            )
-        return agent_end_text
-
     def _fallback_final_content(
         self,
         agent_end_text: Optional[str],
@@ -648,6 +640,7 @@ class AgentHelpersMixin:
                     tool_executors=tool_executors,
                     logger=logger,
                     timeout=timeout,
+                    client=client,
                     max_tool_rounds=max_tool_rounds,
                     max_tool_calls=max_tool_calls,
                     current_stage_index=current_stage_index,

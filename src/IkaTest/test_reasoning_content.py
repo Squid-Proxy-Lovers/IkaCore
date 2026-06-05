@@ -1,15 +1,9 @@
 """Test suite for reasoning_content support in DeepSeek models."""
 
-import sys
-from pathlib import Path
 from unittest.mock import Mock
 
-src_dir = Path(__file__).parent.parent
-if str(src_dir) not in sys.path:
-    sys.path.insert(0, str(src_dir))
-
-from IkaModel.deepseek.deepseek import deepseek_fill_payload
 from IkaModel.chat_interface.chat_interface import chat
+from IkaModel.deepseek.deepseek import deepseek_fill_payload
 
 
 def test_deepseek_reasoning_content_in_message_history():
@@ -118,8 +112,8 @@ def test_deepseek_thinking_disabled():
 
 
 def test_chat_interface_extracts_reasoning_content():
-    from unittest.mock import patch, MagicMock
-    import httpx
+    from unittest.mock import MagicMock, patch
+
     
     class MockBareBoneModel:
         def __init__(self):
@@ -161,7 +155,7 @@ def test_chat_interface_extracts_reasoning_content():
 
 
 def test_chat_interface_stores_reasoning_content_in_history():
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock, patch
     
     class MockBareBoneModel:
         def __init__(self):
@@ -197,7 +191,7 @@ def test_chat_interface_stores_reasoning_content_in_history():
     mock_response.raise_for_status = MagicMock()
     
     with patch('IkaModel.chat_interface.chat_interface.api_request_retry', return_value=mock_response):
-        response = chat(model, messages, message_history, timeout=1.0)
+        chat(model, messages, message_history, timeout=1.0)
         
         msg_ids = list(message_history["messages"].keys())
         assert len(msg_ids) > 0
@@ -207,7 +201,7 @@ def test_chat_interface_stores_reasoning_content_in_history():
 
 
 def test_chat_interface_returns_reasoning_content():
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock, patch
     
     class MockBareBoneModel:
         def __init__(self):

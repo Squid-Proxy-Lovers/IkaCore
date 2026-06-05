@@ -1,10 +1,10 @@
 import json
-import uuid
 import logging
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..request_interface import agent_tools_for_payload
 from .openrouter import openrouter_fill_payload
-from ..request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
 
 LOG = logging.getLogger(__name__)
 
@@ -15,17 +15,15 @@ def build_openrouter_request(
     message_history: dict
 ) -> Tuple[str, Dict[str, str], dict]:
     """Build OpenRouter API request (URL, headers, payload)."""
-    _apply_tools_filter_for_payload(barebone_model)
-
     # Extract OpenRouter-specific config if present
     plugins = getattr(barebone_model, 'openrouter_plugins', None)
     response_format = getattr(barebone_model, 'openrouter_response_format', None)
 
     payload = openrouter_fill_payload(
         barebone_model, messages, message_history,
-        plugins=plugins, response_format=response_format
+        plugins=plugins, response_format=response_format,
+        agent_tools=agent_tools_for_payload(barebone_model),
     )
-    _restore_tools_after_payload(barebone_model)
 
     # Build headers
     headers = {

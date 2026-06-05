@@ -3,8 +3,8 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..request_interface import agent_tools_for_payload
 from .google import gemini_fill_payload
-from ..request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
 
 LOG = logging.getLogger(__name__)
 
@@ -14,12 +14,18 @@ def build_gemini_request(
     messages: List[dict],
     message_history: dict
 ) -> Tuple[str, Dict[str, str], dict]:
-    _apply_tools_filter_for_payload(barebone_model)
-    payload = gemini_fill_payload(barebone_model, messages, message_history)
-    _restore_tools_after_payload(barebone_model)
+    payload = gemini_fill_payload(
+        barebone_model,
+        messages,
+        message_history,
+        agent_tools=agent_tools_for_payload(barebone_model),
+    )
     
-    api_url = f"{barebone_model.api_url}?key={barebone_model.api_key}"
-    headers = {"Content-Type": "application/json"}
+    api_url = barebone_model.api_url
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": barebone_model.api_key,
+    }
     
     return api_url, headers, payload
 

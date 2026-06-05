@@ -1,5 +1,6 @@
 from typing import Any, Optional
 
+
 class STMemItem:
     """short-term memory data container."""
     def __init__(

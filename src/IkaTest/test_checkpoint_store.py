@@ -1,5 +1,4 @@
 """Tests for the lightweight checkpoint persistence layer."""
-from pathlib import Path
 
 from IkaCore.checkpoint import CheckpointStore
 

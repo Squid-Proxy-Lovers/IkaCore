@@ -25,20 +25,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from ..openai.openai_responses import _build_parameters
-
-
-# Codex backend model slugs (per codex-rs/models-manager/models.json).
-# Adding new entries is harmless — the backend will reject unknowns with a
-# clear 400, but we surface a friendlier message client-side when we know.
-CODEX_KNOWN_MODELS = {
-    "gpt-5.5",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.3-codex",
-    "gpt-5.2",
-    "gpt-5.2-codex",
-}
+from ..model_metadata import CODEX_KNOWN_MODELS as CODEX_KNOWN_MODELS
+from ..tool_schema import build_provider_tool_payload
 
 
 def _wrap_user_content(content: Any) -> List[Dict[str, Any]]:
@@ -81,6 +69,7 @@ def codex_responses_fill_payload(
     model,
     messages: List[Dict[str, Any]],
     message_history: Optional[Dict[str, Any]] = None,
+    agent_tools: Optional[list[Any]] = None,
 ) -> Dict[str, Any]:
     """Build a request body for the codex Responses endpoint."""
     message_history = message_history or {
@@ -212,24 +201,12 @@ def codex_responses_fill_payload(
     if getattr(model, "reasoning_effort", None):
         payload["reasoning"] = {"effort": model.reasoning_effort}
 
+    agent_tools = model.agent_tools if agent_tools is None else agent_tools
+
     # Tools.
-    if getattr(model, "agent_tools", None):
-        tools = []
-        tool_names = set()
-        for tool in model.agent_tools:
-            tool_names.add(tool.name)
-            parameters = _build_parameters(tool)
-            # Ensure additionalProperties: false at object roots so callers that
-            # opt into strict mode later don't trip the codex backend.
-            if isinstance(parameters, dict) and parameters.get("type") == "object":
-                parameters.setdefault("additionalProperties", False)
-            tools.append({
-                "type": "function",
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": parameters,
-            })
-        payload["tools"] = tools
+    if agent_tools:
+        tool_payload = build_provider_tool_payload("codex", agent_tools)
+        payload["tools"] = tool_payload.tools
 
         # Control tools (agent_end / stage_end / change_stage) are registered
         # by IkaBaseAgent with required=True so the loop knows they exist. If
@@ -240,11 +217,11 @@ def codex_responses_fill_payload(
         _CONTROL_TOOLS = {"agent_end", "stage_end", "change_stage"}
 
         forced_tool_name = getattr(model, "forced_tool_name", None)
-        if forced_tool_name and forced_tool_name in tool_names:
+        if forced_tool_name and forced_tool_name in tool_payload.names:
             payload["tool_choice"] = {"type": "function", "name": forced_tool_name}
         else:
             required_tools = [
-                t for t in model.agent_tools
+                t for t in agent_tools
                 if getattr(t, "required", False) and t.name not in _CONTROL_TOOLS
             ]
             if len(required_tools) == 1:

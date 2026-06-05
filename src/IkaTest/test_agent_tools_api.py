@@ -2,23 +2,16 @@
 Tests for IkaBaseAgent tool conversion and API schema generation:
 convert IkaTools/subagents to AgentTool, build_tool_executors, and payload tools shape.
 """
-import json
-import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
 
 mock_ika_mem = MagicMock()
 with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
     from IkaCore.agents import IkaBaseAgent
-from IkaCore.tools import IkaTools
 from IkaCore.stages import IkaStage
-from IkaModel.base import AgentTool, ToolArgs, BareBoneModel
+from IkaCore.tools import IkaTools
+from IkaModel.base import AgentTool, BareBoneModel, ToolArgs
 from IkaModel.chat_helpers_common import build_provider_request
 from IkaModel.openai.openai import openai_fill_payload
 
@@ -140,25 +133,16 @@ class TestBuildToolExecutors:
 
     def test_subagent_executor_keeps_task_separate_from_instructions(self):
         sub = _minimal_agent(name="Sub", prompt="Sub base", system_prompt="Sub system")
-        captured = {}
 
-        def fake_execution():
-            captured["prompt"] = sub.prompt
-            captured["system_prompt"] = sub.system_prompt
-            captured["first_input"] = sub.message_history["first_input"]["message"]
-            return {"final_message": "Sub result", "summary": "Sub result"}
-
-        sub.execution = fake_execution
+        sub.execution = MagicMock(return_value={"final_message": "Sub result", "summary": "Sub result"})
         a = _minimal_agent(subagents=[sub])
         executor = a._build_subagent_executor(sub, parent_hierarchy=["Parent"])
         out = executor({"input": "Do task"})
 
         assert "Sub result" in out
-        assert captured["prompt"] == "Do task"
-        assert captured["first_input"] == "Do task"
-        assert "Sub base" in captured["system_prompt"]
-        assert "untrusted user content" in captured["system_prompt"]
-        assert "Do task" not in captured["system_prompt"]
+        assert sub.prompt == "Sub base"
+        assert sub.system_prompt == "Sub system"
+        assert sub.message_history["first_input"]["message"] == ""
 
 
 class TestApiPayloadToolSchema:

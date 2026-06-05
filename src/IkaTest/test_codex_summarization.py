@@ -11,16 +11,9 @@ Covers:
   - run_summarization with codex provider does NOT rewrite codex URL to
     api.openai.com/v1/chat/completions (the old silent-URL-rewrite bug).
 """
-import json
-import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
 
 from IkaModel.base import BareBoneModel
 from IkaModel.codex import CODEX_API_URL
@@ -31,7 +24,6 @@ from IkaModel.summarization import (
     parse_summary_response,
     run_summarization,
 )
-
 
 # ----------------------------------------------------------------------
 # Provider normalization

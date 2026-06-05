@@ -1,8 +1,15 @@
 import json
 from typing import Any, Dict, List, Optional
 
+from ..tool_schema import build_provider_tool_payload
 
-def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+
+def gemini_fill_payload(
+    model,
+    messages: List[Dict[str, Any]],
+    message_history: Optional[Dict[str, Any]] = None,
+    agent_tools: Optional[list[Any]] = None,
+) -> Dict[str, Any]:
     message_history = message_history or {
         "system": {"message": "", "tokens": 0},
         "first_input": {"message": "", "tokens": 0},
@@ -78,85 +85,13 @@ def gemini_fill_payload(model, messages: List[Dict[str, Any]], message_history: 
             "parts": [{"text": system_instruction}]
         }
 
-    if model.agent_tools:
-        function_declarations = []
-        tool_names = set()
-        for tool in model.agent_tools:
-            tool_names.add(tool.name)
-            # For agent_end and subagent tools with type="input", always use input parameter
-            if tool.name == "agent_end" and tool.args.type == "input":
-                parameters = {
-                    "type": "object",
-                    "properties": {
-                        "input": {
-                            "type": "string",
-                            "description": tool.args.description or "Final response content. This is REQUIRED - provide your complete final answer here."
-                        }
-                    },
-                    "required": ["input"]
-                }
-            elif tool.args.type == "input":
-                parameters = {
-                    "type": "object",
-                    "properties": {
-                        "input": {
-                            "type": "string",
-                            "description": tool.args.description or f"Input for {tool.name}"
-                        }
-                    },
-                    "required": ["input"]
-                }
-            # Handle tools with explicit properties
-            elif tool.args.properties and len(tool.args.properties) > 0:
-                required_list = list(tool.args.properties.get("__required__", []))
-                properties = {}
-                for prop_name, prop_def in tool.args.properties.items():
-                    if prop_name == "__required__":
-                        continue
-                    prop_schema = {
-                        "type": prop_def.get("type", "string"),
-                        "description": prop_def.get("description", "")
-                    }
-                    if "items" in prop_def:
-                        prop_schema["items"] = prop_def["items"]
-                    if "enum" in prop_def:
-                        prop_schema["enum"] = prop_def["enum"]
-                    if "properties" in prop_def:
-                        prop_schema["properties"] = prop_def["properties"]
-                    properties[prop_name] = prop_schema
-                parameters = {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required_list
-                }
-            else:
-                # Simple single-argument tool
-                arg_name = tool.args.type
-                json_type = "string"
-                if arg_name in ["stage_index"]:
-                    json_type = "integer"
-                elif arg_name == "input":
-                    json_type = "string"
-                parameters = {
-                    "type": "object",
-                    "properties": {
-                        arg_name: {
-                            "type": json_type,
-                            "description": tool.args.description
-                        }
-                    },
-                    "required": []
-                }
+    agent_tools = model.agent_tools if agent_tools is None else agent_tools
 
-            function_declarations.append({
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": parameters
-            })
-
-        payload["tools"] = [{"functionDeclarations": function_declarations}]
+    if agent_tools:
+        tool_payload = build_provider_tool_payload("gemini", agent_tools)
+        payload["tools"] = [{"functionDeclarations": tool_payload.tools}]
         forced_tool_name = getattr(model, "forced_tool_name", None)
-        if forced_tool_name and forced_tool_name in tool_names:
+        if forced_tool_name and forced_tool_name in tool_payload.names:
             payload["toolConfig"] = {
                 "functionCallingConfig": {
                     "mode": "ANY",

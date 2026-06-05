@@ -2,9 +2,9 @@ import json
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..request_interface import agent_tools_for_payload
 from .openai import openai_fill_payload
 from .openai_responses import openai_responses_fill_payload
-from ..request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
 
 
 def build_openai_request(
@@ -12,9 +12,12 @@ def build_openai_request(
     messages: List[dict],
     message_history: dict
 ) -> Tuple[str, Dict[str, str], dict]:
-    _apply_tools_filter_for_payload(barebone_model)
-    payload = openai_fill_payload(barebone_model, messages, message_history)
-    _restore_tools_after_payload(barebone_model)
+    payload = openai_fill_payload(
+        barebone_model,
+        messages,
+        message_history,
+        agent_tools=agent_tools_for_payload(barebone_model),
+    )
     
     api_url = barebone_model.api_url
     headers = {
@@ -84,9 +87,12 @@ def build_openai_responses_request(
     message_history: dict
 ) -> Tuple[str, Dict[str, str], dict]:
     """Build a request for the OpenAI Responses API endpoint."""
-    _apply_tools_filter_for_payload(barebone_model)
-    payload = openai_responses_fill_payload(barebone_model, messages, message_history)
-    _restore_tools_after_payload(barebone_model)
+    payload = openai_responses_fill_payload(
+        barebone_model,
+        messages,
+        message_history,
+        agent_tools=agent_tools_for_payload(barebone_model),
+    )
 
     # Derive the responses endpoint from the model's api_url.
     # If the caller already set /v1/responses we keep it; otherwise we substitute.

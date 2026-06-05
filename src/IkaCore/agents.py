@@ -3,23 +3,19 @@ import uuid
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
-from IkaCore.tools import IkaTools
-from IkaCore.stages import IkaStage
-from IkaCore.logging_utils import IkaLogger
-from IkaCore.checkpoint import CheckpointStore
-from IkaCore.cli_output import get_cli_output
-from IkaCore.prompts import *
-from IkaMem import STMemory, LTMemory  # type: ignore
-
-from IkaModel.base import *
-
-
-from IkaModel.chat_interface.chat_interface import run_summarization, summarise_message_history
-
-from IkaCore.agent_memory import AgentMemoryMixin
-from IkaCore.agent_tools import AgentToolsMixin
 from IkaCore.agent_execution import AgentExecutionMixin
 from IkaCore.agent_helpers import AgentHelpersMixin
+from IkaCore.agent_memory import AgentMemoryMixin
+from IkaCore.agent_tools import AgentToolsMixin
+from IkaCore.checkpoint import CheckpointStore
+from IkaCore.cli_output import get_cli_output
+from IkaCore.logging_utils import IkaLogger
+from IkaCore.prompts import AGENT_END_INSTRUCTION, HITL_INSTRUCTION, STAGE_MOVEMENT_INSTRUCTION
+from IkaCore.stages import IkaStage
+from IkaCore.tools import IkaTools
+from IkaMem import LTMemory, STMemory  # type: ignore
+from IkaModel.base import AgentEndException, get_global_long_term_memory
+from IkaModel.chat_interface.chat_interface import run_summarization, summarise_message_history
 
 
 class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, AgentHelpersMixin):
@@ -137,6 +133,17 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         self.extend_stage_steps_by = extend_stage_steps_by
 
     def shutdown(self) -> None:
+        client = getattr(self, "client", None)
+        if client is not None:
+            self.client = None
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+            else:
+                aclose = getattr(client, "aclose", None)
+                if callable(aclose):
+                    import asyncio
+                    asyncio.run(aclose())
         if self.logger:
             self.logger.shutdown()
 
@@ -264,7 +271,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     max_tool_calls=self.max_tool_calls,
                     current_stage_index=stage_index,
                     total_stages=len(self.Stages) if self.Stages else 0,
-                    client=self.client,
+                    client=self._get_chat_client(),
                 )
             except AgentEndException as exc:
                 if self.logger:
@@ -459,7 +466,7 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     max_tool_calls=self.max_tool_calls,
                     current_stage_index=None,
                     total_stages=0,
-                    client=self.client,
+                    client=self._get_chat_client(),
                 )
             except AgentEndException as exc:
                 if self.logger:
@@ -473,17 +480,8 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
             tool_calls = response.get("tool_calls", []) or []
             executed_tool_calls = response.get("executed_tool_calls", []) or []
 
-            if response.get("hijacked"):
-                pass
-
             if hasattr(barebone_model, '_tool_call_counts'):
                 self._tool_call_counts.update(barebone_model._tool_call_counts)
-
-            if self.logger:
-                self.logger.log_action(f"DEBUG run_simple: step={step_num} tools={len(tool_calls)} exec={len(executed_tool_calls)} content='{last_content}'")
-                if executed_tool_calls:
-                     names = [tc.get('function', {}).get('name') or tc.get('name') for tc in executed_tool_calls]
-                     self.logger.log_action(f"DEBUG run_simple: executed tool names: {names}")
 
             # Safety break for infinite loop
             if not tool_calls and not last_content and not executed_tool_calls and step_num > 0:
@@ -498,9 +496,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                     response_content=content_before_tools,
                 )
                 
-                if self.logger and agent_end_called:
-                    self.logger.log_action(f"DEBUG run_simple: agent_end detected with text: {agent_end_text}")
-
                 if agent_end_called and agent_end_text:
                     last_agent_end_text = agent_end_text
             except ValueError as e:

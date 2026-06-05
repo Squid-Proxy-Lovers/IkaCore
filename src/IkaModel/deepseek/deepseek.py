@@ -1,8 +1,15 @@
 import json
 from typing import Any, Dict, List, Optional
 
+from ..tool_schema import build_provider_tool_payload
 
-def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+
+def deepseek_fill_payload(
+    model,
+    messages: List[Dict[str, Any]],
+    message_history: Optional[Dict[str, Any]] = None,
+    agent_tools: Optional[list[Any]] = None,
+) -> Dict[str, Any]:
     message_history = message_history or {
         "system": {"message": "", "tokens": 0},
         "first_input": {"message": "", "tokens": 0},
@@ -105,109 +112,10 @@ def deepseek_fill_payload(model, messages: List[Dict[str, Any]], message_history
     else:
         payload["thinking"] = {"type": "disabled"}
     
-    if model.agent_tools:
-        tools = []
-        tool_names = set()
-        for tool in model.agent_tools:
-            tool_names.add(tool.name)
-            # Ensure we always have a valid JSON schema
-            # tool.args.properties can be None, empty dict {}, or a dict with properties
-            # For agent_end, always use type-based conversion to ensure correct parameters
-            if tool.name == "agent_end" and tool.args.type == "input":
-                parameters = {
-                    "type": "object",
-                    "properties": {
-                        "input": {
-                            "type": "string",
-                            "description": tool.args.description or "Final response content. This is REQUIRED - provide your complete final answer here."
-                        }
-                    },
-                    "required": ["input"]
-                }
-            elif tool.args.type == "input":
-                parameters = {
-                    "type": "object",
-                    "properties": {
-                        "input": {
-                            "type": "string",
-                            "description": tool.args.description or f"Input for {tool.name}"
-                        }
-                    },
-                    "required": ["input"]
-                }
-            elif tool.args.properties is not None and isinstance(tool.args.properties, dict):
-                if len(tool.args.properties) > 0:
-                    # Non-empty properties dict - use it but ensure proper structure
-                    if "type" in tool.args.properties and tool.args.properties["type"] == "object":
-                        # Already has type: object, use as-is but ensure properties key exists
-                        required_list = tool.args.properties.get("required", [])
-                        parameters = {
-                            "type": "object",
-                            "properties": tool.args.properties.get("properties", {}),
-                            "required": required_list
-                        }
-                    elif "type" not in tool.args.properties:
-                        required_list = list(tool.args.properties.get("__required__", []))
-                        props = {k: v for k, v in tool.args.properties.items() if k != "__required__" and isinstance(v, dict)}
-                        parameters = {
-                            "type": "object",
-                            "properties": props,
-                            "required": required_list
-                        }
-                    else:
-                        # Has type but might not be object, use as-is
-                        parameters = tool.args.properties
-                else:
-                    # Empty properties dict {} - create valid empty schema
-                    parameters = {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
-            else:
-                # No properties or properties is None - create schema from tool.args.type
-                arg_name = tool.args.type
-                json_type = "string"
-                if arg_name in ["stage_index"]:
-                    json_type = "integer"
-                elif arg_name == "input":
-                    json_type = "string"
+    agent_tools = model.agent_tools if agent_tools is None else agent_tools
 
-                if arg_name == "object":
-                    parameters = {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
-                else:
-                    parameters = {
-                        "type": "object",
-                        "properties": {
-                            arg_name: {
-                                "type": json_type,
-                                "description": tool.args.description or f"Parameter for {tool.name}"
-                            }
-                        },
-                        "required": []
-                    }
-
-            # Ensure parameters is never None and always has type: object
-            if parameters is None or parameters.get("type") != "object":
-                parameters = {
-                    "type": "object",
-                    "properties": parameters.get("properties", {}) if isinstance(parameters, dict) else {},
-                    "required": parameters.get("required", []) if isinstance(parameters, dict) else []
-                }
-
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": parameters
-                }
-            })
-        payload["tools"] = tools
+    if agent_tools:
+        payload["tools"] = build_provider_tool_payload("deepseek", agent_tools).tools
         
         # Do not send tool_choice to DeepSeek. The OpenAI-compatible API
         # defaults to auto tool choice when tools are present, and some

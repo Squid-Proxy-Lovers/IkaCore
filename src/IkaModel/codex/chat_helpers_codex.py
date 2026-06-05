@@ -26,8 +26,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from ..codex_constants import CODEX_API_URL
-from ..request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
-from .codex_responses import codex_responses_fill_payload, CODEX_KNOWN_MODELS
+from ..model_metadata import CODEX_KNOWN_MODELS
+from ..request_interface import agent_tools_for_payload
+from .codex_responses import codex_responses_fill_payload
 
 LOG = logging.getLogger(__name__)
 
@@ -128,9 +129,12 @@ def build_codex_request(
     and pass its return as ``api_key``. This module never reads files or env
     vars on its own.
     """
-    _apply_tools_filter_for_payload(barebone_model)
-    payload = codex_responses_fill_payload(barebone_model, messages, message_history)
-    _restore_tools_after_payload(barebone_model)
+    payload = codex_responses_fill_payload(
+        barebone_model,
+        messages,
+        message_history,
+        agent_tools=agent_tools_for_payload(barebone_model),
+    )
 
     api_key = barebone_model.api_key
     if not api_key:

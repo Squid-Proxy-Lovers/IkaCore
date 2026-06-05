@@ -4,15 +4,9 @@ Workflow semantics tests.
 These lock down the v2 behavior where child edges only wire subagents into a
 stage and are never auto-executed as separate workflow nodes.
 """
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
 
 mock_ika_mem = MagicMock()
 with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):

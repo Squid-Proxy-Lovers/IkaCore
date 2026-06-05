@@ -2,8 +2,9 @@ import json
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..model_metadata import is_anthropic_haiku_model
+from ..request_interface import agent_tools_for_payload
 from .claude import anthropic_fill_payload
-from ..request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
 
 
 def build_anthropic_request(
@@ -11,13 +12,16 @@ def build_anthropic_request(
     messages: List[dict],
     message_history: dict
 ) -> Tuple[str, Dict[str, str], dict]:
-    _apply_tools_filter_for_payload(barebone_model)
-    payload = anthropic_fill_payload(barebone_model, messages, message_history)
-    _restore_tools_after_payload(barebone_model)
+    payload = anthropic_fill_payload(
+        barebone_model,
+        messages,
+        message_history,
+        agent_tools=agent_tools_for_payload(barebone_model),
+    )
     
     if "max_tokens" not in payload or not payload["max_tokens"]:
         payload["max_tokens"] = 4096
-    if "haiku" in barebone_model.model_id.lower() and payload["max_tokens"] > 4096:
+    if is_anthropic_haiku_model(barebone_model.model_id) and payload["max_tokens"] > 4096:
         payload["max_tokens"] = 4096
     
     api_url = barebone_model.api_url

@@ -1,22 +1,10 @@
 """Tests for OpenRouter API integration."""
-import sys
-from pathlib import Path
-from unittest.mock import Mock
-import pytest
 
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
-
-from IkaModel.base import BareBoneModel, AgentTool, ToolArgs
-from IkaModel.request_interface import get_provider
-from IkaModel.openrouter.openrouter import openrouter_fill_payload
-from IkaModel.openrouter.chat_helpers_openrouter import (
-    build_openrouter_request,
-    parse_openrouter_response,
-    append_openrouter_tool_messages
-)
+from IkaModel.base import AgentTool, BareBoneModel, ToolArgs
 from IkaModel.chat_helpers_common import build_provider_request
+from IkaModel.openrouter.chat_helpers_openrouter import build_openrouter_request, parse_openrouter_response
+from IkaModel.openrouter.openrouter import openrouter_fill_payload
+from IkaModel.request_interface import get_provider
 
 
 class TestOpenRouterProviderDetection:

@@ -4,12 +4,10 @@ import asyncio
 import concurrent.futures
 import threading
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Set, Any
-from copy import deepcopy
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from IkaCore.agents import IkaBaseAgent, summarise_message_history
 from IkaCore.cli_output import get_cli_output
-
 
 WorkflowCompressionHook = Callable[[List[str], IkaBaseAgent], str]
 
@@ -194,6 +192,8 @@ class IkaWorkflow:
         self._visiting: Set[str] = set()
         self._node_dependencies: Dict[str, Set[str]] = {}
         self._node_dependents: Dict[str, Set[str]] = {}
+        self._edges_by_source: Dict[str, List[WorkflowEdge]] = {}
+        self._next_edges_by_source: Dict[str, List[WorkflowEdge]] = {}
 
         self._validate_nodes()
         self._validate_edges()
@@ -224,10 +224,6 @@ class IkaWorkflow:
         
         lines.append("")
         lines.append("Graph Structure:")
-        node_connections = {}
-        for edge in self.edges:
-            node_connections.setdefault(edge.source, []).append((edge.target, edge.edge_type, edge.stage_index))
-        
         def print_node(node_name: str, indent: int = 0, visited: Optional[Set[str]] = None) -> List[str]:
             if visited is None:
                 visited = set()
@@ -241,12 +237,11 @@ class IkaWorkflow:
                 return result
             visited.add(node_name)
             
-            if node_name in node_connections:
-                for target, edge_type, stage_idx in node_connections[node_name]:
-                    edge_label = "child" if edge_type == "child" else "next"
-                    stage_label = f" [stage {stage_idx}]" if stage_idx is not None else ""
-                    result.append(f"{prefix}  |--({edge_label}{stage_label})-->")
-                    result.extend(print_node(target, indent + 2, visited.copy()))
+            for edge in self._edges_by_source.get(node_name, []):
+                edge_label = "child" if edge.edge_type == "child" else "next"
+                stage_label = f" [stage {edge.stage_index}]" if edge.stage_index is not None else ""
+                result.append(f"{prefix}  |--({edge_label}{stage_label})-->")
+                result.extend(print_node(edge.target, indent + 2, visited.copy()))
             
             return result
         
@@ -291,9 +286,13 @@ class IkaWorkflow:
         for node in self.nodes:
             self._node_dependencies[node.name] = set()
             self._node_dependents[node.name] = set()
+            self._edges_by_source[node.name] = []
+            self._next_edges_by_source[node.name] = []
         
         for edge in self.edges:
+            self._edges_by_source.setdefault(edge.source, []).append(edge)
             if edge.edge_type == "next":
+                self._next_edges_by_source.setdefault(edge.source, []).append(edge)
                 self._node_dependencies[edge.target].add(edge.source)
                 self._node_dependents[edge.source].add(edge.target)
 
@@ -305,9 +304,8 @@ class IkaWorkflow:
             if node_name in reachable:
                 continue
             reachable.add(node_name)
-            for edge in self.edges:
-                if edge.source == node_name and edge.edge_type == "next":
-                    stack.append(edge.target)
+            for edge in self._next_edges_by_source.get(node_name, []):
+                stack.append(edge.target)
         return reachable
 
     def _default_compress_hook(self, contexts: List[str], agent: IkaBaseAgent) -> str:
@@ -365,10 +363,9 @@ class IkaWorkflow:
         self._results[node_name] = result
         self._visiting.remove(node_name)
 
-        for edge in self.edges:
-            if edge.source == node_name and edge.edge_type == "next":
-                upstream_contexts.setdefault(edge.target, []).append(downstream_context)
-                self._run_node(edge.target, upstream_contexts)
+        for edge in self._next_edges_by_source.get(node_name, []):
+            upstream_contexts.setdefault(edge.target, []).append(downstream_context)
+            self._run_node(edge.target, upstream_contexts)
 
         return result
 
@@ -383,7 +380,7 @@ class IkaWorkflow:
             return self._results[node_name]
 
         node = self._node_index[node_name]
-        agent_copy = deepcopy(node.agent)
+        agent_copy = node.agent.clone_for_run()
         if instance_id > 0:
             agent_copy.name = f"{node.agent.name}_instance_{instance_id}"
         
@@ -417,7 +414,7 @@ class IkaWorkflow:
         return result
 
     def _create_agent_instance(self, agent: IkaBaseAgent, instance_id: int, instance_input: Optional[str] = None) -> IkaBaseAgent:
-        agent_copy = deepcopy(agent)
+        agent_copy = agent.clone_for_run()
         if instance_id > 0:
             agent_copy.name = f"{agent.name}_instance_{instance_id}"
         
@@ -514,14 +511,13 @@ class IkaWorkflow:
                     node_name = result['node_name']
                     if result['success']:
                         summary = result['result'].get("summary", result['result'].get("final_message", ""))
-                        for edge in self.edges:
-                            if edge.source == node_name and edge.edge_type == "next":
-                                upstream_contexts.setdefault(edge.target, []).append(summary)
-                                target_deps = self._node_dependencies[edge.target]
-                                if target_deps.issubset(completed_nodes):
-                                    if edge.target in self._next_reachable_nodes and edge.target not in completed_nodes and edge.target not in ready_nodes:
-                                        ready_nodes.add(edge.target)
-                                        pending_nodes.discard(edge.target)
+                        for edge in self._next_edges_by_source.get(node_name, []):
+                            upstream_contexts.setdefault(edge.target, []).append(summary)
+                            target_deps = self._node_dependencies[edge.target]
+                            if target_deps.issubset(completed_nodes):
+                                if edge.target in self._next_reachable_nodes and edge.target not in completed_nodes and edge.target not in ready_nodes:
+                                    ready_nodes.add(edge.target)
+                                    pending_nodes.discard(edge.target)
                 for n in {r["node_name"] for r in results}:
                     node_futures.pop(n, None)
             for node_name in list(pending_nodes):

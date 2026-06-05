@@ -1,9 +1,12 @@
+import logging
 import time
 from typing import Any, Optional
 
 from IkaMem.memory import Memory
 from IkaMem.memory_items import LTMemItem
 from IkaMem.storage.mem0_storage import Mem0Store
+
+LOG = logging.getLogger(__name__)
 
 
 class LTMemory(Memory):
@@ -73,10 +76,10 @@ class LTMemory(Memory):
                 super().save(value=value, metadata=metadata or {})
             
             elapsed = (time.time() - start_time) * 1000
-            print(f"[LTMemory] saved in {elapsed:.2f}ms")
+            LOG.debug("long-term memory saved in %.2fms", elapsed)
             
-        except Exception as e:
-            print(f"[LTMemory] save failed: {str(e)}")
+        except Exception:
+            LOG.exception("long-term memory save failed")
             raise
 
 
@@ -106,7 +109,7 @@ class LTMemory(Memory):
             )
             
             elapsed = (time.time() - start_time) * 1000
-            print(f"[LTMemory] search completed in {elapsed:.2f}ms, found {len(raw_results)} results")
+            LOG.debug("long-term memory search completed in %.2fms, found %d results", elapsed, len(raw_results))
             
             # apply custom filter (must return list)
             filtered = self._filter_func(raw_results)
@@ -117,7 +120,6 @@ class LTMemory(Memory):
             
             return filtered
             
-        except Exception as e:
-            print(f"[LTMemory] search failed: {str(e)}")
+        except Exception:
+            LOG.exception("long-term memory search failed")
             raise
-

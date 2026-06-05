@@ -104,7 +104,10 @@ Important current behavior:
 
 - OpenAI Responses is the default OpenAI backend
 - OpenAI Chat Completions requires `use_responses_api=False`
+- Codex is a separate provider that targets `CODEX_API_URL`
 - explicit non-OpenAI URLs are respected
+
+Codex auth is intentionally not automatic in the request path. The Codex provider treats `BareBoneModel.api_key` as the literal bearer token. Users can pass their own bearer token, or call `IkaModel.codex.codex_auth.get_bearer()` to read and refresh the Codex CLI credentials from `~/.codex/auth.json` or `$CODEX_HOME/auth.json`.
 
 ### HITL And Resume
 

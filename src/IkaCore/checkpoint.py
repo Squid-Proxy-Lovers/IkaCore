@@ -1,9 +1,10 @@
 import json
+import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
-from datetime import datetime, timezone
 
 
 class CheckpointStore:
@@ -29,6 +30,13 @@ class CheckpointStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_checkpoints_uid ON checkpoints(uid)"
             )
+        self._chmod_private()
+
+    def _chmod_private(self) -> None:
+        try:
+            os.chmod(self.db_path, 0o600)
+        except OSError:
+            pass
 
     def save_checkpoint(self, scope: str, payload: dict[str, Any], uid: Optional[str] = None) -> str:
         checkpoint_uid = uid or str(uuid4())
@@ -61,8 +69,8 @@ class CheckpointStore:
             return None
         try:
             return json.loads(row[0])
-        except Exception:
-            return None
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Checkpoint '{uid}' contains invalid JSON") from e
 
     def delete_checkpoint(self, uid: str) -> None:
         with sqlite3.connect(self.db_path) as conn:

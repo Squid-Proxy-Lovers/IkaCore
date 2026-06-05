@@ -2,16 +2,9 @@
 Tests for IkaBaseAgent helper mixin: validation, memory access, message history,
 final_prompt, parse_control_calls, _fallback_final_content, _build_final_output.
 """
-import json
-import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
 
 mock_ika_mem = MagicMock()
 with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):

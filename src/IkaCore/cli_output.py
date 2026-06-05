@@ -1,12 +1,12 @@
+import json
+import sys
+import threading
+import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Dict, Any, Tuple, Callable
 from threading import Lock, local
-from collections import defaultdict
-import sys
-import time
-import json
-import threading
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Global stdout lock - shared across all output systems for thread-safe console output
 _stdout_lock = Lock()
