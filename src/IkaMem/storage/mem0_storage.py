@@ -1,52 +1,66 @@
+# pyright: strict
+
+from __future__ import annotations
+
+import importlib
 import os
 from collections import defaultdict
-from typing import Any, Optional
-
-try:
-    from mem0 import Memory, MemoryClient
-    _MEM0_AVAILABLE = True
-except ImportError:
-    _MEM0_AVAILABLE = False
-    Memory = None
-    MemoryClient = None
+from typing import Any, Optional, TypeAlias, cast
 
 from IkaMem.storage.interface import Storage
 
+Mem0Filter: TypeAlias = dict[str, list[dict[str, Any]]]
+Mem0Results: TypeAlias = dict[str, list[dict[str, Any]]]
 
-class Mem0Store(Storage):
 
-    def __init__(self, memory_type: str, config: Optional[dict[str, Any]] = None):
-        super().__init__()
-        """
-        init Mem0Store
-        Args:
-            memory_type: Type of memory ('short_term' or 'long_term')
-            config: Optional configuration dictionary containing:
-                - api_key: Mem0 API key (or set MEM0_API_KEY env var)
-                - org_id: Organization ID
-                - project_id: Project ID
-                - user_id: User identifier
-                - agent_id: Agent identifier
-                - run_id: Run identifier (for short_term memory)
-                - local_mem0_config: Local Mem0 configuration dict
-                - infer: Whether to infer categories (default True)
-                - includes: Categories to include
-                - excludes: Categories to exclude
-                - custom_categories: Custom categories list
-        """
-        self._validate_type(memory_type)
-        self.memory_type = memory_type
-        self.config = config or {}
-        
-        self.mem0_run_id = self.config.get("run_id")
-        self.includes = self.config.get("includes")
-        self.excludes = self.config.get("excludes")
-        self.custom_categories = self.config.get("custom_categories")
-        self.infer = self.config.get("infer", True)
-        
-        self._initialize_memory()
+def _load_mem0_classes() -> tuple[type[Any] | None, type[Any] | None]:
+    try:
+        mem0_module = importlib.import_module("mem0")
+    except ImportError:
+        return None, None
+
+    memory_cls = getattr(mem0_module, "Memory", None)
+    memory_client_cls = getattr(mem0_module, "MemoryClient", None)
+    if not isinstance(memory_cls, type) or not isinstance(memory_client_cls, type):
+        return None, None
+    return memory_cls, memory_client_cls
+
+
+_mem0_memory_cls, _mem0_client_cls = _load_mem0_classes()
+Memory: type[Any] | None = _mem0_memory_cls
+MemoryClient: type[Any] | None = _mem0_client_cls
+_MEM0_AVAILABLE = Memory is not None and MemoryClient is not None
+
+
+class Mem0InitializationMixin:
+    config: dict[str, Any]
+    memory_type: str
+    mem0_run_id: Any
+    includes: Any
+    excludes: Any
+    custom_categories: Any
+    infer: bool
+    memory: Any
+
+    @staticmethod
+    def _validate_type(memory_type: str) -> None:
+        if memory_type not in {"short_term", "long_term"}:
+            raise ValueError("memory_type must be 'short_term' or 'long_term'")
 
     def _initialize_memory(self) -> None:
+        if not _MEM0_AVAILABLE:
+            raise ImportError(
+                "Mem0Store requires the optional 'mem0' package. "
+                "Install mem0 or pass a custom storage backend."
+            )
+        memory_cls = Memory
+        memory_client_cls = MemoryClient
+        if memory_cls is None or memory_client_cls is None:
+            raise ImportError(
+                "Mem0Store requires a complete mem0 installation with Memory "
+                "and MemoryClient."
+            )
+
         api_key = self.config.get("api_key") or os.getenv("MEM0_API_KEY")
         org_id = self.config.get("org_id")
         project_id = self.config.get("project_id")
@@ -55,28 +69,30 @@ class Mem0Store(Storage):
         if api_key:
             # set MemoryClient for cloud-based Mem0
             if org_id and project_id:
-                self.memory = MemoryClient(
+                self.memory = memory_client_cls(
                     api_key=api_key, org_id=org_id, project_id=project_id
                 )
             else:
-                self.memory = MemoryClient(api_key=api_key)
+                self.memory = memory_client_cls(api_key=api_key)
             
             # supdate project with custom categories if provided
             if self.custom_categories:
                 self.memory.update_project(custom_categories=self.custom_categories)
         else:
             if local_config and len(local_config) > 0:
-                self.memory = Memory.from_config(local_config)
+                self.memory = memory_cls.from_config(local_config)
             else:
-                self.memory = Memory()
+                self.memory = memory_cls()
 
-    def _create_filter_for_search(self) -> dict[str, list]:
+
+class Mem0FilterMixin(Mem0InitializationMixin):
+    def _create_filter_for_search(self) -> Mem0Filter:
         """
         create filter dictionary for searching memory.
-        
+
         note: filter dictionary with AND/OR conditions
         """
-        filter_dict = defaultdict(list)
+        filter_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
 
         if self.memory_type == "short_term" and self.mem0_run_id:
             # For short-term memory with run_id, filter by run
@@ -99,6 +115,8 @@ class Mem0Store(Storage):
 
         return dict(filter_dict)
 
+
+class Mem0SaveMixin(Mem0FilterMixin):
     def save(self, value: Any, metadata: dict[str, Any]) -> None:
         """
         save a value to Mem0 storage.
@@ -125,7 +143,8 @@ class Mem0Store(Storage):
         }
 
         # Add MemoryClient-specific parameters
-        if isinstance(self.memory, MemoryClient):
+        memory_client_cls = MemoryClient
+        if memory_client_cls is not None and isinstance(self.memory, memory_client_cls):
             params["includes"] = self.includes
             params["excludes"] = self.excludes
             params["output_format"] = "v1.1"
@@ -146,6 +165,8 @@ class Mem0Store(Storage):
         # Save to Mem0
         self.memory.add(conversations, **params)
 
+
+class Mem0SearchMixin(Mem0SaveMixin):
     def search(
         self, query: str, limit: int = 5, score_threshold: float = 0.6
     ) -> list[Any]:
@@ -186,22 +207,40 @@ class Mem0Store(Storage):
         params["threshold"] = score_threshold
 
         # Remove parameters not supported by local Memory (use pop to avoid KeyError)
-        if isinstance(self.memory, Memory):
+        memory_cls = Memory
+        if memory_cls is not None and isinstance(self.memory, memory_cls):
             params.pop("metadata", None)
             params.pop("version", None)
             params.pop("output_format", None)
             params.pop("run_id", None)
 
         # Execute search
-        results = self.memory.search(**params)
+        results = cast(Mem0Results, self.memory.search(**params))
 
         # Normalize results format
-        for result in results["results"]:
+        result_items = results["results"]
+        for result in result_items:
             result["content"] = result["memory"]
 
-        return [r for r in results["results"]]
+        return result_items
+
+
+class Mem0Store(Mem0SearchMixin, Storage):
+    def __init__(self, memory_type: str, config: Optional[dict[str, Any]] = None) -> None:
+        super().__init__()
+        self._validate_type(memory_type)
+        self.memory_type = memory_type
+        self.config = config or {}
+
+        self.mem0_run_id = self.config.get("run_id")
+        self.includes = self.config.get("includes")
+        self.excludes = self.config.get("excludes")
+        self.custom_categories = self.config.get("custom_categories")
+        self.infer = self.config.get("infer", True)
+        self.memory: Any = None
+
+        self._initialize_memory()
 
     def reset(self) -> None:
         if self.memory:
             self.memory.reset()
-

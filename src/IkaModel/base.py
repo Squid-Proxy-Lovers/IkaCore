@@ -25,18 +25,19 @@ TOKENMAX_MAPPING = model_metadata.TOKENMAX_MAPPING
 class AgentEndException(RuntimeError):
     """Raised when agent_end (or equivalent) signals immediate completion."""
 
-    def __init__(self, response: Optional[dict] = None, final_text: Optional[str] = None):
+    def __init__(self, response: Optional[dict[str, Any]] = None, final_text: Optional[str] = None):
         super().__init__("agent_end requested termination")
-        self.response = response or {}
-        self.final_text = final_text or (self.response.get("content") if isinstance(self.response, dict) else None)
+        self.response: dict[str, Any] = response or {}
+        response_content = self.response.get("content")
+        self.final_text = final_text or (response_content if isinstance(response_content, str) else None)
 
 
 class HumanInputRequired(RuntimeError):
     """Raised when HITL execution must pause for human input."""
 
-    def __init__(self, payload: Optional[dict] = None):
+    def __init__(self, payload: Optional[dict[str, Any]] = None):
         super().__init__("human input required")
-        self.payload = payload or {}
+        self.payload: dict[str, Any] = payload or {}
 
 
 def load_gemini_payload():
@@ -66,8 +67,8 @@ class ToolArgs:
     description: str
     agent: Optional[str] = None
     data: Optional[Any] = None
-    metadata: Optional[dict] = None
-    properties: Optional[dict] = None
+    metadata: Optional[dict[str, Any]] = None
+    properties: Optional[dict[str, Any]] = None
     
     # we are going to assume that all args are required
 
@@ -168,6 +169,7 @@ class BareBoneModel:
         self.use_responses_api = use_responses_api
         self.force_control_tool_on_max_tool_calls = force_control_tool_on_max_tool_calls
         self.forced_tool_name: Optional[str] = None
+        self._current_step: int = 0
 
         # Display prompts using CLI output (unless suppressed)
         if not suppress_init_output:

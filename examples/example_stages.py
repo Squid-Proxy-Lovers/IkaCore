@@ -3,22 +3,6 @@ from time import time
 
 from IkaCore import IkaBaseAgent, IkaStage, IkaTools
 
-API_KEY = os.getenv("API_KEY")
-MODEL_ID = os.getenv("MODEL_ID", "deepseek-chat")
-if not API_KEY:
-    raise ValueError("API_KEY is not set")
-if not MODEL_ID:
-    raise ValueError("MODEL_ID is not set")
-
-API_KEY2 = os.getenv("API_KEY2")
-MODEL_ID2 = os.getenv("MODEL_ID2", "gpt-4o-mini")
-if not API_KEY2:
-    raise ValueError("API_KEY2 is not set")
-if not MODEL_ID2:
-    raise ValueError("MODEL_ID2 is not set")
-    
-
-
 SYSTEM_PROMPT = """You are a general purpose agent. You can use the tools provided to you to achieve your goal."""
 
 
@@ -55,11 +39,23 @@ You will need to return the summary of the files in the current working director
 """
 
 def main():
+    api_key = os.getenv("API_KEY")
+    model_id = os.getenv("MODEL_ID", "deepseek-chat")
+    if not api_key:
+        raise ValueError("API_KEY is not set")
+    if not model_id:
+        raise ValueError("MODEL_ID is not set")
+
+    api_key2 = os.getenv("API_KEY2")
+    model_id2 = os.getenv("MODEL_ID2", "gpt-4o-mini")
+    if not api_key2:
+        raise ValueError("API_KEY2 is not set")
+    if not model_id2:
+        raise ValueError("MODEL_ID2 is not set")
 
     def read_file_execute(file_path: str) -> str:
-        return open(file_path, "r").read()
-
-
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
 
     get_pwd = IkaTools(
         name="get_pwd",
@@ -70,7 +66,7 @@ def main():
         execute_function=lambda _: os.getcwd(),
         limit_calls=1,
     )
-    
+
     list_files = IkaTools(
         name="list_files",
         description="List files in a directory",
@@ -78,11 +74,10 @@ def main():
             "directory_path": {
                 "type": "string",
                 "description": "The path to the directory to list files from",
-                "required": True
+                "required": True,
             },
         },
         execute_function=lambda x: os.listdir(x.get("directory_path") or os.getcwd()),
-        #required=True,
     )
 
     read_file = IkaTools(
@@ -98,17 +93,17 @@ def main():
         name="list_stage",
         prompt=STAGE1,
         tools=[list_files, get_pwd],
-        model_id=MODEL_ID2,
-        api_key=API_KEY2,
+        model_id=model_id2,
+        api_key=api_key2,
         stage_max_step=30,
     )
 
     read_stage = IkaStage(
         name="read_stage",
         prompt=STAGE2,
-        tools=[read_file,get_pwd],
-        model_id=MODEL_ID2,
-        api_key=API_KEY2,
+        tools=[read_file, get_pwd],
+        model_id=model_id2,
+        api_key=api_key2,
         stage_max_step=30,
     )
 
@@ -116,9 +111,9 @@ def main():
         name="summarize_stage",
         prompt=STAGE3,
         tools=[],
-        allowed_back_to=[1,2],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        allowed_back_to=[1, 2],
+        model_id=model_id,
+        api_key=api_key,
     )
     agent = IkaBaseAgent(
         name="example_system",
@@ -127,15 +122,14 @@ def main():
         prompt=PROMPT,
         tools=[],
         Stages=[list_stage, read_stage, summarize_stage],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
-        #logging_level=3,
+        model_id=model_id,
+        api_key=api_key,
         maxsteps=100,
     )
     start_time = time()
     finalmsg = agent.execution()
     end_time = time()
-    print("-"*100)
+    print("-" * 100)
     print(f"Time taken: {end_time - start_time} seconds")
     print(finalmsg)
 

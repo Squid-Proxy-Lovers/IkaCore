@@ -1,3 +1,7 @@
+# pyright: strict
+
+from __future__ import annotations
+
 from typing import Any, Optional
 
 
@@ -8,7 +12,7 @@ class STMemItem:
         data: Any,
         agent: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
-    ):
+    ) -> None:
         """
         init short-term memory item.
         
@@ -32,7 +36,7 @@ class LTMemItem:
         datetime: str,
         quality: Optional[float] = None,
         metadata: Optional[dict[str, Any]] = None,
-    ):
+    ) -> None:
         """
         init long-term memory item.
         
@@ -50,4 +54,3 @@ class LTMemItem:
         self.datetime = datetime
         self.expected_output = expected_output
         self.metadata = metadata if metadata is not None else {}
-

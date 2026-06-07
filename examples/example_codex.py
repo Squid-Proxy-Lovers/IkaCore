@@ -43,7 +43,6 @@ import os
 from IkaCore import IkaBaseAgent, IkaTools
 from IkaModel.codex import CODEX_API_URL, codex_auth
 
-
 SYSTEM_PROMPT = """You are a concise agent. Use the tools provided when they
 help, and call agent_end with a short final answer when you're done."""
 

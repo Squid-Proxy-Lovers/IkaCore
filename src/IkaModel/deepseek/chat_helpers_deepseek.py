@@ -1,16 +1,34 @@
+# pyright: strict
+# pyright: reportUnusedFunction=false
+
 import json
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Optional, cast
 
+from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
+
+from ..base import BareBoneModel
 from ..request_interface import agent_tools_for_payload
 from .deepseek import deepseek_fill_payload
 
+ProviderRequest = tuple[str, dict[str, str], JsonDict]
+ProviderRound = tuple[str, Optional[str], list[JsonDict], int]
+MessageList = list[JsonDict]
+
+
+def _token_count(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    return 0
+
 
 def build_deepseek_request(
-    barebone_model: Any,
-    messages: List[dict],
-    message_history: dict
-) -> Tuple[str, Dict[str, str], dict]:
+    barebone_model: BareBoneModel,
+    messages: MessageList,
+    message_history: JsonDict
+) -> ProviderRequest:
     payload = deepseek_fill_payload(
         barebone_model,
         messages,
@@ -50,7 +68,7 @@ def _unwrap_double_encoded_args(args_str: str) -> str:
     are left alone. Only dict/list payloads get unwrapped, which matches the
     schema-shape error the model is actually trying to satisfy.
     """
-    if not args_str or not isinstance(args_str, str):
+    if not args_str:
         return args_str
     try:
         parsed = json.loads(args_str)
@@ -58,8 +76,9 @@ def _unwrap_double_encoded_args(args_str: str) -> str:
         return args_str
     if not isinstance(parsed, dict):
         return args_str
+    parsed_data = cast(JsonDict, parsed)
     changed = False
-    for k, v in list(parsed.items()):
+    for k, v in list(parsed_data.items()):
         if not isinstance(v, str):
             continue
         # Cheap pre-check: only attempt re-parse on values that LOOK like
@@ -72,40 +91,43 @@ def _unwrap_double_encoded_args(args_str: str) -> str:
         except (json.JSONDecodeError, TypeError):
             continue
         if isinstance(inner, (dict, list)):
-            parsed[k] = inner
+            parsed_data[k] = inner
             changed = True
-    return json.dumps(parsed) if changed else args_str
+    return json.dumps(parsed_data) if changed else args_str
 
 
-def parse_deepseek_response(data: dict, model_id: str) -> Tuple[str, Optional[str], List[dict], int]:
-    message_obj = data["choices"][0]["message"]
-    content = message_obj.get("content") or ""
-    tool_calls = message_obj.get("tool_calls", []) or []
-    tokens = data.get("usage", {}).get("total_tokens", 0)
-    reasoning_content = message_obj.get("reasoning_content")
+def parse_deepseek_response(data: JsonDict, model_id: str) -> ProviderRound:
+    choices = cast(list[JsonDict], data["choices"])
+    message_obj = json_dict(choices[0].get("message"))
+    content = string_value(message_obj.get("content"))
+    raw_tool_calls: object = message_obj.get("tool_calls", []) or []
+    tool_calls = cast(list[JsonDict], raw_tool_calls) if isinstance(raw_tool_calls, list) else []
+    tokens = _token_count(json_dict(data.get("usage")).get("total_tokens"))
+    reasoning_value = message_obj.get("reasoning_content")
+    reasoning_content = string_value(reasoning_value) if reasoning_value else None
 
     # Repair V4-flash's double-encoded nested object/array args in place so
     # downstream tool dispatch sees the canonical shape.
     for tc in tool_calls:
-        fn = tc.get("function") if isinstance(tc, dict) else None
-        if not isinstance(fn, dict):
+        fn = json_dict(tc.get("function"))
+        if not fn:
             continue
-        fn["arguments"] = _unwrap_double_encoded_args(fn.get("arguments", "{}"))
+        fn["arguments"] = _unwrap_double_encoded_args(string_value(fn.get("arguments"), "{}"))
 
     return content, reasoning_content, tool_calls, tokens
 
 
 def append_deepseek_tool_messages(
-    messages: List[dict],
-    message_history: dict,
+    messages: MessageList,
+    message_history: JsonDict,
     content: str,
     reasoning_content: Optional[str],
-    executed_tool_call_list: List[dict],
-    tool_messages: List[dict],
+    executed_tool_call_list: list[JsonDict],
+    tool_messages: MessageList,
     tokens: int,
     repeated_warning_msg: str = ""
 ) -> None:
-    assistant_msg = {"role": "assistant", "content": content}
+    assistant_msg: JsonDict = {"role": "assistant", "content": content}
     if reasoning_content:
         assistant_msg["reasoning_content"] = reasoning_content
     if executed_tool_call_list:
@@ -119,7 +141,7 @@ def append_deepseek_tool_messages(
     
     if executed_tool_call_list:
         msg_id = str(uuid.uuid4())
-        message_history["messages"][msg_id] = {  # type: ignore
+        history_section(message_history, "messages")[msg_id] = {
             "message": json.dumps(assistant_msg),
             "tokens": tokens,
             "type": "assistant_with_tools",
@@ -127,7 +149,7 @@ def append_deepseek_tool_messages(
     
     for tool_msg in tool_messages:
         msg_id = str(uuid.uuid4())
-        message_history["messages"][msg_id] = {  # type: ignore
+        history_section(message_history, "messages")[msg_id] = {
             "message": json.dumps(tool_msg),
             "tokens": 0,
             "type": "tool",

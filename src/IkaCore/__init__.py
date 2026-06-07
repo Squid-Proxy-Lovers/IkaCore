@@ -1,7 +1,28 @@
-from importlib import import_module
-from typing import Any
+# pyright: strict
 
-_EXPORTS = {
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from IkaCore.agents import IkaBaseAgent as IkaBaseAgent
+    from IkaCore.stages import IkaStage as IkaStage
+    from IkaCore.tools import IkaTools as IkaTools
+    from IkaCore.workflow import IkaWorkflow as IkaWorkflow
+    from IkaCore.workflow import WorkflowEdge as WorkflowEdge
+    from IkaCore.workflow import WorkflowNode as WorkflowNode
+    from IkaCore.workflow import WorkflowResult as WorkflowResult
+
+__all__ = [
+    "IkaBaseAgent",
+    "IkaStage",
+    "IkaTools",
+    "IkaWorkflow",
+    "WorkflowEdge",
+    "WorkflowNode",
+    "WorkflowResult",
+]
+
+_EXPORTS: dict[str, tuple[str, str]] = {
     "IkaBaseAgent": ("IkaCore.agents", "IkaBaseAgent"),
     "IkaStage": ("IkaCore.stages", "IkaStage"),
     "IkaTools": ("IkaCore.tools", "IkaTools"),
@@ -10,8 +31,6 @@ _EXPORTS = {
     "WorkflowNode": ("IkaCore.workflow", "WorkflowNode"),
     "WorkflowResult": ("IkaCore.workflow", "WorkflowResult"),
 }
-
-__all__ = list(_EXPORTS)
 
 
 def __getattr__(name: str) -> Any:

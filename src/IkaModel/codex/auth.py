@@ -40,6 +40,7 @@ fully coordinated here.
 from __future__ import annotations
 
 import base64
+import binascii
 import contextlib
 import json
 import logging
@@ -137,11 +138,11 @@ def _interprocess_lock() -> Iterator[None]:
         if fd is not None:
             try:
                 fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
-            except Exception:
+            except OSError:
                 pass
             try:
                 fd.close()
-            except Exception:
+            except OSError:
                 pass
 
 
@@ -178,7 +179,7 @@ def _decode_jwt_payload(token: str) -> Dict[str, Any]:
         payload_segment = token.split(".")[1]
         padded = payload_segment + "=" * (-len(payload_segment) % 4)
         return json.loads(base64.urlsafe_b64decode(padded))
-    except Exception as e:
+    except (IndexError, TypeError, ValueError, UnicodeDecodeError, binascii.Error, json.JSONDecodeError) as e:
         LOG.warning(f"Failed to decode JWT payload: {e}")
         return {}
 

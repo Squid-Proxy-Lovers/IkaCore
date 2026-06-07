@@ -20,7 +20,7 @@ import base64
 import json
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -200,6 +200,104 @@ class TestGetBearer:
         with pytest.raises(FileNotFoundError, match="codex login"):
             codex_auth.get_bearer()
 
+    def test_apikey_mode_missing_key_and_tokenless_modes_raise_or_fallback(self, isolated_codex_home):
+        isolated_codex_home.mkdir(parents=True, exist_ok=True)
+
+        (isolated_codex_home / "auth.json").write_text(json.dumps({
+            "auth_mode": "apikey",
+            "OPENAI_API_KEY": "",
+            "tokens": {},
+        }))
+        with pytest.raises(RuntimeError, match="OPENAI_API_KEY is missing"):
+            codex_auth.get_bearer()
+
+        (isolated_codex_home / "auth.json").write_text(json.dumps({
+            "auth_mode": "chatgpt",
+            "OPENAI_API_KEY": "sk-fallback",
+            "tokens": {},
+        }))
+        assert codex_auth.get_bearer() == "sk-fallback"
+
+        (isolated_codex_home / "auth.json").write_text(json.dumps({
+            "auth_mode": "chatgpt",
+            "OPENAI_API_KEY": "",
+            "tokens": {},
+        }))
+        with pytest.raises(RuntimeError, match="neither tokens.access_token"):
+            codex_auth.get_bearer()
+
+
+class TestRefreshHelpers:
+    def test_oauth_token_url_override_is_gated(self, monkeypatch):
+        monkeypatch.setenv(codex_auth._CODEX_TOKEN_URL_OVERRIDE_ENV, "https://override.example/token")
+        monkeypatch.delenv(codex_auth._CODEX_TOKEN_URL_OVERRIDE_ALLOW_ENV, raising=False)
+        assert codex_auth._resolve_oauth_token_url() == codex_auth.CODEX_OAUTH_TOKEN_URL
+
+        monkeypatch.setenv(codex_auth._CODEX_TOKEN_URL_OVERRIDE_ALLOW_ENV, "1")
+        assert codex_auth._resolve_oauth_token_url() == "https://override.example/token"
+
+    def test_write_auth_is_atomic_and_private(self, isolated_codex_home):
+        data = {"auth_mode": "chatgpt", "tokens": {"access_token": "access"}}
+        isolated_codex_home.mkdir(parents=True, exist_ok=True)
+
+        codex_auth._write_auth(data)
+
+        path = isolated_codex_home / "auth.json"
+        assert json.loads(path.read_text()) == data
+        assert oct(path.stat().st_mode & 0o777) == "0o600"
+        assert not (isolated_codex_home / "auth.json.tmp").exists()
+
+    def test_refresh_tokens_posts_expected_oauth_body_and_reports_failures(self, monkeypatch):
+        monkeypatch.setenv(codex_auth._CODEX_TOKEN_URL_OVERRIDE_ENV, "https://override.example/token")
+        monkeypatch.setenv(codex_auth._CODEX_TOKEN_URL_OVERRIDE_ALLOW_ENV, "1")
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"access_token": "new-access"}
+
+        with patch("IkaModel.codex.auth.httpx.post", return_value=response) as post:
+            assert codex_auth._refresh_tokens("refresh-token") == {"access_token": "new-access"}
+
+        post.assert_called_once_with(
+            "https://override.example/token",
+            json={
+                "grant_type": "refresh_token",
+                "refresh_token": "refresh-token",
+                "client_id": codex_auth.CODEX_OAUTH_CLIENT_ID,
+                "scope": codex_auth.CODEX_AUTH_SCOPE,
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=30.0,
+        )
+
+        failed = MagicMock(status_code=400, text="bad refresh")
+        with patch("IkaModel.codex.auth.httpx.post", return_value=failed):
+            with pytest.raises(RuntimeError, match="Codex refresh failed"):
+                codex_auth._refresh_tokens("refresh-token")
+
+    def test_refresh_and_persist_rotates_refresh_token_and_requires_refresh_token(self, isolated_codex_home):
+        old = _write_auth_json(isolated_codex_home, exp_offset_sec=60, refresh_token="old-refresh")
+        new = {
+            "access_token": _make_jwt({"exp": int(time.time() + 3600)}),
+            "id_token": _make_jwt({"sub": "new"}),
+            "refresh_token": "new-refresh",
+        }
+
+        with patch.object(codex_auth, "_refresh_tokens", return_value=new):
+            refreshed = codex_auth._refresh_and_persist()
+
+        saved = json.loads((isolated_codex_home / "auth.json").read_text())
+        assert refreshed["tokens"]["access_token"] == new["access_token"]
+        assert refreshed["tokens"]["id_token"] == new["id_token"]
+        assert refreshed["tokens"]["refresh_token"] == "new-refresh"
+        assert saved["tokens"] == refreshed["tokens"]
+        assert refreshed["last_refresh"] != old["last_refresh"]
+
+        (isolated_codex_home / "auth.json").write_text(json.dumps({
+            "auth_mode": "chatgpt",
+            "tokens": {"access_token": "access"},
+        }))
+        with pytest.raises(RuntimeError, match="no refresh_token"):
+            codex_auth._refresh_and_persist()
+
 
 # ----------------------------------------------------------------------
 # Account / plan claim extraction
@@ -220,4 +318,9 @@ class TestClaims:
         assert codex_auth.get_account_id() is None
 
     def test_get_chatgpt_plan_missing_auth_returns_none(self, isolated_codex_home):
+        assert codex_auth.get_chatgpt_plan() is None
+
+    def test_get_chatgpt_plan_without_access_token_returns_none(self, isolated_codex_home):
+        isolated_codex_home.mkdir(parents=True, exist_ok=True)
+        (isolated_codex_home / "auth.json").write_text(json.dumps({"tokens": {}}))
         assert codex_auth.get_chatgpt_plan() is None

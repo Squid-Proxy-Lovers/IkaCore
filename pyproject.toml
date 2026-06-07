@@ -23,8 +23,10 @@ classifiers = [
 [project.optional-dependencies]
 test = [
   "pytest>=8",
+  "pytest-cov>=5",
 ]
 dev = [
+  "pyright>=1.1.390",
   "ruff>=0.8",
 ]
 
@@ -58,3 +60,32 @@ ignore = ["E501"]
 "src/IkaTest/test_hitl_interrupt_resume.py" = ["E402"]
 "src/IkaTest/test_ika_base_agent.py" = ["E402"]
 "src/IkaTest/test_workflow_semantics.py" = ["E402"]
+
+[tool.pyright]
+include = ["src/IkaCore", "src/IkaModel", "src/IkaMem"]
+exclude = ["src/IkaTest", "examples"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+reportMissingImports = "error"
+reportMissingTypeStubs = "none"
+reportUnsupportedDunderAll = "none"
+# Static gate: enforce import/name, return, assignment, argument, call-shape,
+# optional, iterable, and attribute-access checks. Stub availability remains
+# staged because optional provider integrations do not all ship type stubs.
+reportAttributeAccessIssue = "error"
+reportArgumentType = "error"
+reportAssignmentType = "error"
+reportCallIssue = "error"
+reportOptionalCall = "error"
+reportOptionalIterable = "error"
+reportOptionalMemberAccess = "error"
+reportReturnType = "error"
+
+[tool.coverage.run]
+branch = true
+source = ["IkaCore", "IkaModel", "IkaMem"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 91

@@ -18,7 +18,7 @@ This document explains how the current IkaCore runtime is structured and where t
 - `AgentExecutionMixin`: thin execution entry points
 - `AgentHelpersMixin`: shared runtime helpers, validation, checkpoint and HITL support
 
-The constructor in [agents.py](/Users/tarun/Malware-analysis-website/IkaCore/src/IkaCore/agents.py:31) is the contract that the rest of the repo now follows.
+The constructor in [`agents.py`](../src/IkaCore/agents.py) is the contract that the rest of the repo now follows.
 
 ### Execution Modes
 
@@ -65,7 +65,7 @@ The control parser path is now unified. The dead duplicate control-call implemen
 
 ### Subagents
 
-Subagents are exposed as tools. The relevant code is in [agent_tools.py](/Users/tarun/Malware-analysis-website/IkaCore/src/IkaCore/agent_tools.py:102).
+Subagents are exposed as tools. The relevant code is in [`agent_tools.py`](../src/IkaCore/agent_tools.py).
 
 Current boundary rules:
 
@@ -90,15 +90,15 @@ The semantics are intentionally strict:
 - `child` requires `stage_index`
 - `child` does not create an auto-executed child node
 
-This behavior is enforced by tests in [test_workflow_semantics.py](/Users/tarun/Malware-analysis-website/IkaCore/src/IkaTest/test_workflow_semantics.py:1).
+This behavior is enforced by tests in [`test_workflow_semantics.py`](../src/IkaTest/test_workflow_semantics.py).
 
 ### Provider Layer
 
 `IkaModel` separates three concerns:
 
-1. Provider detection and URL selection in [request_interface.py](/Users/tarun/Malware-analysis-website/IkaCore/src/IkaModel/request_interface.py:1)
+1. Provider detection and URL selection in [`request_interface.py`](../src/IkaModel/request_interface.py)
 2. Provider-specific payload builders under `openai/`, `anthropic/`, `deepseek/`, `gemini/`, `openrouter/`
-3. The transport and tool-call loop in [chat_interface.py](/Users/tarun/Malware-analysis-website/IkaCore/src/IkaModel/chat_interface/chat_interface.py:1)
+3. The transport and tool-call loop in [`chat_interface.py`](../src/IkaModel/chat_interface/chat_interface.py) and [`chat_runtime.py`](../src/IkaModel/chat_interface/chat_runtime.py)
 
 Important current behavior:
 
@@ -119,11 +119,11 @@ Current behavior:
 - the interrupt can be checkpointed
 - `resume_execution(..., resume_input=...)` continues the run
 
-Regression coverage lives in [test_hitl_interrupt_resume.py](/Users/tarun/Malware-analysis-website/IkaCore/src/IkaTest/test_hitl_interrupt_resume.py:1).
+Regression coverage lives in [`test_hitl_interrupt_resume.py`](../src/IkaTest/test_hitl_interrupt_resume.py).
 
 ### Checkpointing
 
-Checkpoint persistence is implemented in [checkpoint.py](/Users/tarun/Malware-analysis-website/IkaCore/src/IkaCore/checkpoint.py:1).
+Checkpoint persistence is implemented in [`checkpoint.py`](../src/IkaCore/checkpoint.py).
 
 The current implementation is intentionally simple:
 
@@ -143,12 +143,14 @@ It is materially better than the older coarse resume path, but it is still light
 
 Agent-side memory tools are assembled by `AgentMemoryMixin`. Long-term save and search now use structured tool schemas instead of the old string-splitting format.
 
-### Known Hygiene Gaps
+### Maintenance Gates
 
-The repo is cleaner than it was at the start of this work, but a few design debts remain:
+The repo now has explicit gates for the maintenance risks that used to drift:
 
-- some runtime modules still mutate `sys.path` during import
-- examples are still source-checkout scripts rather than installed console examples
-- the package layout is partly namespace-style and partly traditional package-style
+- no production function or class may grow to 70 lines or more
+- broad `except Exception` boundaries are limited to the current intentional runtime isolation points
+- `pyright` checks import/name, call, argument, assignment, return, optional, iterable, and attribute access regressions
+- coverage must stay above the configured project threshold
+- optional live provider smoke tests are kept separate from deterministic CI
 
-Those are maintainability issues, not correctness blockers, but they should be addressed in a follow-up cleanup pass.
+The remaining maturity gap is not local unit behavior. It is broader integration confidence: real provider smoke coverage is opt-in, and long-running degraded-network workflows still need periodic manual or scheduled runs with credentials.

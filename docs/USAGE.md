@@ -316,6 +316,14 @@ Useful options:
 - `show_usage_level0=True`
 - `IKA_DUMP_REQUESTS=/path/to/dir` to dump request/response payloads for debugging
 
+Optional live provider smoke tests are available for checking real provider plumbing outside normal CI:
+
+```bash
+IKACORE_LIVE_PROVIDER_TESTS=1 OPENAI_API_KEY=... pytest src/IkaTest/test_live_provider_smoke.py
+```
+
+The live smoke suite supports OpenAI, Anthropic, DeepSeek, Gemini, and OpenRouter. When live smoke is enabled, at least one provider must be fully configured. For providers without stable project defaults, set the matching `IKACORE_LIVE_<PROVIDER>_MODEL` variable before running it.
+
 ### Examples
 
 The repo includes runnable examples in `examples/`:
@@ -326,4 +334,4 @@ The repo includes runnable examples in `examples/`:
 - `example_workflow.py`
 - `example_workflow_advanced.py`
 
-These examples are source-checkout examples and currently add `src/` to `sys.path` directly.
+These examples assume the package is installed, for example with `pip install -e .`, and should not mutate `sys.path`.

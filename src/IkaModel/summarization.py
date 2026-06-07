@@ -1,8 +1,14 @@
+# pyright: strict
+# pyright: reportUnusedFunction=false
+
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from typing import Optional, cast
 
 import httpx
+
+from IkaCore.agent_runtime_payloads import JsonDict, history_message_text, history_section, json_dict, string_value
 
 from .base import BareBoneModel
 from .model_metadata import (
@@ -57,7 +63,7 @@ WHAT_REMAINS_USER_PREFIX = _load_prompt(
 )
 
 
-def _get_prompts_for_kind(prompt_kind: str) -> Tuple[str, str]:
+def _get_prompts_for_kind(prompt_kind: str) -> tuple[str, str]:
     if prompt_kind == "force_answer":
         return FORCE_ANSWER_SYSTEM, FORCE_ANSWER_USER_PREFIX
     if prompt_kind == "what_remains":
@@ -83,14 +89,14 @@ def get_summary_model(provider: str) -> tuple[Optional[str], Optional[str]]:
     return get_summary_model_for_provider(provider)
 
 
-def _chat_summary_messages(sys_prompt: str, user_content: str) -> list[dict]:
+def _chat_summary_messages(sys_prompt: str, user_content: str) -> list[JsonDict]:
     return [
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": user_content},
     ]
 
 
-def _bearer_headers(api_key: str) -> dict:
+def _bearer_headers(api_key: str) -> dict[str, str]:
     return {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
@@ -102,7 +108,7 @@ def _build_deepseek_summary_payload(
     api_key: str,
     sys_prompt: str,
     user_content: str,
-) -> tuple[dict, dict]:
+) -> tuple[JsonDict, dict[str, str]]:
     return {
         "model": model_name,
         "messages": _chat_summary_messages(sys_prompt, user_content),
@@ -117,9 +123,9 @@ def _build_openai_like_summary_payload(
     api_key: str,
     sys_prompt: str,
     user_content: str,
-) -> tuple[dict, dict]:
+) -> tuple[JsonDict, dict[str, str]]:
     token_key = "max_completion_tokens" if uses_openai_max_completion_tokens(model_name) else "max_tokens"
-    payload = {
+    payload: JsonDict = {
         "model": model_name,
         "messages": _chat_summary_messages(sys_prompt, user_content),
         token_key: 2000,
@@ -134,8 +140,8 @@ def _build_anthropic_summary_payload(
     api_key: str,
     sys_prompt: str,
     user_content: str,
-) -> tuple[dict, dict]:
-    headers = {
+) -> tuple[JsonDict, dict[str, str]]:
+    headers: dict[str, str] = {
         "Content-Type": "application/json",
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01",
@@ -154,8 +160,8 @@ def _build_gemini_summary_payload(
     api_key: str,
     sys_prompt: str,
     user_content: str,
-) -> tuple[dict, dict]:
-    headers = {
+) -> tuple[JsonDict, dict[str, str]]:
+    headers: dict[str, str] = {
         "Content-Type": "application/json",
         "x-goog-api-key": api_key,
     }
@@ -175,7 +181,7 @@ def _build_codex_summary_payload(
     api_key: str,
     sys_prompt: str,
     user_content: str,
-) -> tuple[dict, dict]:
+) -> tuple[JsonDict, dict[str, str]]:
     headers = _bearer_headers(api_key)
     headers["Accept"] = "text/event-stream"
     return {
@@ -191,7 +197,7 @@ def _build_codex_summary_payload(
     }, headers
 
 
-SummaryPayloadBuilder = Callable[[str, str, str, str], tuple[dict, dict]]
+SummaryPayloadBuilder = Callable[[str, str, str, str], tuple[JsonDict, dict[str, str]]]
 SUMMARY_PAYLOAD_BUILDERS: dict[str, SummaryPayloadBuilder] = {
     "anthropic": _build_anthropic_summary_payload,
     "codex": _build_codex_summary_payload,
@@ -209,7 +215,7 @@ def create_summary_payload(
     conversation_text: str,
     system_prompt: Optional[str] = None,
     user_prompt_prefix: Optional[str] = None,
-) -> tuple[dict, dict]:
+) -> tuple[JsonDict, dict[str, str]]:
     sys_prompt = system_prompt if system_prompt is not None else SUMMARY_PROMPT
     user_prefix = user_prompt_prefix if user_prompt_prefix is not None else DEFAULT_SUMMARY_USER_PREFIX
     user_content = f"{user_prefix}{conversation_text}"
@@ -222,31 +228,42 @@ def create_summary_payload(
     return builder(model_name, api_key, sys_prompt, user_content)
 
 
-def _parse_chat_summary_response(data: dict) -> str:
+def _parse_chat_summary_response(data: JsonDict) -> str:
     return data["choices"][0]["message"]["content"]
 
 
-def _parse_anthropic_summary_response(data: dict) -> str:
-    content_blocks = data.get("content", [])
-    text_parts = [block["text"] for block in content_blocks if block.get("type") == "text"]
+def _parse_anthropic_summary_response(data: JsonDict) -> str:
+    content_blocks: object = data.get("content", [])
+    blocks = cast(list[object], content_blocks) if isinstance(content_blocks, list) else []
+    text_parts = [
+        string_value(block.get("text"))
+        for block in (json_dict(item) for item in blocks)
+        if block.get("type") == "text"
+    ]
     return "".join(text_parts)
 
 
-def _parse_gemini_summary_response(data: dict) -> str:
+def _parse_gemini_summary_response(data: JsonDict) -> str:
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
-def _parse_codex_summary_response(data: dict) -> str:
-    parts = []
-    for item in data.get("output", []) or []:
-        if item.get("type") == "message":
-            for block in item.get("content", []) or []:
-                if block.get("type") == "output_text":
-                    parts.append(block.get("text", ""))
-    return "".join(parts) or (data.get("output_text") or "")
+def _parse_codex_summary_response(data: JsonDict) -> str:
+    parts: list[str] = []
+    output_items: object = data.get("output", []) or []
+    items = cast(list[object], output_items) if isinstance(output_items, list) else []
+    for item in items:
+        item_data = json_dict(item)
+        if item_data.get("type") == "message":
+            content_blocks: object = item_data.get("content", []) or []
+            blocks = cast(list[object], content_blocks) if isinstance(content_blocks, list) else []
+            for block in blocks:
+                block_data = json_dict(block)
+                if block_data.get("type") == "output_text":
+                    parts.append(string_value(block_data.get("text")))
+    return "".join(parts) or string_value(data.get("output_text"))
 
 
-SummaryResponseParser = Callable[[dict], str]
+SummaryResponseParser = Callable[[JsonDict], str]
 SUMMARY_RESPONSE_PARSERS: dict[str, SummaryResponseParser] = {
     "anthropic": _parse_anthropic_summary_response,
     "codex": _parse_codex_summary_response,
@@ -258,7 +275,7 @@ SUMMARY_RESPONSE_PARSERS: dict[str, SummaryResponseParser] = {
 
 
 def parse_summary_response(provider: str, response: httpx.Response) -> str:
-    data = response.json()
+    data = json_dict(response.json())
     provider = _normalize_provider_for_summary(provider)
     parser = SUMMARY_RESPONSE_PARSERS.get(provider)
     if parser is None:
@@ -266,30 +283,38 @@ def parse_summary_response(provider: str, response: httpx.Response) -> str:
     return parser(data)
 
 
-def _usage_total_tokens(data: dict) -> int:
-    usage = data.get("usage", {})
-    return usage.get("total_tokens", 0)
+def _token_count(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    return 0
 
 
-def _usage_anthropic_tokens(data: dict) -> int:
-    usage = data.get("usage", {})
-    return usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+def _usage_total_tokens(data: JsonDict) -> int:
+    usage = json_dict(data.get("usage"))
+    return _token_count(usage.get("total_tokens"))
 
 
-def _usage_gemini_tokens(data: dict) -> int:
-    usage = data.get("usageMetadata", {})
-    return usage.get("totalTokenCount", 0)
+def _usage_anthropic_tokens(data: JsonDict) -> int:
+    usage = json_dict(data.get("usage"))
+    return _token_count(usage.get("input_tokens")) + _token_count(usage.get("output_tokens"))
 
 
-def _usage_codex_tokens(data: dict) -> int:
-    usage = data.get("usage", {})
-    return usage.get(
+def _usage_gemini_tokens(data: JsonDict) -> int:
+    usage = json_dict(data.get("usageMetadata"))
+    return _token_count(usage.get("totalTokenCount"))
+
+
+def _usage_codex_tokens(data: JsonDict) -> int:
+    usage = json_dict(data.get("usage"))
+    return _token_count(usage.get(
         "total_tokens",
         (usage.get("input_tokens", 0) or 0) + (usage.get("output_tokens", 0) or 0),
-    )
+    ))
 
 
-SummaryTokenExtractor = Callable[[dict], int]
+SummaryTokenExtractor = Callable[[JsonDict], int]
 SUMMARY_TOKEN_EXTRACTORS: dict[str, SummaryTokenExtractor] = {
     "anthropic": _usage_anthropic_tokens,
     "codex": _usage_codex_tokens,
@@ -300,7 +325,7 @@ SUMMARY_TOKEN_EXTRACTORS: dict[str, SummaryTokenExtractor] = {
 }
 
 
-def extract_summary_tokens(provider: str, data: dict) -> int:
+def extract_summary_tokens(provider: str, data: JsonDict) -> int:
     provider = _normalize_provider_for_summary(provider)
     extractor = SUMMARY_TOKEN_EXTRACTORS.get(provider)
     return extractor(data) if extractor else 0
@@ -327,9 +352,10 @@ def _resolve_summary_target(
     return model_name, api_url
 
 
-def _write_summary_to_history(message_history: dict, summary: str, summary_tokens: int) -> None:
-    message_history["summary"]["message"] = f"[SUMMARY]\n{summary}"
-    message_history["summary"]["tokens"] = summary_tokens
+def _write_summary_to_history(message_history: JsonDict, summary: str, summary_tokens: int) -> None:
+    summary_section = history_section(message_history, "summary")
+    summary_section["message"] = f"[SUMMARY]\n{summary}"
+    summary_section["tokens"] = summary_tokens
     message_history["messages"] = {}
     _LOG.info(
         "Message history summarized. Kept: system prompt, first input, and summary. "
@@ -337,26 +363,30 @@ def _write_summary_to_history(message_history: dict, summary: str, summary_token
     )
 
 
-def get_conversation_text(message_history: dict) -> str:
-    parts = []
-    if message_history["first_input"]["message"]:
-        parts.append(message_history["first_input"]["message"])
-    if message_history["summary"]["message"]:
-        parts.append(message_history["summary"]["message"])
-    for msg_id in message_history["messages"]:
-        parts.append(message_history["messages"][msg_id]["message"])
+def get_conversation_text(message_history: JsonDict) -> str:
+    parts: list[str] = []
+    first_input = history_message_text(message_history, "first_input")
+    if first_input:
+        parts.append(first_input)
+    summary = history_message_text(message_history, "summary")
+    if summary:
+        parts.append(summary)
+    for message_entry in history_section(message_history, "messages").values():
+        message = json_dict(message_entry).get("message")
+        if message:
+            parts.append(string_value(message))
     return "\n".join(parts)
 
 
 def run_summarization(
     barebone_model: BareBoneModel,
-    message_history: dict,
+    message_history: JsonDict,
     prompt_kind: str = "default",
     write_to_history: bool = True,
     use_same_model: bool = True,
     client: Optional[httpx.Client] = None,
 ) -> str:
-    if not message_history["first_input"]["message"] and not message_history["messages"]:
+    if not history_message_text(message_history, "first_input") and not history_section(message_history, "messages"):
         return ""
 
     conversation_text = get_conversation_text(message_history)
@@ -383,7 +413,7 @@ def run_summarization(
     try:
         response = api_request_retry(api_url, headers, payload, max_retries=3, wait_seconds=10, client=client)
         response.raise_for_status()
-        data = response.json()
+        data = json_dict(response.json())
         summary = parse_summary_response(provider, response)
         summary_tokens = extract_summary_tokens(provider, data)
 
@@ -394,14 +424,14 @@ def run_summarization(
     except httpx.HTTPError as e:
         _LOG.error(f"Failed to summarize message history: {e}")
         return ""
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, KeyError) as e:
         _LOG.error(f"Unexpected error during summarization: {e}")
         return ""
 
 
 def summarise_message_history(
     barebone_model: BareBoneModel,
-    message_history: dict,
+    message_history: JsonDict,
     client: Optional[httpx.Client] = None,
 ) -> str:
     return run_summarization(
@@ -415,13 +445,13 @@ def summarise_message_history(
 
 async def async_summarise_message_history(
     barebone_model: BareBoneModel,
-    message_history: dict,
+    message_history: JsonDict,
     client: Optional[httpx.AsyncClient] = None,
     use_same_model: bool = True,
     prompt_kind: str = "default",
     write_to_history: bool = True,
 ) -> str:
-    if not message_history["first_input"]["message"] and not message_history["messages"]:
+    if not history_message_text(message_history, "first_input") and not history_section(message_history, "messages"):
         return ""
 
     conversation_text = get_conversation_text(message_history)
@@ -448,7 +478,7 @@ async def async_summarise_message_history(
     try:
         response = await async_api_request_retry(api_url, headers, payload, max_retries=3, wait_seconds=10, client=client)
         response.raise_for_status()
-        data = response.json()
+        data = json_dict(response.json())
         summary = parse_summary_response(provider, response)
         summary_tokens = extract_summary_tokens(provider, data)
 
@@ -459,6 +489,6 @@ async def async_summarise_message_history(
     except httpx.HTTPError as e:
         _LOG.error(f"Failed to summarize message history: {e}")
         return ""
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, KeyError) as e:
         _LOG.error(f"Unexpected error during summarization: {e}")
         return ""

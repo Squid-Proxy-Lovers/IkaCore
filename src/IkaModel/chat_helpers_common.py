@@ -1,4 +1,7 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any, Optional
+
+from IkaCore.agent_runtime_payloads import JsonDict
 
 from .anthropic.chat_helpers_anthropic import (
     append_anthropic_tool_messages,
@@ -34,30 +37,31 @@ from .openrouter.chat_helpers_openrouter import (
     parse_openrouter_response,
 )
 
-BuildRequestFn = Callable[[Any, List[dict], dict], Tuple[str, Dict[str, str], dict]]
-ParseResponseFn = Callable[[dict, str], Tuple[str, Optional[str], List[dict], int]]
+BuildRequestFn = Callable[[Any, list[JsonDict], JsonDict], tuple[str, dict[str, str], JsonDict]]
+ParseResponseFn = Callable[[JsonDict, str], tuple[str, Optional[str], list[JsonDict], int]]
+GeminiResultFormatterFn = Callable[[list[JsonDict], list[str]], list[JsonDict]]
 ToolAppenderFn = Callable[
     [
-        List[dict],
-        dict,
+        list[JsonDict],
+        JsonDict,
         str,
         Optional[str],
-        List[dict],
-        List[dict],
-        List[str],
+        list[JsonDict],
+        list[JsonDict],
+        list[str],
         int,
         str,
-        Optional[Callable],
+        Optional[GeminiResultFormatterFn],
     ],
     None,
 ]
 StandardToolAppenderFn = Callable[
-    [List[dict], dict, str, Optional[str], List[dict], List[dict], int, str],
+    [list[JsonDict], JsonDict, str, Optional[str], list[JsonDict], list[JsonDict], int, str],
     None,
 ]
 
 
-PROVIDER_REQUEST_BUILDERS: Dict[str, BuildRequestFn] = {
+PROVIDER_REQUEST_BUILDERS: dict[str, BuildRequestFn] = {
     "anthropic": build_anthropic_request,
     "codex": build_codex_request,
     "deepseek": build_deepseek_request,
@@ -67,7 +71,7 @@ PROVIDER_REQUEST_BUILDERS: Dict[str, BuildRequestFn] = {
     "openrouter": build_openrouter_request,
 }
 
-PROVIDER_RESPONSE_PARSERS: Dict[str, ParseResponseFn] = {
+PROVIDER_RESPONSE_PARSERS: dict[str, ParseResponseFn] = {
     "anthropic": parse_anthropic_response,
     "codex": parse_codex_response,
     "deepseek": parse_deepseek_response,
@@ -80,16 +84,16 @@ PROVIDER_RESPONSE_PARSERS: Dict[str, ParseResponseFn] = {
 
 def _standard_tool_appender(append_fn: StandardToolAppenderFn) -> ToolAppenderFn:
     def append(
-        messages: List[dict],
-        message_history: dict,
+        messages: list[JsonDict],
+        message_history: JsonDict,
         content: str,
         reasoning_content: Optional[str],
-        executed_tool_call_list: List[dict],
-        tool_messages: List[dict],
-        tool_results: List[str],
+        executed_tool_call_list: list[JsonDict],
+        tool_messages: list[JsonDict],
+        tool_results: list[str],
         tokens: int,
         repeated_warning_msg: str = "",
-        format_gemini_results_fn: Optional[Callable] = None,
+        format_gemini_results_fn: Optional[GeminiResultFormatterFn] = None,
     ) -> None:
         append_fn(
             messages, message_history, content, reasoning_content,
@@ -100,16 +104,16 @@ def _standard_tool_appender(append_fn: StandardToolAppenderFn) -> ToolAppenderFn
 
 
 def _append_gemini_provider_tools(
-    messages: List[dict],
-    message_history: dict,
+    messages: list[JsonDict],
+    message_history: JsonDict,
     content: str,
     reasoning_content: Optional[str],
-    executed_tool_call_list: List[dict],
-    tool_messages: List[dict],
-    tool_results: List[str],
+    executed_tool_call_list: list[JsonDict],
+    tool_messages: list[JsonDict],
+    tool_results: list[str],
     tokens: int,
     repeated_warning_msg: str = "",
-    format_gemini_results_fn: Optional[Callable] = None,
+    format_gemini_results_fn: Optional[GeminiResultFormatterFn] = None,
 ) -> None:
     append_gemini_tool_messages(
         messages, message_history, content, reasoning_content,
@@ -118,7 +122,7 @@ def _append_gemini_provider_tools(
     )
 
 
-PROVIDER_TOOL_APPENDERS: Dict[str, ToolAppenderFn] = {
+PROVIDER_TOOL_APPENDERS: dict[str, ToolAppenderFn] = {
     "anthropic": _standard_tool_appender(append_anthropic_tool_messages),
     "codex": _standard_tool_appender(append_codex_tool_messages),
     "deepseek": _standard_tool_appender(append_deepseek_tool_messages),
@@ -132,9 +136,9 @@ PROVIDER_TOOL_APPENDERS: Dict[str, ToolAppenderFn] = {
 def build_provider_request(
     provider: str,
     barebone_model: Any,
-    messages: List[dict],
-    message_history: dict
-) -> Tuple[str, Dict[str, str], dict]:
+    messages: list[JsonDict],
+    message_history: JsonDict
+) -> tuple[str, dict[str, str], JsonDict]:
     builder = PROVIDER_REQUEST_BUILDERS.get(provider)
     if builder is None:
         raise ValueError(f"Unsupported provider: {provider}")
@@ -143,9 +147,9 @@ def build_provider_request(
 
 def parse_provider_response(
     provider: str,
-    data: dict,
+    data: JsonDict,
     model_id: str
-) -> Tuple[str, Optional[str], List[dict], int]:
+) -> tuple[str, Optional[str], list[JsonDict], int]:
     parser = PROVIDER_RESPONSE_PARSERS.get(provider)
     if parser is None:
         return "", None, [], 0
@@ -154,16 +158,16 @@ def parse_provider_response(
 
 def append_provider_tool_messages(
     provider: str,
-    messages: List[dict],
-    message_history: dict,
+    messages: list[JsonDict],
+    message_history: JsonDict,
     content: str,
     reasoning_content: Optional[str],
-    executed_tool_call_list: List[dict],
-    tool_messages: List[dict],
-    tool_results: List[str],
+    executed_tool_call_list: list[JsonDict],
+    tool_messages: list[JsonDict],
+    tool_results: list[str],
     tokens: int,
     repeated_warning_msg: str = "",
-    format_gemini_results_fn: Optional[Callable] = None
+    format_gemini_results_fn: Optional[GeminiResultFormatterFn] = None
 ) -> None:
     appender = PROVIDER_TOOL_APPENDERS.get(provider)
     if appender is None:

@@ -73,4 +73,4 @@ Codex support is documented in the [Provider Selection](docs/USAGE.md#provider-s
 
 ## Development Notes
 
-This repo has active cleanup work. The docs now reflect the current runtime behavior, but a few internal hygiene issues still remain, especially legacy `sys.path` mutation inside some modules and examples.
+This repo is maintained with `pytest` and `ruff`. Runtime modules and examples should import through the installed package rather than mutating `sys.path`; keep docs and examples aligned with public API changes.

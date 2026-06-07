@@ -1,4 +1,8 @@
-from typing import Any, Dict, List, Optional
+# pyright: strict
+
+from __future__ import annotations
+
+from typing import Any, Optional, Protocol
 
 from ..model_metadata import (
     openrouter_should_exclude_reasoning_for_tools,
@@ -6,15 +10,26 @@ from ..model_metadata import (
 )
 from ..openai.openai import openai_fill_payload
 
+JsonDict = dict[str, Any]
+
+
+class OpenRouterModel(Protocol):
+    model_id: str
+    max_tokens: int
+    temperature: float
+    agent_tools: list[Any]
+    parallel_tool_calls: bool
+    reasoning_effort: Optional[str]
+
 
 def openrouter_fill_payload(
-    model,
-    messages: List[Dict[str, Any]],
-    message_history: Optional[Dict[str, Any]] = None,
-    plugins: Optional[List[str]] = None,
-    response_format: Optional[Dict[str, Any]] = None,
+    model: OpenRouterModel,
+    messages: list[JsonDict],
+    message_history: Optional[JsonDict] = None,
+    plugins: Optional[list[Any]] = None,
+    response_format: Optional[JsonDict] = None,
     agent_tools: Optional[list[Any]] = None,
-) -> Dict[str, Any]:
+) -> JsonDict:
     """Build OpenRouter API payload (OpenAI-compatible with extensions)."""
     # Start with OpenAI payload as base
     payload = openai_fill_payload(model, messages, message_history, agent_tools=agent_tools)
@@ -45,7 +60,7 @@ def openrouter_fill_payload(
     # that the base function may have applied (e.g. 16384 for gpt-4o-mini).
     # Preserve whichever key the base function chose (max_completion_tokens
     # vs max_tokens) to avoid sending both.
-    max_tokens_value = model.max_tokens if model.max_tokens and model.max_tokens > 0 else 4096
+    max_tokens_value = model.max_tokens if model.max_tokens > 0 else 4096
     if "max_completion_tokens" in payload:
         payload["max_completion_tokens"] = max_tokens_value
         # Ensure we don't have both keys

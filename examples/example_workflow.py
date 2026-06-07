@@ -1,21 +1,22 @@
 import os
 
-from IkaCore import IkaBaseAgent, IkaWorkflow, WorkflowNode, WorkflowEdge
+from IkaCore import IkaBaseAgent, IkaWorkflow, WorkflowEdge, WorkflowNode
 
-API_KEY = os.getenv("API_KEY")
-MODEL_ID = os.getenv("MODEL_ID", "deepseek-reasoner")
-if not API_KEY:
-    raise ValueError("API_KEY is not set")
 
 def main():
+    api_key = os.getenv("API_KEY")
+    model_id = os.getenv("MODEL_ID", "deepseek-reasoner")
+    if not api_key:
+        raise ValueError("API_KEY is not set")
+
     agent_a = IkaBaseAgent(
         name="agent_a",
         description="First agent in the pipeline",
         system_prompt="You are a concise assistant. Reply in one short paragraph.",
         prompt="Expand on the topic you receive. Produce a brief explanation.",
         tools=[],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        model_id=model_id,
+        api_key=api_key,
     )
 
     agent_b = IkaBaseAgent(
@@ -24,8 +25,8 @@ def main():
         system_prompt="You are a concise assistant. Reply in one short paragraph.",
         prompt="Summarize the text you receive into 2 or 3 bullet points.",
         tools=[],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        model_id=model_id,
+        api_key=api_key,
     )
 
     node_a = WorkflowNode(name="node_a", agent=agent_a)
@@ -50,6 +51,7 @@ def main():
         print()
 
     print("Final from last node:", results["node_b"].final[:300], "...")
+
 
 if __name__ == "__main__":
     main()

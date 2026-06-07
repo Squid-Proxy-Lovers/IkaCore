@@ -7,9 +7,11 @@ import sqlite3
 import stat
 import subprocess
 import sys
+from contextlib import closing
 from importlib.resources import files
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from IkaCore.agents import IkaBaseAgent
@@ -18,12 +20,27 @@ from IkaCore.logging_utils import IkaLogger
 from IkaMem.long_term_memory import LTMemory
 from IkaMem.short_term_memory import STMemory
 from IkaModel import model_metadata
-from IkaModel.base import AgentTool, BareBoneModel, ToolArgs
-from IkaModel.chat_interface.chat_interface import async_chat, init_message_history
-from IkaModel.chat_interface.response_interface import async_execute_tool_calls, format_gemini_results
+from IkaModel.base import AgentEndException, AgentTool, BareBoneModel, ToolArgs
+from IkaModel.chat_interface import chat_runtime
+from IkaModel.chat_interface.chat_interface import async_chat, chat, init_message_history
+from IkaModel.chat_interface.response_interface import (
+    async_execute_tool_calls,
+    execute_tool_calls,
+    format_gemini_results,
+)
+from IkaModel.chat_interface.types import ChatLoopState, ChatResponsePayload, ToolRuntimeState, UsageInfo
 from IkaModel.codex import auth as codex_auth
 from IkaModel.gemini.chat_helpers_gemini import build_gemini_request
-from IkaModel.request_interface import _redact_headers, _redact_url, model_for_payload
+from IkaModel.request_interface import (
+    IkaAPIError,
+    IkaRateLimitError,
+    IkaTimeoutError,
+    _redact_headers,
+    _redact_url,
+    api_request_retry,
+    model_for_payload,
+)
+from IkaModel.runtime_errors import IkaContextWindowError, IkaProviderPayloadError
 from IkaModel.tool_schema import build_provider_tool_payload, build_tool_parameters
 
 
@@ -99,6 +116,154 @@ def test_async_tool_calls_return_schema_hint_for_empty_required_args():
     assert "query" in tool_results[0]
 
 
+def test_chat_runtime_types_preserve_public_dict_shape():
+    usage = UsageInfo.from_mapping(
+        {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3, "input_cached_tokens": 4}
+    )
+    usage.add_mapping({"input_tokens": 5, "total_tokens": 6})
+    state = ChatLoopState(
+        provider="openai",
+        content="content",
+        reasoning_content=None,
+        tool_calls=[],
+        tokens=9,
+        content_before_tools="content",
+        usage=usage,
+    )
+    state.add_usage({"output_tokens": 7, "total_tokens": 8})
+    payload = ChatResponsePayload(
+        content=state.content,
+        reasoning_content=state.reasoning_content,
+        tool_calls=state.tool_calls,
+        executed_tool_calls=[],
+        content_before_tools=state.content_before_tools,
+        message_history=init_message_history(),
+        usage=state.usage,
+        cost={"total_cost": 0.0},
+        hijacked=False,
+    )
+
+    out = payload.to_dict()
+
+    assert out["content"] == "content"
+    assert out["usage"] == {
+        "input_tokens": 6,
+        "output_tokens": 9,
+        "total_tokens": 17,
+        "input_cached_tokens": 4,
+    }
+    assert out["cost"] == {"total_cost": 0.0}
+    assert out["interrupted"] is False
+    assert out["interrupt_data"] is None
+
+
+def test_tool_runtime_state_syncs_compatibility_attributes():
+    model = BareBoneModel(
+        model_id="gpt-4o",
+        api_key="k",
+        api_url="https://api.openai.com/v1/chat/completions",
+        suppress_init_output=True,
+        use_responses_api=False,
+    )
+    model._tool_call_counts = {"search": 1}
+    model._recent_tool_calls = [("search", '{"q":"a"}')]
+    model._current_step = 2
+
+    state = ToolRuntimeState.from_model(model)
+    state.apply_updated_counts({"search": 2, "fetch": 1})
+    state.record_executed([{"function": {"name": "fetch", "arguments": "{}"}}])
+    state.recent_tool_calls.append(("fetch", "{}"))
+    state.sync_to_model(model)
+
+    assert state.current_step == 3
+    assert state.total_tool_calls_in_cycle == 1
+    assert model._tool_call_counts == {"search": 2, "fetch": 1}
+    assert model._recent_tool_calls == [("search", '{"q":"a"}'), ("fetch", "{}")]
+    assert model._current_step == 3
+
+
+def test_chat_context_fallback_classifies_initial_payload_build_failure():
+    model = BareBoneModel(
+        model_id="gpt-4o",
+        api_key="k",
+        api_url="https://api.openai.com/v1/chat/completions",
+        suppress_init_output=True,
+        use_responses_api=False,
+    )
+
+    def build_payload():
+        raise KeyError("missing required field")
+
+    with pytest.raises(IkaProviderPayloadError, match="provider request payload"):
+        chat_runtime._api_request_with_context_fallback(build_payload, model, init_message_history())
+
+
+def test_chat_context_fallback_classifies_rebuild_failure_after_summarization():
+    model = BareBoneModel(
+        model_id="gpt-4o",
+        api_key="k",
+        api_url="https://api.openai.com/v1/chat/completions",
+        suppress_init_output=True,
+        use_responses_api=False,
+    )
+    calls = {"count": 0}
+
+    def build_payload():
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return "https://example.test", {}, {}
+        raise ValueError("bad rebuilt payload")
+
+    with patch(
+        "IkaModel.chat_interface.chat_request.api_request_retry",
+        side_effect=IkaAPIError("maximum context length exceeded"),
+    ):
+        with patch("IkaModel.chat_interface.chat_request.summarise_message_history", return_value="summary"):
+            with pytest.raises(IkaContextWindowError, match="rebuild provider request"):
+                chat_runtime._api_request_with_context_fallback(build_payload, model, init_message_history())
+
+
+def test_sync_tool_calls_reject_malformed_json_without_execution():
+    calls = []
+
+    def executor(args):
+        calls.append(args)
+        return "should not execute"
+
+    _, tool_results, counts, executed, interrupt = execute_tool_calls(
+        [{"id": "call_1", "function": {"name": "needs_query", "arguments": '{"query":'}}],
+        {"needs_query": executor},
+        "openai",
+    )
+
+    assert calls == []
+    assert counts == {}
+    assert interrupt is None
+    assert executed[0]["function"]["name"] == "needs_query"
+    assert "Malformed JSON" in tool_results[0]
+
+
+def test_sync_tool_calls_skip_duplicate_arguments_after_first_execution():
+    calls = []
+
+    def executor(args):
+        calls.append(args)
+        return {"ok": args["query"]}
+
+    tool_call = {"function": {"name": "search", "arguments": '{"query":"x"}'}}
+    _, tool_results, counts, _, interrupt = execute_tool_calls(
+        [{"id": "call_1", **tool_call}, {"id": "call_2", **tool_call}],
+        {"search": executor},
+        "openai",
+    )
+
+    assert calls == [{"query": "x"}]
+    assert counts == {"search": 1}
+    assert interrupt is None
+    assert json.loads(tool_results[0]) == {"ok": "x"}
+    assert "Duplicate tool call" in tool_results[1]
+
+
 def test_async_repeated_tool_guard_returns_forced_completion_without_execution():
     model = BareBoneModel(
         model_id="gpt-4o",
@@ -150,6 +315,86 @@ def test_async_repeated_tool_guard_returns_forced_completion_without_execution()
     assert "forced final" in out["content"]
 
 
+def test_sync_max_tool_calls_force_completes_with_synthetic_agent_end():
+    model = BareBoneModel(
+        model_id="gpt-4o",
+        api_key="k",
+        api_url="https://api.openai.com/v1/chat/completions",
+        suppress_init_output=True,
+        use_responses_api=False,
+    )
+    model.agent_tools = [AgentTool("loop", "loop", "Loop", ToolArgs("object", "payload"))]
+
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": "before tools",
+                    "tool_calls": [{"id": "call_1", "function": {"name": "loop", "arguments": "{}"}}],
+                }
+            }
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+    }
+
+    with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=response):
+        with patch("IkaModel.chat_interface.chat_interface.run_summarization", return_value="forced done"):
+            with pytest.raises(AgentEndException) as exc_info:
+                chat(
+                    model,
+                    [{"role": "user", "content": "hi"}],
+                    message_history=init_message_history(),
+                    tool_executors={"loop": lambda _args: "ok"},
+                    max_tool_calls=1,
+                )
+
+    out = exc_info.value.response
+    assert out["hijacked"] is True
+    assert out["content"] == "forced done"
+    assert out["usage"]["total_tokens"] == 3
+    assert [call["function"]["name"] for call in out["executed_tool_calls"]] == ["loop", "agent_end"]
+
+
+def test_async_chat_preserves_caller_owned_client_lifecycle():
+    model = BareBoneModel(
+        model_id="gpt-4o",
+        api_key="k",
+        api_url="https://api.openai.com/v1/chat/completions",
+        suppress_init_output=True,
+        use_responses_api=False,
+    )
+    model.agent_tools = []
+
+    async def run_case():
+        transport = httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": "done", "tool_calls": []}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                },
+            )
+        )
+        client = httpx.AsyncClient(transport=transport)
+        try:
+            out = await async_chat(
+                model,
+                [{"role": "user", "content": "hi"}],
+                message_history=init_message_history(),
+                client=client,
+            )
+            assert out["content"] == "done"
+            assert out["usage"]["total_tokens"] == 2
+            assert client.is_closed is False
+        finally:
+            await client.aclose()
+        assert client.is_closed is True
+
+    asyncio.run(run_case())
+
+
 def test_gemini_api_key_uses_header_and_redaction_hides_secrets():
     model = BareBoneModel(
         model_id="gemini-1.5-pro",
@@ -185,11 +430,12 @@ def test_corrupt_checkpoint_payload_raises(tmp_path):
     db_path = tmp_path / "checkpoints.db"
     store = CheckpointStore(str(db_path))
 
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "INSERT INTO checkpoints (uid, scope, payload_json, created_at) VALUES (?, ?, ?, ?)",
-            ("bad-json", "test", "{not-json", "2026-06-05T00:00:00+00:00"),
-        )
+    with closing(sqlite3.connect(db_path)) as conn:
+        with conn:
+            conn.execute(
+                "INSERT INTO checkpoints (uid, scope, payload_json, created_at) VALUES (?, ?, ?, ?)",
+                ("bad-json", "test", "{not-json", "2026-06-05T00:00:00+00:00"),
+            )
 
     with pytest.raises(ValueError, match="invalid JSON"):
         store.load_checkpoint("bad-json")
@@ -356,3 +602,28 @@ def test_memory_operations_do_not_write_to_stdout(capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == ""
+
+
+def test_mem0_store_missing_dependency_has_clear_error(monkeypatch):
+    from IkaMem.storage import mem0_storage
+
+    monkeypatch.setattr(mem0_storage, "_MEM0_AVAILABLE", False)
+
+    with pytest.raises(ImportError, match="optional 'mem0' package"):
+        mem0_storage.Mem0Store(memory_type="short_term")
+
+
+def test_api_retry_uses_typed_rate_limit_error():
+    response = httpx.Response(429, content=b"rate limit")
+
+    with patch("IkaModel.request_interface.httpx.post", return_value=response):
+        with pytest.raises(IkaRateLimitError) as exc_info:
+            api_request_retry("https://example.test", {}, {}, max_retries=1)
+
+    assert exc_info.value.status_code == 429
+
+
+def test_api_retry_uses_typed_timeout_error():
+    with patch("IkaModel.request_interface.httpx.post", side_effect=httpx.ReadTimeout("slow")):
+        with pytest.raises(IkaTimeoutError, match="timed out"):
+            api_request_retry("https://example.test", {}, {}, max_retries=1, timeout=0.01)

@@ -1,9 +1,11 @@
+# pyright: strict
+
 from __future__ import annotations
 
 import json
 from functools import lru_cache
 from importlib.resources import files
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from .codex_constants import CODEX_API_URL
 
@@ -16,7 +18,7 @@ _MODEL_METADATA_RESOURCE = "data/model_metadata.json"
 
 def _load_model_metadata() -> dict[str, Any]:
     try:
-        raw = files(__package__).joinpath(_MODEL_METADATA_RESOURCE).read_text(encoding="utf-8")
+        raw = files(__package__ or "IkaModel").joinpath(_MODEL_METADATA_RESOURCE).read_text(encoding="utf-8")
     except FileNotFoundError as e:
         raise RuntimeError(f"missing model metadata resource: {_MODEL_METADATA_RESOURCE}") from e
     try:
@@ -25,21 +27,37 @@ def _load_model_metadata() -> dict[str, Any]:
         raise RuntimeError(f"invalid model metadata JSON: {_MODEL_METADATA_RESOURCE}") from e
     if not isinstance(data, dict):
         raise RuntimeError("model metadata must be a JSON object")
-    return data
+    return cast(dict[str, Any], data)
 
 
 def _require_mapping(data: dict[str, Any], key: str) -> dict[str, Any]:
     value = data.get(key)
     if not isinstance(value, dict) or not value:
         raise RuntimeError(f"model metadata field '{key}' must be a non-empty object")
-    return value
+    return cast(dict[str, Any], value)
+
+
+def _require_list(value: Any, key: str, expected_len: int) -> list[Any]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"metadata for '{key}' must be a {expected_len}-item list")
+    typed_value = cast(list[Any], value)
+    if len(typed_value) != expected_len:
+        raise RuntimeError(f"metadata for '{key}' must be a {expected_len}-item list")
+    return typed_value
+
+
+def _load_string_set(data: dict[str, Any], key: str) -> frozenset[str]:
+    value = data.get(key, [])
+    if not isinstance(value, list):
+        raise RuntimeError(f"model metadata field '{key}' must be a list")
+    return frozenset(str(item) for item in cast(list[Any], value))
 
 
 def _load_tokenmax_mapping(data: dict[str, Any]) -> dict[str, int]:
     raw = _require_mapping(data, "tokenmax_mapping")
     out: dict[str, int] = {}
     for key, value in raw.items():
-        if not isinstance(key, str) or not key:
+        if not key:
             raise RuntimeError("token metadata keys must be non-empty strings")
         if not isinstance(value, int) or value <= 0:
             raise RuntimeError(f"token metadata for '{key}' must be a positive integer")
@@ -51,14 +69,13 @@ def _load_model_costs(data: dict[str, Any]) -> dict[str, tuple[float, float, flo
     raw = _require_mapping(data, "model_costs")
     out: dict[str, tuple[float, float, float]] = {}
     for key, value in raw.items():
-        if not isinstance(key, str) or not key:
+        if not key:
             raise RuntimeError("cost metadata keys must be non-empty strings")
-        if not isinstance(value, list) or len(value) != 3:
-            raise RuntimeError(f"cost metadata for '{key}' must be a 3-item list")
-        costs = tuple(float(v) for v in value)
+        raw_costs = _require_list(value, key, 3)
+        costs = (float(raw_costs[0]), float(raw_costs[1]), float(raw_costs[2]))
         if any(v < 0 for v in costs):
             raise RuntimeError(f"cost metadata for '{key}' cannot contain negative values")
-        out[key] = costs  # type: ignore[assignment]
+        out[key] = costs
     return out
 
 
@@ -74,9 +91,8 @@ def _load_summary_models(data: dict[str, Any]) -> dict[str, tuple[str, str]]:
     raw = _require_mapping(data, "summary_model_by_provider")
     out: dict[str, tuple[str, str]] = {}
     for key, value in raw.items():
-        if not isinstance(value, list) or len(value) != 2:
-            raise RuntimeError(f"summary metadata for '{key}' must be a 2-item list")
-        model, url = value
+        raw_summary = _require_list(value, key, 2)
+        model, url = raw_summary
         out[str(key)] = (str(model), str(url))
     return out
 
@@ -84,7 +100,7 @@ def _load_summary_models(data: dict[str, Any]) -> dict[str, tuple[str, str]]:
 _MODEL_DATA = _load_model_metadata()
 API_URL_BY_PROVIDER = _load_api_urls(_MODEL_DATA)
 SUMMARY_MODEL_BY_PROVIDER = _load_summary_models(_MODEL_DATA)
-CODEX_KNOWN_MODELS = frozenset(str(value) for value in _MODEL_DATA.get("codex_known_models", []))
+CODEX_KNOWN_MODELS = _load_string_set(_MODEL_DATA, "codex_known_models")
 TOKENMAX_MAPPING = _load_tokenmax_mapping(_MODEL_DATA)
 MODEL_COSTS = _load_model_costs(_MODEL_DATA)
 

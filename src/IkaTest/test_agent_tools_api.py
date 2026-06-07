@@ -2,6 +2,7 @@
 Tests for IkaBaseAgent tool conversion and API schema generation:
 convert IkaTools/subagents to AgentTool, build_tool_executors, and payload tools shape.
 """
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -93,6 +94,19 @@ class TestBuildToolExecutors:
         with pytest.raises(ValueError, match="empty"):
             executors["agent_end"]({"input": ""})
 
+    @pytest.mark.parametrize("value", [True, False])
+    def test_agent_end_accepts_bool_input_after_validation_coercion(self, value):
+        a = _minimal_agent()
+        executors = a.build_tool_executors([])
+        assert "ended" in executors["agent_end"]({"input": value}).lower()
+
+    @pytest.mark.parametrize("value", ["{}", "[]", "null", '{"functions": []}'])
+    def test_agent_end_rejects_empty_json_values(self, value):
+        a = _minimal_agent()
+        executors = a.build_tool_executors([])
+        with pytest.raises(ValueError, match="empty|invalid"):
+            executors["agent_end"]({"input": value})
+
     def test_stage_end_executor(self):
         a = _minimal_agent()
         stage = IkaStage("S", "P", [])
@@ -108,6 +122,29 @@ class TestBuildToolExecutors:
         assert "change_stage" in executors
         out = executors["change_stage"]({"reason": "Need to redo"})
         assert "stage" in out.lower()
+
+    def test_hitl_ask_user_executor_wired_only_for_hitl_stage(self):
+        hitl_stage = IkaStage("Review", "P", [], hitl=True)
+        non_hitl_stage = IkaStage("Draft", "P", [])
+        a = _minimal_agent()
+        a._prompt_hitl_question = MagicMock(return_value="user answer")
+
+        hitl_executors = a.build_tool_executors(
+            hitl_stage.tools,
+            stage=hitl_stage,
+            stage_index=2,
+            remaining_steps=7,
+        )
+        non_hitl_executors = a.build_tool_executors(non_hitl_stage.tools, stage=non_hitl_stage)
+
+        assert hitl_executors["ask_user"]({"question": "Proceed?"}) == "user answer"
+        a._prompt_hitl_question.assert_called_once_with(
+            "Review",
+            "Proceed?",
+            stage_index=2,
+            remaining_steps=7,
+        )
+        assert "ask_user" not in non_hitl_executors
 
     def test_ika_tool_executor_wired(self):
         results = []
@@ -143,6 +180,64 @@ class TestBuildToolExecutors:
         assert sub.prompt == "Sub base"
         assert sub.system_prompt == "Sub system"
         assert sub.message_history["first_input"]["message"] == ""
+
+    def test_subagent_executor_reports_missing_input_and_runtime_errors(self):
+        sub = _minimal_agent(name="Sub")
+        sub_run = sub.clone_for_run()
+        sub_run.execution = MagicMock(side_effect=RuntimeError("boom"))
+        sub.clone_for_run = MagicMock(return_value=sub_run)
+        a = _minimal_agent(subagents=[sub])
+
+        executors = a.build_tool_executors([])
+
+        missing_input = json.loads(executors["Sub"]({}))
+        runtime_error = json.loads(executors["Sub"]({"input": "Do task"}))
+
+        assert missing_input == {"error": "No input provided for subagent"}
+        assert "Error executing subagent 'Sub': boom" in runtime_error["error"]
+        sub_run.execution.assert_called_once()
+
+    def test_memory_executors_enforce_rate_limit_and_delegate(self):
+        a = _minimal_agent(memory_access={})
+        a.short_term_memory = MagicMock()
+        a.long_term_memory = MagicMock()
+        a._enforce_rate_limit_tool = MagicMock()
+        a._save_to_short_term = MagicMock(return_value="short saved")
+        a._search_short_term = MagicMock(return_value={"matches": ["short"]})
+        a._save_to_long_term = MagicMock(return_value="long saved")
+        a._search_long_term = MagicMock(return_value={"matches": ["long"]})
+        long_term_filter = MagicMock(return_value=True)
+        memory_access = {
+            "short_term_save": True,
+            "short_term_search": True,
+            "long_term_save": True,
+            "long_term_search": True,
+        }
+
+        executors = a.build_tool_executors([], memory_access=memory_access, long_term_filter=long_term_filter)
+
+        assert executors["short_term_save"]({"input": "note"}) == "short saved"
+        assert json.loads(executors["short_term_search"]({"query": "needle", "limit": 3, "score_threshold": 0.8})) == {
+            "matches": ["short"]
+        }
+        assert executors["long_term_save"]({"task": "t", "output": "o"}) == "long saved"
+        assert json.loads(executors["long_term_search"]({"query": "archive", "limit": 2})) == {"matches": ["long"]}
+
+        assert a._enforce_rate_limit_tool.call_args_list == [
+            (("short_term_save",),),
+            (("short_term_search",),),
+            (("long_term_save",),),
+            (("long_term_search",),),
+        ]
+        a._save_to_short_term.assert_called_once_with("note")
+        a._search_short_term.assert_called_once_with("needle", limit=3, score_threshold=0.8)
+        a._save_to_long_term.assert_called_once_with({"task": "t", "output": "o"})
+        a._search_long_term.assert_called_once_with(
+            "archive",
+            limit=2,
+            score_threshold=0.6,
+            filter_func=long_term_filter,
+        )
 
 
 class TestApiPayloadToolSchema:

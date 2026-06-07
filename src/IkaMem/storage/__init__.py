@@ -1,5 +1,9 @@
 """storage backends."""
 
+# pyright: strict
+
+from __future__ import annotations
+
 from IkaMem.storage.interface import Storage
 
 try:

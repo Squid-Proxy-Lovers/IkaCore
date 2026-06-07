@@ -1,10 +1,14 @@
+# pyright: strict
+
 from __future__ import annotations
 
-from typing import Any, Dict, NamedTuple
+from typing import Any, NamedTuple, cast
+
+JsonSchema = dict[str, Any]
 
 
 class ProviderToolPayload(NamedTuple):
-    tools: list[dict[str, Any]]
+    tools: list[JsonSchema]
     names: frozenset[str]
     required_names: tuple[str, ...]
 
@@ -14,7 +18,13 @@ _PROVIDER_TOOL_FAST_CACHE: dict[tuple[Any, ...], tuple[list[Any], ProviderToolPa
 _PROVIDER_TOOL_CACHE_MAX = 512
 
 
-def build_tool_parameters(tool: Any) -> Dict[str, Any]:
+def _as_schema(value: Any) -> JsonSchema:
+    if isinstance(value, dict):
+        return cast(JsonSchema, value)
+    return {}
+
+
+def build_tool_parameters(tool: Any) -> JsonSchema:
     """Build the object-root JSON schema used by provider function tools."""
     tool_args = getattr(tool, "args", None)
     arg_type = getattr(tool_args, "type", "string")
@@ -23,8 +33,10 @@ def build_tool_parameters(tool: Any) -> Dict[str, Any]:
     tool_name = getattr(tool, "name", "")
     cache_key = (tool_name, arg_type, description, id(properties))
     cached = getattr(tool, "_ika_tool_parameters_cache", None)
-    if cached and cached[0] == cache_key:
-        return cached[1]
+    if isinstance(cached, tuple):
+        cached_tuple = cast(tuple[Any, ...], cached)
+        if len(cached_tuple) == 2 and cached_tuple[0] == cache_key:
+            return _as_schema(cached_tuple[1])
 
     if tool_name == "agent_end" and arg_type == "input":
         parameters = _input_parameters(
@@ -37,26 +49,27 @@ def build_tool_parameters(tool: Any) -> Dict[str, Any]:
         return _cache_tool_parameters(tool, cache_key, parameters)
 
     if isinstance(properties, dict):
-        if not properties:
+        schema_properties = cast(JsonSchema, properties)
+        if not schema_properties:
             parameters = _empty_object_parameters()
             return _cache_tool_parameters(tool, cache_key, parameters)
-        if properties.get("type") == "object":
+        if schema_properties.get("type") == "object":
             parameters = {
                 "type": "object",
-                "properties": properties.get("properties", {}),
-                "required": properties.get("required", []),
+                "properties": _as_schema(schema_properties.get("properties")),
+                "required": _as_list(schema_properties.get("required")),
             }
             return _cache_tool_parameters(tool, cache_key, parameters)
-        if "type" not in properties:
-            required_list = list(properties.get("__required__", []))
-            props = {
-                key: value
-                for key, value in properties.items()
+        if "type" not in schema_properties:
+            required_list = [str(item) for item in _as_list(schema_properties.get("__required__"))]
+            props: JsonSchema = {
+                key: cast(JsonSchema, value)
+                for key, value in schema_properties.items()
                 if key != "__required__" and isinstance(value, dict)
             }
-            parameters = {"type": "object", "properties": props, "required": required_list}
+            parameters: JsonSchema = {"type": "object", "properties": props, "required": required_list}
             return _cache_tool_parameters(tool, cache_key, parameters)
-        parameters = _ensure_object_root(properties)
+        parameters = _ensure_object_root(schema_properties)
         return _cache_tool_parameters(tool, cache_key, parameters)
 
     if arg_type == "object":
@@ -78,10 +91,16 @@ def build_tool_parameters(tool: Any) -> Dict[str, Any]:
     return _cache_tool_parameters(tool, cache_key, parameters)
 
 
-def _cache_tool_parameters(tool: Any, cache_key: tuple[Any, ...], parameters: Dict[str, Any]) -> Dict[str, Any]:
+def _as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return cast(list[Any], value)
+    return []
+
+
+def _cache_tool_parameters(tool: Any, cache_key: tuple[Any, ...], parameters: JsonSchema) -> JsonSchema:
     try:
         tool._ika_tool_parameters_cache = (cache_key, parameters)
-    except Exception:
+    except (AttributeError, TypeError):
         pass
     return parameters
 
@@ -127,7 +146,7 @@ def _tool_fingerprint(tool: Any) -> tuple[Any, ...]:
     )
 
 
-def _build_provider_tool(provider: str, tool: Any) -> dict[str, Any]:
+def _build_provider_tool(provider: str, tool: Any) -> JsonSchema:
     parameters = build_tool_parameters(tool)
     if provider in {"openai", "deepseek", "openrouter"}:
         return {
@@ -151,7 +170,7 @@ def _build_provider_tool(provider: str, tool: Any) -> dict[str, Any]:
             "parameters": parameters,
         }
 
-    if provider == "codex" and isinstance(parameters, dict) and parameters.get("type") == "object":
+    if provider == "codex" and parameters.get("type") == "object":
         parameters = {**parameters, "additionalProperties": parameters.get("additionalProperties", False)}
     return {
         "type": "function",
@@ -161,7 +180,7 @@ def _build_provider_tool(provider: str, tool: Any) -> dict[str, Any]:
     }
 
 
-def _input_parameters(description: str) -> Dict[str, Any]:
+def _input_parameters(description: str) -> JsonSchema:
     return {
         "type": "object",
         "properties": {
@@ -174,15 +193,15 @@ def _input_parameters(description: str) -> Dict[str, Any]:
     }
 
 
-def _empty_object_parameters() -> Dict[str, Any]:
+def _empty_object_parameters() -> JsonSchema:
     return {"type": "object", "properties": {}, "required": []}
 
 
-def _ensure_object_root(parameters: Dict[str, Any]) -> Dict[str, Any]:
+def _ensure_object_root(parameters: JsonSchema) -> JsonSchema:
     if parameters.get("type") == "object":
         return parameters
     return {
         "type": "object",
-        "properties": parameters.get("properties", {}),
-        "required": parameters.get("required", []),
+        "properties": _as_schema(parameters.get("properties")),
+        "required": _as_list(parameters.get("required")),
     }

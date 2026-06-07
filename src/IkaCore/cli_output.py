@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import sys
 import threading
@@ -6,56 +8,60 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from threading import Lock, local
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, cast
 
-# Global stdout lock - shared across all output systems for thread-safe console output
 _stdout_lock = Lock()
-
-# Global flag to enable or disable all stdout emission from IkaCore
 _stdout_enabled = True
-
-# Optional sink for routing rendered output somewhere else (for example, log files)
 _output_sink: Optional[Callable[["OutputContext", str], None]] = None
 
 
 def set_stdout_enabled(enabled: bool) -> None:
-    """
-    Enable or disable all stdout output produced by IkaCore.
-    When disabled, CLIOutput will drop all rendered output instead of writing to sys.stdout.
-    """
+    """Enable or disable all stdout output produced by IkaCore."""
     global _stdout_enabled
     _stdout_enabled = bool(enabled)
 
 
 def is_stdout_enabled() -> bool:
-    """
-    Return current stdout enable state for IkaCore.
-    """
+    """Return current stdout enable state for IkaCore."""
     return _stdout_enabled
 
 
 def set_output_sink(sink: Optional[Callable[["OutputContext", str], None]]) -> None:
-    """
-    Set a sink callback that receives every rendered output box.
-    The sink is called even when stdout is disabled.
-    """
+    """Set a callback that receives every rendered output box."""
     global _output_sink
     _output_sink = sink
 
 
+def _route_to_sink(ctx: "OutputContext", rendered: str) -> None:
+    if _output_sink is None:
+        return
+    try:
+        _output_sink(ctx, rendered)
+    except Exception:
+        pass
+
+
+def _write_stdout(rendered: str) -> None:
+    if not _stdout_enabled:
+        return
+    with _stdout_lock:
+        sys.stdout.write(rendered)
+        sys.stdout.flush()
+
+
 class OutputType(Enum):
-    AGENT_INIT = "agent_init"          # YELLOW
-    TOOL_CALL = "tool_call"            # GREEN
-    TOOL_RESULT = "tool_result"        # RED
-    AGENT_RESPONSE = "agent_response"  # BLUE
-    SUMMARIZATION = "summarization"    # MAGENTA
+    AGENT_INIT = "agent_init"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    AGENT_RESPONSE = "agent_response"
+    SUMMARIZATION = "summarization"
 
 
 @dataclass
 class OutputContext:
     output_type: OutputType
     step_number: int
-    hierarchy_chain: List[str]  # e.g., ["recon_agent", "safe_ping_sweep", "nmap_scan"]
+    hierarchy_chain: List[str]
     thread_id: int
     instance_id: int
     content: str
@@ -67,31 +73,171 @@ class OutputContext:
         return " -> ".join(self.hierarchy_chain) if self.hierarchy_chain else "root"
 
 
-class BoxRenderer:
+class _BoxTextState(Protocol):
+    use_colors: bool
+    COLORS: Dict[OutputType, str]
+    RESET: str
+    NO_TRUNCATE_TYPES: set[OutputType]
+    MAX_CONTENT_LENGTH: int
 
-    # Unicode box characters
-    TOP_LEFT = "\u250c"
-    TOP_RIGHT = "\u2510"
-    BOTTOM_LEFT = "\u2514"
-    BOTTOM_RIGHT = "\u2518"
-    HORIZONTAL = "\u2500"
-    VERTICAL = "\u2502"
-    T_RIGHT = "\u251c"
-    T_LEFT = "\u2524"
+    def _wrap_paragraph(self, paragraph: str, inner_width: int) -> List[str]:
+        ...
 
-    # ANSI color codes
-    COLORS = {
-        OutputType.AGENT_INIT: "\033[93m",      # Yellow
-        OutputType.TOOL_CALL: "\033[92m",       # Green
-        OutputType.TOOL_RESULT: "\033[91m",     # Red
-        OutputType.AGENT_RESPONSE: "\033[94m",  # Blue
-        OutputType.SUMMARIZATION: "\033[95m",   # Magenta
+    def _add_wrapped_word(self, lines: List[str], current_line: str, word: str, inner_width: int) -> str:
+        ...
+
+
+class _BoxFrameState(Protocol):
+    width: int
+    MIN_BOX_WIDTH: int
+    TYPE_LABELS: Dict[OutputType, str]
+    HORIZONTAL: str
+    VERTICAL: str
+    T_RIGHT: str
+    T_LEFT: str
+
+    def _colorize(self, text: str, output_type: OutputType) -> str:
+        ...
+
+    def _border(self, left: str, right: str, box_width: int, output_type: OutputType) -> str:
+        ...
+
+
+class _CLIOutputStepState(Protocol):
+    _lock: Lock
+    _step_counters: Dict[str, int]
+    _agent_start_times: Dict[str, float]
+
+
+class _CLIOutputEmitState(_CLIOutputStepState, Protocol):
+    _renderer: BoxRenderer
+    _buffer: OutputBuffer
+    _thread_local: Any
+
+    def get_step(self, agent_name: str) -> int:
+        ...
+
+    def _get_thread_id(self) -> int:
+        ...
+
+    def _get_instance_id(self) -> int:
+        ...
+
+    def _elapsed_for_agent(self, agent_name: str) -> Optional[float]:
+        ...
+
+
+class _CLIOutputEventsState(Protocol):
+    def emit(self, output_type: OutputType, content: str, hierarchy: List[str], step: Optional[int] = None, instance_id: Optional[int] = None) -> None:
+        ...
+
+    def _format_config(self, kwargs: Dict[str, Any]) -> str:
+        ...
+
+    def _format_tool_args(self, args: Dict[str, Any]) -> str:
+        ...
+
+    def _tool_result_prefix(self, is_error: bool, is_timeout: bool) -> str:
+        ...
+
+
+class BoxTextMixin:
+    def _colorize(self: _BoxTextState, text: str, output_type: OutputType) -> str:
+        if not self.use_colors:
+            return text
+        return f"{self.COLORS[output_type]}{text}{self.RESET}"
+
+    def _truncate(self: _BoxTextState, content: str, output_type: Optional[OutputType] = None) -> str:
+        if output_type in self.NO_TRUNCATE_TYPES:
+            return content
+        if len(content) <= self.MAX_CONTENT_LENGTH:
+            return content
+        return content[: self.MAX_CONTENT_LENGTH - 3] + "..."
+
+    def _wrap_line(self: _BoxTextState, text: str, inner_width: int) -> List[str]:
+        if not text:
+            return [""]
+
+        lines = []
+        for paragraph in text.split("\n"):
+            lines.extend(self._wrap_paragraph(paragraph, inner_width))
+        return lines if lines else [""]
+
+    def _wrap_paragraph(self: _BoxTextState, paragraph: str, inner_width: int) -> List[str]:
+        if not paragraph:
+            return [""]
+        words = paragraph.split()
+        if not words:
+            return [""]
+
+        lines: List[str] = []
+        current_line = ""
+        for word in words:
+            current_line = self._add_wrapped_word(lines, current_line, word, inner_width)
+        if current_line:
+            lines.append(current_line)
+        return lines
+
+    def _add_wrapped_word(self: _BoxTextState, lines: List[str], current_line: str, word: str, inner_width: int) -> str:
+        if len(current_line) + len(word) + 1 <= inner_width:
+            return f"{current_line} {word}".strip()
+        if current_line:
+            lines.append(current_line)
+        while len(word) > inner_width:
+            lines.append(word[:inner_width])
+            word = word[inner_width:]
+        return word
+
+
+class BoxFrameMixin:
+    MIN_BOX_WIDTH: int = 5
+
+    def _inner_width(self: _BoxFrameState, box_width: Optional[int] = None) -> int:
+        width = self.width if box_width is None else box_width
+        return max(width - 4, 1)
+
+    def _header(self: _BoxFrameState, ctx: OutputContext) -> str:
+        type_label = self.TYPE_LABELS[ctx.output_type]
+        timing = f" | +{ctx.elapsed_seconds:.1f}s" if ctx.elapsed_seconds is not None else ""
+        return f"[{type_label}] Step {ctx.step_number}{timing} | Thread:{ctx.thread_id} Instance:{ctx.instance_id}"
+
+    def _box_width(self: _BoxFrameState, text_lines: List[str]) -> int:
+        max_line_len = max(len(line) for line in text_lines)
+        configured_width = max(self.width, self.MIN_BOX_WIDTH)
+        return min(max(max_line_len + 4, 40), configured_width)
+
+    def _border(self: _BoxFrameState, left: str, right: str, box_width: int, output_type: OutputType) -> str:
+        return self._colorize(f"{left}{self.HORIZONTAL * (box_width - 2)}{right}", output_type)
+
+    def _text_row(self: _BoxFrameState, text: str, inner_width: int, output_type: OutputType) -> str:
+        padded = text.ljust(inner_width)[:inner_width]
+        return self._colorize(f"{self.VERTICAL} {padded} {self.VERTICAL}", output_type)
+
+    def _separator(self: _BoxFrameState, box_width: int, output_type: OutputType) -> str:
+        return self._border(self.T_RIGHT, self.T_LEFT, box_width, output_type)
+
+
+class BoxRenderer(BoxFrameMixin, BoxTextMixin):
+    TOP_LEFT: str = "\u250c"
+    TOP_RIGHT: str = "\u2510"
+    BOTTOM_LEFT: str = "\u2514"
+    BOTTOM_RIGHT: str = "\u2518"
+    HORIZONTAL: str = "\u2500"
+    VERTICAL: str = "\u2502"
+    T_RIGHT: str = "\u251c"
+    T_LEFT: str = "\u2524"
+
+    COLORS: Dict[OutputType, str] = {
+        OutputType.AGENT_INIT: "\033[93m",
+        OutputType.TOOL_CALL: "\033[92m",
+        OutputType.TOOL_RESULT: "\033[91m",
+        OutputType.AGENT_RESPONSE: "\033[94m",
+        OutputType.SUMMARIZATION: "\033[95m",
     }
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
+    RESET: str = "\033[0m"
+    BOLD: str = "\033[1m"
 
-    # Type labels for header
-    TYPE_LABELS = {
+    TYPE_LABELS: Dict[OutputType, str] = {
         OutputType.AGENT_INIT: "AGENT INIT",
         OutputType.TOOL_CALL: "TOOL CALL",
         OutputType.TOOL_RESULT: "TOOL RESULT",
@@ -99,118 +245,37 @@ class BoxRenderer:
         OutputType.SUMMARIZATION: "SUMMARIZATION",
     }
 
-    MAX_CONTENT_LENGTH = 999999
-    DEFAULT_WIDTH = 80
-
-    # Output types that should never be truncated
-    NO_TRUNCATE_TYPES = {OutputType.AGENT_INIT, OutputType.SUMMARIZATION}
+    MAX_CONTENT_LENGTH: int = 999999
+    DEFAULT_WIDTH: int = 80
+    NO_TRUNCATE_TYPES: set[OutputType] = {OutputType.AGENT_INIT, OutputType.SUMMARIZATION}
 
     def __init__(self, use_colors: bool = True, width: int = 80):
         self.use_colors = use_colors
         self.width = width
 
-    def _colorize(self, text: str, output_type: OutputType) -> str:
-        if not self.use_colors:
-            return text
-        return f"{self.COLORS[output_type]}{text}{self.RESET}"
-
-    def _truncate(self, content: str, output_type: Optional[OutputType] = None) -> str:
-        if output_type in self.NO_TRUNCATE_TYPES:
-            return content
-        if len(content) <= self.MAX_CONTENT_LENGTH:
-            return content
-        return content[:self.MAX_CONTENT_LENGTH - 3] + "..."
-
-    def _wrap_line(self, text: str, inner_width: int) -> List[str]:
-        if not text:
-            return [""]
-
-        lines = []
-        for paragraph in text.split('\n'):
-            if not paragraph:
-                lines.append("")
-                continue
-
-            words = paragraph.split()
-            if not words:
-                lines.append("")
-                continue
-
-            current_line = ""
-            for word in words:
-                if len(current_line) + len(word) + 1 <= inner_width:
-                    current_line = f"{current_line} {word}".strip()
-                else:
-                    if current_line:
-                        lines.append(current_line)
-                    # Handle very long words
-                    while len(word) > inner_width:
-                        lines.append(word[:inner_width])
-                        word = word[inner_width:]
-                    current_line = word
-
-            if current_line:
-                lines.append(current_line)
-
-        return lines if lines else [""]
-
     def render(self, ctx: OutputContext) -> str:
-        inner_width = self.width - 4  # Account for "| " and " |"
-
-        # Build header line
-        type_label = self.TYPE_LABELS[ctx.output_type]
-        timing = f" | +{ctx.elapsed_seconds:.1f}s" if ctx.elapsed_seconds is not None else ""
-        header = f"[{type_label}] Step {ctx.step_number}{timing} | Thread:{ctx.thread_id} Instance:{ctx.instance_id}"
-
-        # Build hierarchy line
+        header = self._header(ctx)
         hierarchy_line = f"Chain: {ctx.hierarchy_string}"
-
-        # Truncate and wrap content (AGENT_INIT is never truncated)
         content = self._truncate(ctx.content, ctx.output_type)
-        content_lines = self._wrap_line(content, inner_width)
+        content_lines = self._wrap_line(content, self._inner_width())
 
-        # Calculate box width based on longest line
-        all_text_lines = [header, hierarchy_line] + content_lines
-        max_line_len = max(len(line) for line in all_text_lines)
-        box_width = min(max(max_line_len + 4, 40), self.width)
-        inner_width = box_width - 4
+        box_width = self._box_width([header, hierarchy_line] + content_lines)
+        inner_width = self._inner_width(box_width)
+        separator = self._separator(box_width, ctx.output_type)
 
-        # Build box lines
-        lines = []
-
-        # Top border
-        top_border = f"{self.TOP_LEFT}{self.HORIZONTAL * (box_width - 2)}{self.TOP_RIGHT}"
-        lines.append(self._colorize(top_border, ctx.output_type))
-
-        # Header line
-        padded_header = header.ljust(inner_width)[:inner_width]
-        lines.append(self._colorize(f"{self.VERTICAL} {padded_header} {self.VERTICAL}", ctx.output_type))
-
-        # Separator after header
-        separator = f"{self.T_RIGHT}{self.HORIZONTAL * (box_width - 2)}{self.T_LEFT}"
-        lines.append(self._colorize(separator, ctx.output_type))
-
-        # Hierarchy line
-        padded_hierarchy = hierarchy_line.ljust(inner_width)[:inner_width]
-        lines.append(self._colorize(f"{self.VERTICAL} {padded_hierarchy} {self.VERTICAL}", ctx.output_type))
-
-        # Separator after hierarchy
-        lines.append(self._colorize(separator, ctx.output_type))
-
-        # Content lines
-        for content_line in content_lines:
-            padded_content = content_line.ljust(inner_width)[:inner_width]
-            lines.append(self._colorize(f"{self.VERTICAL} {padded_content} {self.VERTICAL}", ctx.output_type))
-
-        # Bottom border
-        bottom_border = f"{self.BOTTOM_LEFT}{self.HORIZONTAL * (box_width - 2)}{self.BOTTOM_RIGHT}"
-        lines.append(self._colorize(bottom_border, ctx.output_type))
-
+        lines = [
+            self._border(self.TOP_LEFT, self.TOP_RIGHT, box_width, ctx.output_type),
+            self._text_row(header, inner_width, ctx.output_type),
+            separator,
+            self._text_row(hierarchy_line, inner_width, ctx.output_type),
+            separator,
+        ]
+        lines.extend(self._text_row(content_line, inner_width, ctx.output_type) for content_line in content_lines)
+        lines.append(self._border(self.BOTTOM_LEFT, self.BOTTOM_RIGHT, box_width, ctx.output_type))
         return "\n".join(lines)
 
 
 class OutputBuffer:
-
     def __init__(self, renderer: Optional[BoxRenderer] = None):
         self._lock = Lock()
         self._buffers: Dict[Tuple[str, int], List[OutputContext]] = defaultdict(list)
@@ -237,83 +302,195 @@ class OutputBuffer:
     def add(self, ctx: OutputContext):
         with self._lock:
             if self._buffering_enabled:
-                buffer_key = (ctx.hierarchy_chain[0] if ctx.hierarchy_chain else "unknown", ctx.instance_id)
-                self._buffers[buffer_key].append(ctx)
-            else:
-                self._print_output(ctx)
+                self._buffers[self._buffer_key(ctx)].append(ctx)
+                return
+        self._print_output(ctx)
+
+    def _buffer_key(self, ctx: OutputContext) -> Tuple[str, int]:
+        return (ctx.hierarchy_chain[0] if ctx.hierarchy_chain else "unknown", ctx.instance_id)
 
     def _print_output(self, ctx: OutputContext):
-        # Render outside the lock to minimize lock hold time
         rendered = self._renderer.render(ctx) + "\n"
+        _route_to_sink(ctx, rendered)
+        _write_stdout(rendered)
 
-        # Route to sink if configured
-        if _output_sink is not None:
-            try:
-                _output_sink(ctx, rendered)
-            except Exception:
-                # Sink failures must not break agent execution
-                pass
+    def _sorted_buffered_outputs(self) -> List[OutputContext]:
+        all_outputs: List[OutputContext] = []
+        for outputs in self._buffers.values():
+            all_outputs.extend(outputs)
+        return sorted(all_outputs, key=lambda x: x.timestamp)
 
-        # Respect global stdout flag
-        if not _stdout_enabled:
-            return
-
-        with _stdout_lock:
-            # Use write() for more atomic output than print()
-            sys.stdout.write(rendered)
-            sys.stdout.flush()
+    def _render_buffered_outputs(self, outputs: List[OutputContext]) -> List[str]:
+        rendered_outputs: List[str] = []
+        for ctx in outputs:
+            rendered = self._renderer.render(ctx)
+            rendered_outputs.append(rendered)
+            _route_to_sink(ctx, rendered + "\n")
+        return rendered_outputs
 
     def flush(self):
         with self._lock:
             if not self._buffers:
                 self._buffering_enabled = False
                 return
-
-            # Flatten all buffers and sort by timestamp globally
-            all_outputs: List[OutputContext] = []
-            for outputs in self._buffers.values():
-                all_outputs.extend(outputs)
-
-            sorted_outputs = sorted(all_outputs, key=lambda x: x.timestamp)
-
-            # Render all outputs and batch them into a single write for atomic output
-            all_rendered: List[str] = []
-            for ctx in sorted_outputs:
-                rendered = self._renderer.render(ctx)
-                all_rendered.append(rendered)
-
-                if _output_sink is not None:
-                    try:
-                        _output_sink(ctx, rendered + "\n")
-                    except Exception:
-                        pass
-
+            rendered_outputs = self._render_buffered_outputs(self._sorted_buffered_outputs())
             self._buffers.clear()
             self._buffering_enabled = False
 
-        # Write all buffered output as a single atomic operation outside self._lock
-        # to avoid holding both locks simultaneously
-        if all_rendered and _stdout_enabled:
-            full_output = "\n".join(all_rendered) + "\n"
-            with _stdout_lock:
-                sys.stdout.write(full_output)
-                sys.stdout.flush()
+        if rendered_outputs:
+            _write_stdout("\n".join(rendered_outputs) + "\n")
 
 
-class CLIOutput:
+class CLIOutputSingletonMixin:
+    def __new__(cls):
+        cls_any = cast(Any, cls)
+        with cls_any._instance_lock:
+            if cls_any._instance is None:
+                cls_any._instance = super().__new__(cls)
+                setattr(cls_any._instance, "_initialized", False)
+            return cls_any._instance
 
+
+class CLIOutputStepMixin:
+    def get_step(self: _CLIOutputStepState, agent_name: str) -> int:
+        with self._lock:
+            return self._step_counters.get(agent_name, 0)
+
+    def set_step(self: _CLIOutputStepState, agent_name: str, step: int):
+        with self._lock:
+            self._step_counters[agent_name] = step
+            if step == 1 and agent_name not in self._agent_start_times:
+                self._agent_start_times[agent_name] = time.time()
+
+    def increment_step(self: _CLIOutputStepState, agent_name: str) -> int:
+        with self._lock:
+            current = self._step_counters.get(agent_name, 0)
+            self._step_counters[agent_name] = current + 1
+            return current + 1
+
+    def reset_steps(self: _CLIOutputStepState):
+        with self._lock:
+            self._step_counters.clear()
+            self._agent_start_times.clear()
+
+
+class CLIOutputEmitMixin:
+    def configure(self: _CLIOutputEmitState, use_colors: bool = True, width: int = 80):
+        self._renderer = BoxRenderer(use_colors=use_colors, width=width)
+        self._buffer.set_renderer(self._renderer)
+
+    def start_parallel(self: _CLIOutputEmitState):
+        self._buffer.enable_buffering()
+
+    def end_parallel(self: _CLIOutputEmitState):
+        self._buffer.flush()
+
+    def is_buffering(self: _CLIOutputEmitState) -> bool:
+        return self._buffer.is_buffering()
+
+    def _get_thread_id(self) -> int:
+        return threading.current_thread().ident or 0
+
+    def _get_instance_id(self: _CLIOutputEmitState) -> int:
+        return getattr(self._thread_local, "instance_id", 0)
+
+    def set_instance_id(self: _CLIOutputEmitState, instance_id: int):
+        self._thread_local.instance_id = instance_id
+
+    def emit(self: _CLIOutputEmitState, output_type: OutputType, content: str, hierarchy: List[str], step: Optional[int] = None, instance_id: Optional[int] = None):
+        agent_name = hierarchy[0] if hierarchy else "unknown"
+        step_number = step if step is not None else self.get_step(agent_name)
+        elapsed = self._elapsed_for_agent(agent_name)
+
+        ctx = OutputContext(
+            output_type=output_type,
+            step_number=step_number,
+            hierarchy_chain=hierarchy,
+            thread_id=self._get_thread_id(),
+            instance_id=instance_id if instance_id is not None else self._get_instance_id(),
+            content=content,
+            elapsed_seconds=elapsed,
+        )
+        self._buffer.add(ctx)
+
+    def _elapsed_for_agent(self: _CLIOutputEmitState, agent_name: str) -> Optional[float]:
+        with self._lock:
+            if agent_name not in self._agent_start_times:
+                self._agent_start_times[agent_name] = time.time()
+            start = self._agent_start_times.get(agent_name)
+        return time.time() - start if start else None
+
+
+class CLIOutputAgentEventsMixin:
+    def agent_init(self: _CLIOutputEventsState, agent_name: str, hierarchy: List[str], step: int = 0, description: str = "", **kwargs):
+        content_parts = [f"Initializing agent: {agent_name}"]
+        if description:
+            content_parts.append(f"Description: {description}")
+        if kwargs:
+            content_parts.append(f"Config: {self._format_config(kwargs)}")
+        self.emit(OutputType.AGENT_INIT, "\n".join(content_parts), hierarchy, step)
+
+    def agent_response(self: _CLIOutputEventsState, agent_name: str, response: str, hierarchy: List[str], step: int, is_final: bool = False):
+        status = " (Final)" if is_final else ""
+        content = f"Agent: {agent_name}{status}\nResponse:\n{response}"
+        self.emit(OutputType.AGENT_RESPONSE, content, hierarchy, step)
+
+    def summarization(self: _CLIOutputEventsState, agent_name: str, summary: str, hierarchy: Optional[List[str]] = None, step: int = 0):
+        effective_hierarchy = hierarchy if hierarchy is not None else [agent_name]
+        content = f"Summary for {agent_name}:\n{summary}"
+        self.emit(OutputType.SUMMARIZATION, content, effective_hierarchy, step)
+
+    def workflow_status(self: _CLIOutputEventsState, workflow_name: str, message: str, step: int = 0):
+        content = f"Workflow: {workflow_name}\n{message}"
+        self.emit(OutputType.AGENT_INIT, content, [workflow_name], step)
+
+    def _format_config(self, kwargs: Dict[str, Any]) -> str:
+        return ", ".join(f"{k}={v}" for k, v in kwargs.items())
+
+
+class CLIOutputToolEventsMixin:
+    def tool_call(self: _CLIOutputEventsState, tool_name: str, args: Dict[str, Any], hierarchy: List[str], step: int):
+        content = f"Calling tool: {tool_name}\nArguments:\n{self._format_tool_args(args)}"
+        self.emit(OutputType.TOOL_CALL, content, hierarchy, step)
+
+    def tool_result(
+        self: _CLIOutputEventsState,
+        tool_name: str,
+        result: str,
+        hierarchy: List[str],
+        step: int,
+        is_error: bool = False,
+        is_timeout: bool = False,
+    ):
+        content = f"Tool: {tool_name}\n{self._tool_result_prefix(is_error, is_timeout)}:\n{result}"
+        self.emit(OutputType.TOOL_RESULT, content, hierarchy, step)
+
+    def _format_tool_args(self, args: Dict[str, Any]) -> str:
+        try:
+            return json.dumps(args, indent=2, default=str)
+        except (TypeError, ValueError):
+            return str(args)
+
+    def _tool_result_prefix(self, is_error: bool, is_timeout: bool) -> str:
+        if is_timeout:
+            return "TIMEOUT"
+        if is_error:
+            return "ERROR"
+        return "Result"
+
+
+class CLIOutput(
+    CLIOutputSingletonMixin,
+    CLIOutputToolEventsMixin,
+    CLIOutputAgentEventsMixin,
+    CLIOutputEmitMixin,
+    CLIOutputStepMixin,
+):
     _instance = None
     _instance_lock = Lock()
 
-    def __new__(cls):
-        with cls._instance_lock:
-            if cls._instance is None:
-                cls._instance = super().__new__(cls)
-                cls._instance._initialized = False
-            return cls._instance
-
     def __init__(self):
-        if getattr(self, '_initialized', False):
+        if getattr(self, "_initialized", False):
             return
 
         self._renderer = BoxRenderer()
@@ -324,162 +501,7 @@ class CLIOutput:
         self._lock = Lock()
         self._initialized = True
 
-    def configure(self, use_colors: bool = True, width: int = 80):
-        self._renderer = BoxRenderer(use_colors=use_colors, width=width)
-        self._buffer.set_renderer(self._renderer)
 
-    def start_parallel(self):
-        self._buffer.enable_buffering()
-
-    def end_parallel(self):
-        self._buffer.flush()
-
-    def is_buffering(self) -> bool:
-        return self._buffer.is_buffering()
-
-    def _get_thread_id(self) -> int:
-        return threading.current_thread().ident or 0
-
-    def _get_instance_id(self) -> int:
-        return getattr(self._thread_local, 'instance_id', 0)
-
-    def set_instance_id(self, instance_id: int):
-        self._thread_local.instance_id = instance_id
-
-    def get_step(self, agent_name: str) -> int:
-        with self._lock:
-            return self._step_counters.get(agent_name, 0)
-
-    def set_step(self, agent_name: str, step: int):
-        with self._lock:
-            self._step_counters[agent_name] = step
-            if step == 1 and agent_name not in self._agent_start_times:
-                self._agent_start_times[agent_name] = time.time()
-
-    def increment_step(self, agent_name: str) -> int:
-        with self._lock:
-            current = self._step_counters.get(agent_name, 0)
-            self._step_counters[agent_name] = current + 1
-            return current + 1
-
-    def reset_steps(self):
-        with self._lock:
-            self._step_counters.clear()
-            self._agent_start_times.clear()
-
-    def emit(
-        self,
-        output_type: OutputType,
-        content: str,
-        hierarchy: List[str],
-        step: Optional[int] = None,
-        instance_id: Optional[int] = None
-    ):
-        agent_name = hierarchy[0] if hierarchy else "unknown"
-        step_number = step if step is not None else self.get_step(agent_name)
-        with self._lock:
-            if agent_name not in self._agent_start_times:
-                self._agent_start_times[agent_name] = time.time()
-            start = self._agent_start_times.get(agent_name)
-        elapsed = time.time() - start if start else None
-
-        ctx = OutputContext(
-            output_type=output_type,
-            step_number=step_number,
-            hierarchy_chain=hierarchy,
-            thread_id=self._get_thread_id(),
-            instance_id=instance_id if instance_id is not None else self._get_instance_id(),
-            content=content,
-            elapsed_seconds=elapsed
-        )
-
-        self._buffer.add(ctx)
-
-    # Convenience methods
-    def agent_init(
-        self,
-        agent_name: str,
-        hierarchy: List[str],
-        step: int = 0,
-        description: str = "",
-        **kwargs
-    ):
-        content_parts = [f"Initializing agent: {agent_name}"]
-        if description:
-            content_parts.append(f"Description: {description}")
-        if kwargs:
-            config_str = ", ".join(f"{k}={v}" for k, v in kwargs.items())
-            content_parts.append(f"Config: {config_str}")
-        content = "\n".join(content_parts)
-        self.emit(OutputType.AGENT_INIT, content, hierarchy, step)
-
-    def tool_call(
-        self,
-        tool_name: str,
-        args: Dict[str, Any],
-        hierarchy: List[str],
-        step: int
-    ):
-        try:
-            args_str = json.dumps(args, indent=2, default=str)
-        except (TypeError, ValueError):
-            args_str = str(args)
-        content = f"Calling tool: {tool_name}\nArguments:\n{args_str}"
-        self.emit(OutputType.TOOL_CALL, content, hierarchy, step)
-
-    def tool_result(
-        self,
-        tool_name: str,
-        result: str,
-        hierarchy: List[str],
-        step: int,
-        is_error: bool = False,
-        is_timeout: bool = False
-    ):
-        if is_timeout:
-            prefix = "TIMEOUT"
-        elif is_error:
-            prefix = "ERROR"
-        else:
-            prefix = "Result"
-        content = f"Tool: {tool_name}\n{prefix}:\n{result}"
-        self.emit(OutputType.TOOL_RESULT, content, hierarchy, step)
-
-    def agent_response(
-        self,
-        agent_name: str,
-        response: str,
-        hierarchy: List[str],
-        step: int,
-        is_final: bool = False
-    ):
-        status = " (Final)" if is_final else ""
-        content = f"Agent: {agent_name}{status}\nResponse:\n{response}"
-        self.emit(OutputType.AGENT_RESPONSE, content, hierarchy, step)
-
-    def summarization(
-        self,
-        agent_name: str,
-        summary: str,
-        hierarchy: Optional[List[str]] = None,
-        step: int = 0
-    ):
-        if hierarchy is None:
-            hierarchy = [agent_name]
-        content = f"Summary for {agent_name}:\n{summary}"
-        self.emit(OutputType.SUMMARIZATION, content, hierarchy, step)
-
-    def workflow_status(
-        self,
-        workflow_name: str,
-        message: str,
-        step: int = 0
-    ):
-        content = f"Workflow: {workflow_name}\n{message}"
-        self.emit(OutputType.AGENT_INIT, content, [workflow_name], step)
-
-
-# Global singleton accessor
 _cli_output_instance: Optional[CLIOutput] = None
 _cli_output_lock = Lock()
 
@@ -487,6 +509,8 @@ _cli_output_lock = Lock()
 def get_cli_output() -> CLIOutput:
     global _cli_output_instance
     with _cli_output_lock:
-        if _cli_output_instance is None:
-            _cli_output_instance = CLIOutput()
-        return _cli_output_instance
+        instance = _cli_output_instance
+        if instance is None:
+            instance = CLIOutput()
+            _cli_output_instance = instance
+        return instance

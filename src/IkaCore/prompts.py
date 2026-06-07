@@ -1,3 +1,5 @@
+# pyright: strict
+
 AGENT_END_INSTRUCTION = """
 CRITICAL: When you call the agent_end tool, you MUST provide your final answer/output in the tool arguments.
 The agent_end tool REQUIRES a non-empty response. You must pass your final answer using the "input" parameter.

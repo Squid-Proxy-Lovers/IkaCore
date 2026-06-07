@@ -14,6 +14,9 @@ Three pieces:
   identically to any other provider.
 """
 
+# pyright: strict
+# pyright: reportUnusedFunction=false
+
 from __future__ import annotations
 
 import email.utils
@@ -21,16 +24,32 @@ import json
 import logging
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from collections.abc import Iterator
+from typing import Any, Optional, cast
 
 import httpx
 
+from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
+
+from ..base import BareBoneModel
 from ..codex_constants import CODEX_API_URL
 from ..model_metadata import CODEX_KNOWN_MODELS
 from ..request_interface import agent_tools_for_payload
 from .codex_responses import codex_responses_fill_payload
 
 LOG = logging.getLogger(__name__)
+
+ProviderRequest = tuple[str, dict[str, str], JsonDict]
+ProviderRound = tuple[str, Optional[str], list[JsonDict], int]
+MessageList = list[JsonDict]
+
+
+def _token_count(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    return 0
 
 
 class _CodexRetryableStreamError(RuntimeError):
@@ -51,13 +70,14 @@ _RETRYABLE_STREAM_ERROR_CODES = {
 }
 
 
-def _classify_stream_error(err_obj: Any) -> bool:
+def _classify_stream_error(err_obj: object) -> bool:
     """Return True if this stream-level error looks transient."""
     if not isinstance(err_obj, dict):
         # Unknown shape — be conservative: don't retry, surface to caller.
         return False
-    et = str(err_obj.get("type") or "").lower()
-    code = str(err_obj.get("code") or "").lower()
+    error_data = cast(JsonDict, err_obj)
+    et = string_value(error_data.get("type")).lower()
+    code = string_value(error_data.get("code")).lower()
     return et in _RETRYABLE_STREAM_ERROR_TYPES or code in _RETRYABLE_STREAM_ERROR_CODES
 
 
@@ -79,11 +99,10 @@ def _parse_retry_after(header_value: Optional[str], default: float) -> float:
     try:
         from datetime import timezone
         parsed = email.utils.parsedate_to_datetime(header_value)
-        if parsed is not None:
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return max(0.0, parsed.timestamp() - time.time())
-    except Exception:
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return max(0.0, parsed.timestamp() - time.time())
+    except (TypeError, ValueError, IndexError, OverflowError):
         pass
     return float(default)
 
@@ -116,10 +135,10 @@ def is_codex_url(api_url: Optional[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 def build_codex_request(
-    barebone_model: Any,
-    messages: List[dict],
-    message_history: dict,
-) -> Tuple[str, Dict[str, str], dict]:
+    barebone_model: BareBoneModel,
+    messages: MessageList,
+    message_history: JsonDict,
+) -> ProviderRequest:
     """Return (url, headers, payload) for a codex Responses call.
 
     ``barebone_model.api_key`` is treated as a literal bearer — same convention
@@ -183,18 +202,18 @@ class _CodexResponseShim:
 
     def __init__(
         self,
-        data: Dict[str, Any],
+        data: JsonDict,
         status_code: int = 200,
-        headers: Optional[Dict[str, str]] = None,
+        headers: Optional[dict[str, str]] = None,
         text_fallback: str = "",
-    ):
+    ) -> None:
         self._data = data
         self.status_code = status_code
         self.headers = httpx.Headers(headers or {})
         self.text = text_fallback or json.dumps(data)
         self.content = self.text.encode("utf-8", "replace")
 
-    def json(self) -> Dict[str, Any]:
+    def json(self) -> JsonDict:
         return self._data
 
     def raise_for_status(self) -> None:
@@ -206,7 +225,7 @@ class _CodexResponseShim:
             )
 
 
-def _iter_sse(response: httpx.Response):
+def _iter_sse(response: httpx.Response) -> Iterator[tuple[Optional[str], object]]:
     """
     Yield (event_name, parsed_json) from a Server-Sent Events stream.
 
@@ -215,10 +234,8 @@ def _iter_sse(response: httpx.Response):
     the event name is mirrored from the ``type`` field of the JSON itself
     on the codex backend, but we honor an explicit ``event:`` line too.
     """
-    current_event = None
+    current_event: Optional[str] = None
     for line in response.iter_lines():
-        if line is None:
-            continue
         # httpx strips the trailing newline but leaves the line as-is.
         if not line:
             current_event = None
@@ -237,7 +254,7 @@ def _iter_sse(response: httpx.Response):
                 continue
 
 
-def _collect_stream(response: httpx.Response) -> Dict[str, Any]:
+def _collect_stream(response: httpx.Response) -> JsonDict:
     """
     Walk the SSE stream and return the final response dict.
 
@@ -255,36 +272,37 @@ def _collect_stream(response: httpx.Response) -> Dict[str, Any]:
     fallback for cases where ``output_item.done`` doesn't arrive (shouldn't
     happen in practice but keeps us defensive).
     """
-    envelope: Dict[str, Any] = {}
-    collected_items: List[Dict[str, Any]] = []
-    output_text_chunks: List[str] = []
+    envelope: JsonDict = {}
+    collected_items: list[JsonDict] = []
+    output_text_chunks: list[str] = []
 
     for _event, obj in _iter_sse(response):
-        if not isinstance(obj, dict):
+        obj_data = json_dict(obj)
+        if not obj_data:
             continue
-        t = obj.get("type", "")
+        t = obj_data.get("type", "")
         if t == "response.failed" or t == "response.error":
-            err = obj.get("error") or obj.get("response", {}).get("error")
+            err = obj_data.get("error") or json_dict(obj_data.get("response")).get("error")
             if _classify_stream_error(err):
                 raise _CodexRetryableStreamError(f"codex stream transient failure: {err}")
             raise RuntimeError(f"codex response failed: {err}")
         elif t in ("response.created", "response.in_progress"):
-            resp = obj.get("response")
-            if isinstance(resp, dict):
+            resp = json_dict(obj_data.get("response"))
+            if resp:
                 envelope = resp
         elif t == "response.completed":
-            resp = obj.get("response")
-            if isinstance(resp, dict):
+            resp = json_dict(obj_data.get("response"))
+            if resp:
                 # Keep the latest envelope (it has the final ``usage`` and
                 # any updated status fields), but its output[] is empty so
                 # we'll fill it from collected_items below.
                 envelope = resp
         elif t == "response.output_item.done":
-            item = obj.get("item")
-            if isinstance(item, dict):
+            item = json_dict(obj_data.get("item"))
+            if item:
                 collected_items.append(item)
         elif t == "response.output_text.delta":
-            delta = obj.get("delta")
+            delta = obj_data.get("delta")
             if isinstance(delta, str):
                 output_text_chunks.append(delta)
 
@@ -306,128 +324,135 @@ def _collect_stream(response: httpx.Response) -> Dict[str, Any]:
     return envelope
 
 
-def request_codex(
+def _codex_rate_headers(response: httpx.Response) -> dict[str, str]:
+    return {
+        key: value for key, value in response.headers.items()
+        if key.lower().startswith("x-codex-") or "ratelimit" in key.lower()
+    }
+
+
+def _handle_codex_429(response: httpx.Response, body: str, attempt: int, max_retries: int, wait_seconds: int) -> None:
+    if attempt >= max_retries - 1:
+        raise RuntimeError(f"codex backend returned 429 after {max_retries} attempts: {body[:500]}")
+    retry_after = _parse_retry_after(response.headers.get("retry-after"), wait_seconds)
+    LOG.warning(
+        "codex backend 429 (rate-limited); sleeping %.1fs (attempt %d/%d)",
+        retry_after, attempt + 1, max_retries,
+    )
+    time.sleep(retry_after)
+
+
+def _handle_codex_5xx(status: int, body: str, backoff: float, attempt: int, max_retries: int) -> None:
+    if attempt >= max_retries - 1:
+        raise RuntimeError(f"codex backend returned {status} after {max_retries} attempts: {body[:500]}")
+    _sleep_before_retry(
+        "codex backend %d (transient)",
+        backoff, attempt, max_retries, status,
+    )
+
+
+def _handle_codex_non_200(
+    response: httpx.Response,
+    body: str,
+    backoff: float,
+    attempt: int,
+    max_retries: int,
+    wait_seconds: int,
+) -> None:
+    status = response.status_code
+    if status == 401:
+        raise RuntimeError(
+            f"codex backend returned 401 (bearer rejected): {body[:500]}. "
+            "Caller may need to refresh the token and retry."
+        )
+    if status == 429:
+        _handle_codex_429(response, body, attempt, max_retries, wait_seconds)
+        return
+    if 500 <= status < 600:
+        _handle_codex_5xx(status, body, backoff, attempt, max_retries)
+        return
+    raise RuntimeError(f"codex backend returned {status}: {body[:2000]}")
+
+
+def _request_codex_once(
     api_url: str,
-    headers: Dict[str, str],
-    payload: Dict[str, Any],
-    timeout: float = 900.0,
-    max_retries: int = 3,
-    wait_seconds: int = 10,
-) -> _CodexResponseShim:
-    """
-    POST to the codex Responses endpoint, drain the SSE stream, return a
-    Response-shaped object whose ``.json()`` is the final response dict.
+    headers: dict[str, str],
+    payload: JsonDict,
+    timeout: float,
+    backoff: float,
+    attempt: int,
+    max_retries: int,
+    wait_seconds: int,
+) -> Optional[_CodexResponseShim]:
+    with httpx.stream("POST", api_url, headers=headers, json=payload, timeout=timeout) as response:
+        rate_headers = _codex_rate_headers(response)
+        if response.status_code == 200:
+            data = _collect_stream(response)
+            return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
 
-    Streaming is forced by the codex backend; we don't expose deltas to
-    callers — the rest of IkaCore is built around single-shot JSON
-    responses, and streaming the UI is a future enhancement.
+        body = response.read().decode("utf-8", "replace")
+        _handle_codex_non_200(response, body, backoff, attempt, max_retries, wait_seconds)
+    return None
 
-    Retry policy:
-      - 200 → succeed
-      - 401 → no retry; caller refreshes bearer and retries
-      - 429 → retry honoring Retry-After (with defensive parsing)
-      - 5xx → retry with exponential backoff (transient backend)
-      - Other 4xx → no retry; caller bug (bad payload, unknown model, etc.)
-      - Network timeouts / httpx.HTTPError → retry with backoff
-      - Stream-level ``response.failed`` events → retried if classified as
-        transient (server_error / internal_error / overloaded), else bubble.
-    """
+
+def _retry_codex_exception(message: str, backoff: float, attempt: int, max_retries: int, error: Exception) -> None:
+    if attempt >= max_retries - 1:
+        raise error
+    _sleep_before_retry(message, backoff, attempt, max_retries, error)
+
+
+def _streaming_codex_payload(payload: JsonDict) -> JsonDict:
     # Defensive: the codex backend rejects anything but stream:true. Make this
     # an invariant here even if a caller pre-built the payload differently.
-    payload = dict(payload)
-    payload["stream"] = True
+    normalized: JsonDict = dict(payload)
+    normalized["stream"] = True
+    return normalized
 
+
+def _request_codex_with_retries(
+    api_url: str,
+    headers: dict[str, str],
+    payload: JsonDict,
+    timeout: float,
+    max_retries: int,
+    wait_seconds: int,
+) -> _CodexResponseShim:
     last_exc: Optional[Exception] = None
     for attempt in range(max_retries):
-        is_last_attempt = attempt >= max_retries - 1
         backoff = wait_seconds * (2 ** attempt)
         try:
-            with httpx.stream(
-                "POST", api_url, headers=headers, json=payload, timeout=timeout
-            ) as resp:
-                rate_headers = {
-                    k: v for k, v in resp.headers.items()
-                    if k.lower().startswith("x-codex-") or "ratelimit" in k.lower()
-                }
-                status = resp.status_code
+            response = _request_codex_once(
+                api_url,
+                headers,
+                payload,
+                timeout,
+                backoff,
+                attempt,
+                max_retries,
+                wait_seconds,
+            )
+            if response is not None:
+                return response
+            continue
 
-                if status == 200:
-                    # Stream the SSE body. _collect_stream may raise either
-                    # _CodexRetryableStreamError (transient — retry below) or
-                    # plain RuntimeError (caller error — bubble immediately).
-                    data = _collect_stream(resp)
-                    return _CodexResponseShim(
-                        data=data, status_code=200, headers=rate_headers,
-                    )
-
-                # All non-200 paths share a body read for error reporting.
-                body = resp.read().decode("utf-8", "replace")
-
-                if status == 401:
-                    raise RuntimeError(
-                        f"codex backend returned 401 (bearer rejected): {body[:500]}. "
-                        "Caller may need to refresh the token and retry."
-                    )
-
-                if status == 429:
-                    if is_last_attempt:
-                        raise RuntimeError(
-                            f"codex backend returned 429 after {max_retries} attempts: {body[:500]}"
-                        )
-                    retry_after = _parse_retry_after(
-                        resp.headers.get("retry-after"), wait_seconds
-                    )
-                    LOG.warning(
-                        "codex backend 429 (rate-limited); sleeping %.1fs (attempt %d/%d)",
-                        retry_after, attempt + 1, max_retries,
-                    )
-                    time.sleep(retry_after)
-                    continue
-
-                if 500 <= status < 600:
-                    if is_last_attempt:
-                        raise RuntimeError(
-                            f"codex backend returned {status} after {max_retries} attempts: {body[:500]}"
-                        )
-                    _sleep_before_retry(
-                        "codex backend %d (transient)",
-                        backoff, attempt, max_retries, status,
-                    )
-                    continue
-
-                # Other 4xx — caller-side error (bad payload, unknown model,
-                # missing field). Not retryable.
-                raise RuntimeError(
-                    f"codex backend returned {status}: {body[:2000]}"
-                )
-
-        except _CodexRetryableStreamError as e:
-            last_exc = e
-            if is_last_attempt:
-                raise
-            _sleep_before_retry(
+        except _CodexRetryableStreamError as error:
+            last_exc = error
+            _retry_codex_exception(
                 "codex stream transient failure: %s",
-                backoff, attempt, max_retries, e,
+                backoff, attempt, max_retries, error,
             )
-            continue
-        except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
-            last_exc = e
-            if is_last_attempt:
-                raise
-            _sleep_before_retry(
+        except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as error:
+            last_exc = error
+            _retry_codex_exception(
                 "codex request timeout: %s",
-                backoff, attempt, max_retries, e,
+                backoff, attempt, max_retries, error,
             )
-            continue
-        except httpx.HTTPError as e:
-            last_exc = e
-            if is_last_attempt:
-                raise
-            _sleep_before_retry(
+        except httpx.HTTPError as error:
+            last_exc = error
+            _retry_codex_exception(
                 "codex http error: %s",
-                backoff, attempt, max_retries, e,
+                backoff, attempt, max_retries, error,
             )
-            continue
 
     # Loop exhausted without a return — surface the last seen exception.
     if last_exc:
@@ -435,57 +460,81 @@ def request_codex(
     raise RuntimeError("codex request failed without specific exception")
 
 
+def request_codex(
+    api_url: str,
+    headers: dict[str, str],
+    payload: JsonDict,
+    timeout: float = 900.0,
+    max_retries: int = 3,
+    wait_seconds: int = 10,
+) -> _CodexResponseShim:
+    """POST to the Codex Responses endpoint and return a Response-shaped shim."""
+    return _request_codex_with_retries(
+        api_url,
+        headers,
+        _streaming_codex_payload(payload),
+        timeout,
+        max_retries,
+        wait_seconds,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Response parsing
 # ---------------------------------------------------------------------------
 
 def parse_codex_response(
-    data: dict,
+    data: JsonDict,
     model_id: str,
-) -> Tuple[str, Optional[str], List[dict], int]:
+) -> ProviderRound:
     """
     Parse a final codex response dict (the ``response.completed`` event's
     ``response`` payload) into the internal (content, reasoning, tool_calls,
     tokens) tuple used by IkaCore.
     """
     content = ""
-    tool_calls: List[dict] = []
+    tool_calls: list[JsonDict] = []
     reasoning_content: Optional[str] = None
 
-    output = data.get("output", []) or []
+    raw_output: object = data.get("output", []) or []
+    output = cast(list[object], raw_output) if isinstance(raw_output, list) else []
     for item in output:
-        item_type = item.get("type", "")
+        item_data = json_dict(item)
+        item_type = item_data.get("type", "")
         if item_type == "message":
-            for block in item.get("content", []) or []:
-                if block.get("type") == "output_text":
-                    content += block.get("text", "")
+            raw_blocks: object = item_data.get("content", []) or []
+            blocks = cast(list[object], raw_blocks) if isinstance(raw_blocks, list) else []
+            for block in blocks:
+                block_data = json_dict(block)
+                if block_data.get("type") == "output_text":
+                    content += string_value(block_data.get("text"))
         elif item_type == "function_call":
             tool_calls.append({
-                "id": item.get("call_id", item.get("id", "")),
+                "id": item_data.get("call_id", item_data.get("id", "")),
                 "type": "function",
                 "function": {
-                    "name": item.get("name", ""),
-                    "arguments": item.get("arguments", "{}"),
+                    "name": item_data.get("name", ""),
+                    "arguments": item_data.get("arguments", "{}"),
                 },
             })
         elif item_type == "reasoning":
             # The codex backend serves reasoning summaries (and optionally
             # encrypted_content). We only keep the summary text here; the
             # encrypted_content carry-over is a future optimization.
-            summary = item.get("summary") or []
+            raw_summary: object = item_data.get("summary") or []
+            summary = cast(list[object], raw_summary) if isinstance(raw_summary, list) else []
             if summary:
-                parts = [s.get("text", "") for s in summary if isinstance(s, dict)]
+                parts = [string_value(cast(JsonDict, s).get("text")) for s in summary if isinstance(s, dict)]
                 joined = "\n".join(p for p in parts if p)
                 if joined:
                     reasoning_content = joined
 
     if not content and data.get("output_text"):
-        content = data["output_text"]
+        content = string_value(data.get("output_text"))
 
-    usage = data.get("usage", {}) or {}
-    tokens = usage.get("total_tokens") or (
-        (usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0)
-    )
+    usage = json_dict(data.get("usage"))
+    fallback_tokens = _token_count(usage.get("input_tokens")) + _token_count(usage.get("output_tokens"))
+    tokens = _token_count(usage.get("total_tokens")) or fallback_tokens
 
     return content, reasoning_content, tool_calls, tokens
 
@@ -495,12 +544,12 @@ def parse_codex_response(
 # ---------------------------------------------------------------------------
 
 def append_codex_tool_messages(
-    messages: List[dict],
-    message_history: dict,
+    messages: MessageList,
+    message_history: JsonDict,
     content: str,
     reasoning_content: Optional[str],
-    executed_tool_call_list: List[dict],
-    tool_messages: List[dict],
+    executed_tool_call_list: list[JsonDict],
+    tool_messages: MessageList,
     tokens: int,
     repeated_warning_msg: str = "",
 ) -> None:
@@ -510,7 +559,7 @@ def append_codex_tool_messages(
     payload builder converts role=='tool' messages into the
     ``function_call_output`` form when it next reads ``messages``.
     """
-    assistant_msg: dict = {"role": "assistant", "content": content}
+    assistant_msg: JsonDict = {"role": "assistant", "content": content}
     if reasoning_content:
         assistant_msg["reasoning_content"] = reasoning_content
     if executed_tool_call_list:
@@ -524,7 +573,7 @@ def append_codex_tool_messages(
 
     if executed_tool_call_list:
         msg_id = str(uuid.uuid4())
-        message_history["messages"][msg_id] = {
+        history_section(message_history, "messages")[msg_id] = {
             "message": json.dumps(assistant_msg),
             "tokens": tokens,
             "type": "assistant_with_tools",
@@ -532,7 +581,7 @@ def append_codex_tool_messages(
 
     for tool_msg in tool_messages:
         msg_id = str(uuid.uuid4())
-        message_history["messages"][msg_id] = {
+        history_section(message_history, "messages")[msg_id] = {
             "message": json.dumps(tool_msg),
             "tokens": 0,
             "type": "tool",

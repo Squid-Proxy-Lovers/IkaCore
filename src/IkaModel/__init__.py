@@ -1,7 +1,24 @@
 from importlib import import_module
 from typing import Any
 
-_EXPORTS = {
+__all__ = [
+    "AgentTool",
+    "BareBoneModel",
+    "ToolArgs",
+    "async_api_request_retry",
+    "async_chat",
+    "async_execute_tool",
+    "async_execute_tool_calls",
+    "async_summarise_message_history",
+    "chat",
+    "execute_tool_calls",
+    "get_global_long_term_memory",
+    "get_provider",
+    "init_global_long_term_memory",
+    "summarise_message_history",
+]
+
+_EXPORTS: dict[str, tuple[str, str]] = {
     "BareBoneModel": ("IkaModel.base", "BareBoneModel"),
     "AgentTool": ("IkaModel.base", "AgentTool"),
     "ToolArgs": ("IkaModel.base", "ToolArgs"),
@@ -17,8 +34,6 @@ _EXPORTS = {
     "async_execute_tool": ("IkaModel.chat_interface.chat_interface", "async_execute_tool"),
     "async_api_request_retry": ("IkaModel.chat_interface.chat_interface", "async_api_request_retry"),
 }
-
-__all__ = list(_EXPORTS)
 
 
 def __getattr__(name: str) -> Any:
