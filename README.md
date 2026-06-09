@@ -7,7 +7,7 @@ The current runtime supports:
 - `IkaBaseAgent` for single-agent execution
 - `IkaStage` for bounded staged execution
 - `IkaWorkflow` for multi-agent graphs
-- OpenAI, Anthropic, DeepSeek, Gemini, and OpenRouter backends
+- OpenAI, Anthropic, DeepSeek, Gemini, OpenRouter, and Codex backends
 - checkpoint/resume and interruptible HITL flows
 - optional short-term and long-term memory helpers
 
@@ -62,6 +62,8 @@ print(result["final_message"])
 - [Architecture Notes](docs/indepth.md)
 - [Memory Notes](src/IkaMem/docs/README.md)
 
+Codex support is documented in the [Provider Selection](docs/USAGE.md#provider-selection) section. IkaCore treats Codex auth as opt-in: pass a bearer token as `api_key`, or call `IkaModel.codex.codex_auth.get_bearer()` to read and refresh the Codex CLI token from `~/.codex/auth.json`.
+
 ## Examples
 
 - `examples/example_fileagent.py`
@@ -71,4 +73,4 @@ print(result["final_message"])
 
 ## Development Notes
 
-This repo has active cleanup work. The docs now reflect the current runtime behavior, but a few internal hygiene issues still remain, especially legacy `sys.path` mutation inside some modules and examples.
+This repo is maintained with `pytest` and `ruff`. Runtime modules and examples should import through the installed package rather than mutating `sys.path`; keep docs and examples aligned with public API changes.

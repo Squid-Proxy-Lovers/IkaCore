@@ -40,6 +40,7 @@ fully coordinated here.
 from __future__ import annotations
 
 import base64
+import binascii
 import contextlib
 import json
 import logging
@@ -57,10 +58,9 @@ LOG = logging.getLogger(__name__)
 # OAuth client). Visible in any codex-issued JWT's ``client_id`` claim and
 # declared in codex-rs/login/src/auth/manager.rs.
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-CODEX_OAUTH_TOKEN_URL = os.environ.get(
-    "CODEX_REFRESH_TOKEN_URL_OVERRIDE",
-    "https://auth.openai.com/oauth/token",
-)
+CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
+_CODEX_TOKEN_URL_OVERRIDE_ENV = "CODEX_REFRESH_TOKEN_URL_OVERRIDE"
+_CODEX_TOKEN_URL_OVERRIDE_ALLOW_ENV = "IKACORE_ALLOW_CODEX_TOKEN_URL_OVERRIDE"
 CODEX_AUTH_SCOPE = "openid profile email offline_access"
 
 # Refresh when the access_token is within this many seconds of its ``exp``.
@@ -69,6 +69,20 @@ REFRESH_LEAD_SECONDS = 8 * 60
 
 _lock = threading.Lock()
 _fcntl_warned = False
+
+
+def _resolve_oauth_token_url() -> str:
+    override = os.environ.get(_CODEX_TOKEN_URL_OVERRIDE_ENV)
+    if not override:
+        return CODEX_OAUTH_TOKEN_URL
+    if os.environ.get(_CODEX_TOKEN_URL_OVERRIDE_ALLOW_ENV) == "1":
+        return override
+    LOG.warning(
+        "Ignoring %s because %s=1 is not set; using the official Codex OAuth token URL.",
+        _CODEX_TOKEN_URL_OVERRIDE_ENV,
+        _CODEX_TOKEN_URL_OVERRIDE_ALLOW_ENV,
+    )
+    return CODEX_OAUTH_TOKEN_URL
 
 
 def _lock_file_path() -> Path:
@@ -124,11 +138,11 @@ def _interprocess_lock() -> Iterator[None]:
         if fd is not None:
             try:
                 fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
-            except Exception:
+            except OSError:
                 pass
             try:
                 fd.close()
-            except Exception:
+            except OSError:
                 pass
 
 
@@ -165,7 +179,7 @@ def _decode_jwt_payload(token: str) -> Dict[str, Any]:
         payload_segment = token.split(".")[1]
         padded = payload_segment + "=" * (-len(payload_segment) % 4)
         return json.loads(base64.urlsafe_b64decode(padded))
-    except Exception as e:
+    except (IndexError, TypeError, ValueError, UnicodeDecodeError, binascii.Error, json.JSONDecodeError) as e:
         LOG.warning(f"Failed to decode JWT payload: {e}")
         return {}
 
@@ -180,7 +194,8 @@ def _seconds_until_expiry(token: str) -> float:
 
 def _refresh_tokens(refresh_token: str) -> Dict[str, Any]:
     """Exchange a refresh_token for a fresh access_token/id_token pair."""
-    LOG.info("Refreshing Codex bearer via %s", CODEX_OAUTH_TOKEN_URL)
+    token_url = _resolve_oauth_token_url()
+    LOG.info("Refreshing Codex bearer via %s", token_url)
     body = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
@@ -188,7 +203,7 @@ def _refresh_tokens(refresh_token: str) -> Dict[str, Any]:
         "scope": CODEX_AUTH_SCOPE,
     }
     resp = httpx.post(
-        CODEX_OAUTH_TOKEN_URL,
+        token_url,
         json=body,
         headers={"Content-Type": "application/json"},
         timeout=30.0,

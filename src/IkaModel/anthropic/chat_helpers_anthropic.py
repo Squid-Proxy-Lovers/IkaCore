@@ -1,23 +1,37 @@
+# pyright: strict
+# pyright: reportUnusedFunction=false
+
 import json
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional, cast
 
+from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
+
+from ..base import BareBoneModel
+from ..model_metadata import is_anthropic_haiku_model
+from ..request_interface import agent_tools_for_payload
 from .claude import anthropic_fill_payload
-from ..request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
+
+ProviderRequest = tuple[str, dict[str, str], JsonDict]
+ProviderRound = tuple[str, Optional[str], list[JsonDict], int]
+MessageList = list[JsonDict]
 
 
 def build_anthropic_request(
-    barebone_model: Any,
-    messages: List[dict],
-    message_history: dict
-) -> Tuple[str, Dict[str, str], dict]:
-    _apply_tools_filter_for_payload(barebone_model)
-    payload = anthropic_fill_payload(barebone_model, messages, message_history)
-    _restore_tools_after_payload(barebone_model)
+    barebone_model: BareBoneModel,
+    messages: MessageList,
+    message_history: JsonDict
+) -> ProviderRequest:
+    payload = anthropic_fill_payload(
+        barebone_model,
+        messages,
+        message_history,
+        agent_tools=agent_tools_for_payload(barebone_model),
+    )
     
     if "max_tokens" not in payload or not payload["max_tokens"]:
         payload["max_tokens"] = 4096
-    if "haiku" in barebone_model.model_id.lower() and payload["max_tokens"] > 4096:
+    if is_anthropic_haiku_model(barebone_model.model_id) and payload["max_tokens"] > 4096:
         payload["max_tokens"] = 4096
     
     api_url = barebone_model.api_url
@@ -30,19 +44,25 @@ def build_anthropic_request(
     return api_url, headers, payload
 
 
-def parse_anthropic_response(data: dict, model_id: str) -> Tuple[str, Optional[str], List[dict], int]:
-    content_blocks = data.get("content", [])
-    content = "".join([block["text"] for block in content_blocks if block.get("type") == "text"])
+def parse_anthropic_response(data: JsonDict, model_id: str) -> ProviderRound:
+    raw_content_blocks: object = data.get("content", [])
+    content_blocks = cast(list[object], raw_content_blocks) if isinstance(raw_content_blocks, list) else []
+    content = "".join([
+        string_value(block.get("text"))
+        for block in (json_dict(item) for item in content_blocks)
+        if block.get("type") == "text"
+    ])
     
-    tool_calls = []
+    tool_calls: list[JsonDict] = []
     for block in content_blocks:
-        if block.get("type") == "tool_use":
+        block_data = json_dict(block)
+        if block_data.get("type") == "tool_use":
             tool_calls.append({
-                "id": block.get("id"),
-                "name": block.get("name"),
+                "id": block_data.get("id"),
+                "name": block_data.get("name"),
                 "function": {
-                    "name": block.get("name"),
-                    "arguments": json.dumps(block.get("input", {}))
+                    "name": block_data.get("name"),
+                    "arguments": json.dumps(block_data.get("input", {}))
                 }
             })
     
@@ -52,29 +72,38 @@ def parse_anthropic_response(data: dict, model_id: str) -> Tuple[str, Optional[s
     return content, reasoning_content, tool_calls, tokens
 
 
+def _decode_tool_args_object(raw_args: Any) -> JsonDict:
+    try:
+        parsed = json.loads(raw_args or "{}") if isinstance(raw_args, str) else raw_args
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return cast(JsonDict, parsed) if isinstance(parsed, dict) else {}
+
+
 def append_anthropic_tool_messages(
-    messages: List[dict],
-    message_history: dict,
+    messages: MessageList,
+    message_history: JsonDict,
     content: str,
     reasoning_content: Optional[str],
-    executed_tool_call_list: List[dict],
-    tool_messages: List[dict],
+    executed_tool_call_list: list[JsonDict],
+    tool_messages: MessageList,
     tokens: int,
     repeated_warning_msg: str = ""
 ) -> None:
-    content_blocks: List[dict] = []
+    content_blocks: list[JsonDict] = []
     if content:
         content_blocks.append({"type": "text", "text": content})
     else:
         content_blocks.append({"type": "text", "text": " "})
     for tool_call in executed_tool_call_list:
+        function_payload = json_dict(tool_call.get("function"))
         content_blocks.append({
             "type": "tool_use",
             "id": tool_call.get("id"),
             "name": tool_call.get("name"),
-            "input": json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+            "input": _decode_tool_args_object(function_payload.get("arguments", "{}")),
         })
-    assistant_msg = {"role": "assistant", "content": content_blocks}
+    assistant_msg: JsonDict = {"role": "assistant", "content": content_blocks}
     messages.append(assistant_msg)
     messages.extend(tool_messages)
     
@@ -82,7 +111,7 @@ def append_anthropic_tool_messages(
         messages.append({"role": "user", "content": [{"type": "text", "text": repeated_warning_msg}]})
     
     msg_id = str(uuid.uuid4())
-    message_history["messages"][msg_id] = {  # type: ignore
+    history_section(message_history, "messages")[msg_id] = {
         "message": json.dumps(assistant_msg),
         "tokens": tokens,
         "type": "assistant_with_tools",
@@ -90,7 +119,7 @@ def append_anthropic_tool_messages(
     
     for tool_msg in tool_messages:
         msg_id = str(uuid.uuid4())
-        message_history["messages"][msg_id] = {  # type: ignore
+        history_section(message_history, "messages")[msg_id] = {
             "message": json.dumps(tool_msg),
             "tokens": 0,
             "type": "tool",

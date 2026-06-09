@@ -1,15 +1,7 @@
 """Tests for non-blocking HITL interrupt/resume behavior."""
 import asyncio
 import json
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
-
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
 
 mock_ika_mem = MagicMock()
 with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):

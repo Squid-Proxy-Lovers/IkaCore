@@ -4,31 +4,24 @@ request building (tools, history, messages), response parsing (content, tool_cal
 message_history updates, and chat() return shape (content, history, costs, answers).
 """
 import json
-import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
-
-from IkaModel.base import BareBoneModel, AgentTool, ToolArgs, AgentEndException
-from IkaModel.request_interface import get_provider, get_max_tokens
-from IkaModel.chat_interface.chat_interface import (
-    init_message_history,
-    get_total_tokens,
-    chat,
-)
 from IkaCore.logging_utils import IkaLogger
+from IkaModel.base import AgentEndException, AgentTool, BareBoneModel, ToolArgs
 from IkaModel.chat_helpers_common import (
+    append_provider_tool_messages,
     build_provider_request,
     parse_provider_response,
-    append_provider_tool_messages,
+)
+from IkaModel.chat_interface.chat_interface import (
+    chat,
+    get_total_tokens,
+    init_message_history,
 )
 from IkaModel.chat_interface.response_interface import extract_usage, format_gemini_results
-
+from IkaModel.request_interface import get_max_tokens, get_provider
 
 PROVIDERS = ("openai", "deepseek", "anthropic", "gemini", "openrouter")
 
@@ -152,7 +145,9 @@ class TestAllProvidersRequestBuild:
         history = init_message_history()
         messages = [{"role": "user", "content": "Hi"}]
         url, headers, payload = build_provider_request("gemini", model, messages, history)
-        assert "generativelanguage.googleapis.com" in url or "key=" in url
+        assert "generativelanguage.googleapis.com" in url
+        assert "key=" not in url
+        assert headers["x-goog-api-key"] == model.api_key
         assert "contents" in payload or "generationConfig" in payload
 
     def test_build_request_openrouter(self):
@@ -230,8 +225,28 @@ class TestModelCostResolution:
     def test_deepseek_v4_flash_has_pricing(self):
         assert IkaLogger.get_model_cost("deepseek-v4-flash") == IkaLogger.get_model_cost("deepseek-chat")
 
+    def test_deepseek_v4_1_frontier_pricing(self):
+        assert IkaLogger.get_model_cost("deepseek-v4.1-pro") == (0.435, 0.003625, 0.870)
+        assert IkaLogger.get_model_cost("deepseek-v4.1-thinking") == IkaLogger.get_model_cost("deepseek-v4.1")
+
+    def test_openai_frontier_pricing(self):
+        assert IkaLogger.get_model_cost("gpt-5.5") == (5.00, 0.50, 30.00)
+        assert IkaLogger.get_model_cost("gpt-5.5-pro") == (30.00, 30.00, 180.00)
+        assert IkaLogger.get_model_cost("gpt-5.4-mini-2026-03-17") == (0.75, 0.075, 4.50)
+
+    def test_gemini_frontier_pricing(self):
+        assert IkaLogger.get_model_cost("gemini-3.5-flash") == (1.50, 0.15, 9.00)
+        assert IkaLogger.get_model_cost("google/gemini-2.5-pro") == (1.25, 0.125, 10.00)
+
     def test_provider_prefixed_minimax_pricing(self):
         assert IkaLogger.get_model_cost("minimax/minimax-m2.7") == (0.30, 0.30, 1.20)
+
+    def test_provider_prefixed_versioned_anthropic_pricing(self):
+        assert IkaLogger.get_model_cost("us.anthropic.claude-opus-4-6-v1:0") == (5.00, 0.50, 25.00)
+
+    def test_anthropic_frontier_pricing(self):
+        assert IkaLogger.get_model_cost("claude-opus-4-8") == (5.00, 0.50, 25.00)
+        assert IkaLogger.get_model_cost("us.anthropic.claude-sonnet-4-6-v1:0") == (3.00, 0.30, 15.00)
 
     def test_compute_cost_uses_cached_token_rate(self):
         logger = IkaLogger(level=0)
@@ -635,6 +650,14 @@ class TestProviderAndTokenHelpers:
     def test_get_max_tokens_returns_positive(self):
         assert get_max_tokens("gpt-4o") > 0
         assert get_max_tokens("claude-3-sonnet") > 0
+
+    def test_get_max_tokens_prefers_specific_model_slug(self):
+        assert get_max_tokens("gpt-5.3-codex") == 400000
+        assert get_max_tokens("gpt-5.5-pro") == 1050000
+        assert get_max_tokens("gpt-5.4-mini") == 400000
+        assert get_max_tokens("claude-opus-4-8") == 1000000
+        assert get_max_tokens("gemini-3.5-flash") == 1048576
+        assert get_max_tokens("deepseek-v4.1-pro") == 1000000
 
     def test_init_message_history_structure(self):
         h = init_message_history()

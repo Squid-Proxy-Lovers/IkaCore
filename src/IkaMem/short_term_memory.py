@@ -1,41 +1,21 @@
-import time
-from typing import Any, Optional
+# pyright: strict
 
-from IkaMem.memory import Memory
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any, Optional, cast
+
+from IkaMem.memory import Memory, StorageBackend
 from IkaMem.memory_items import STMemItem
 from IkaMem.storage.mem0_storage import Mem0Store
 
+LOG = logging.getLogger(__name__)
 
-class STMemory(Memory):
-    """short-term memory for managing data related to immediate tasks and interactions."""
-    def __init__(
-        self,
-        embedder_config: Optional[dict[str, Any]] = None,
-        storage: Optional[Any] = None,
-    ) -> None:
-        """
-        init ShortTermMemory.
-        
-        Args:
-            embedder_config: config for memory provider
-                - provider: 'mem0' to use Mem0Store
-                - config: Configuration dict for Mem0 (api_key, user_id, etc.)
-            storage: optional custom storage backend. If not provided and
-                embedder_config specifies 'mem0', Mem0Store will be used.
-        """
-        memory_provider = None
-        if embedder_config and isinstance(embedder_config, dict):
-            memory_provider = embedder_config.get("provider")
 
-        if memory_provider == "mem0" and not storage:
-            config = embedder_config.get("config") if embedder_config else None
-            storage = Mem0Store(memory_type="short_term", config=config)
-        elif not storage:
-            raise ValueError("no storage backend provided")
-
-        super().__init__(storage=storage)
-        self._memory_provider = memory_provider
-
+class ShortTermMemorySaveMixin:
+    storage: StorageBackend
+    _memory_provider: Optional[str]
 
     def save(
         self,
@@ -50,23 +30,21 @@ class STMemory(Memory):
             metadata: optional metadata to associate with the value
         """
         start_time = time.time()
-        
-        try:
-            # create short-term memory item
-            item = STMemItem(data=value, metadata=metadata, agent=self.agent)
-            
-            if self._memory_provider == "mem0":
-                item.data = f"Remember the following insights from Agent run: {item.data}"
 
-            super().save(value=item.data, metadata=item.metadata)
-            
-            elapsed = (time.time() - start_time) * 1000
-            print(f"[STMemory] saved in {elapsed:.2f}ms")
-            
-        except Exception as e:
-            print(f"[STMemory] save failed: {str(e)}")
-            raise
+        agent = cast(Optional[str], getattr(self, "agent", None))
+        item = STMemItem(data=value, metadata=metadata, agent=agent)
 
+        if self._memory_provider == "mem0":
+            item.data = f"Remember the following insights from Agent run: {item.data}"
+
+        self.storage.save(value=item.data, metadata=item.metadata)
+
+        elapsed = (time.time() - start_time) * 1000
+        LOG.debug("short-term memory saved in %.2fms", elapsed)
+
+
+class ShortTermMemorySearchMixin:
+    storage: StorageBackend
 
     def search(
         self,
@@ -87,17 +65,32 @@ class STMemory(Memory):
         """
         start_time = time.time()
         
-        try:
-            results = self.storage.search(
-                query=query, limit=limit, score_threshold=score_threshold
-            )
-            
-            elapsed = (time.time() - start_time) * 1000
-            print(f"[STMemory] search completed in {elapsed:.2f}ms, found {len(results)} results")
-            
-            return list(results)
-            
-        except Exception as e:
-            print(f"[STMemory] search failed: {str(e)}")
-            raise
+        results = self.storage.search(
+            query=query, limit=limit, score_threshold=score_threshold
+        )
 
+        elapsed = (time.time() - start_time) * 1000
+        LOG.debug("short-term memory search completed in %.2fms, found %d results", elapsed, len(results))
+
+        return list(results)
+
+
+class STMemory(ShortTermMemorySaveMixin, ShortTermMemorySearchMixin, Memory):
+    """short-term memory for managing data related to immediate tasks and interactions."""
+
+    def __init__(
+        self,
+        embedder_config: Optional[dict[str, Any]] = None,
+        storage: Optional[StorageBackend] = None,
+    ) -> None:
+        provider = embedder_config.get("provider") if embedder_config else None
+        memory_provider = provider if isinstance(provider, str) else None
+
+        if memory_provider == "mem0" and not storage:
+            config = cast(Optional[dict[str, Any]], embedder_config.get("config") if embedder_config else None)
+            storage = Mem0Store(memory_type="short_term", config=config)
+        elif not storage:
+            raise ValueError("no storage backend provided")
+
+        super().__init__(storage=storage)
+        self._memory_provider: Optional[str] = memory_provider

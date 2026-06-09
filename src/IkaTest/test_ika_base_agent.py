@@ -1,22 +1,16 @@
 """
 Tests for IkaBaseAgent: init, validation, geturl, get_barebone, and API-facing tool/stage build.
 """
-import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
 
 mock_ika_mem = MagicMock()
 with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
     from IkaCore.agents import IkaBaseAgent
-from IkaCore.tools import IkaTools
 from IkaCore.stages import IkaStage
-from IkaModel.base import BareBoneModel, AgentTool, ToolArgs
+from IkaCore.tools import IkaTools
+from IkaModel.base import AgentTool, ToolArgs
 
 
 def _minimal_agent(**kwargs):
@@ -101,6 +95,36 @@ class TestIkaBaseAgentInit:
             _minimal_agent(feedback_agent=_minimal_agent(name="Feedback"))
         with pytest.raises(TypeError):
             _minimal_agent(Batch=True)
+
+    def test_logging_level_three_configures_debug_logging(self):
+        logger = MagicMock()
+
+        with patch("logging.basicConfig") as basic_config:
+            with patch("logging.getLogger", return_value=logger) as get_logger:
+                _minimal_agent(logging_level=3)
+
+        basic_config.assert_called_once()
+        get_logger.assert_called_once_with("IkaModel.chat_interface.chat_interface")
+        logger.setLevel.assert_called_once()
+
+    def test_shutdown_awaits_async_client_close_and_closes_logger(self):
+        class AsyncClient:
+            def __init__(self):
+                self.closed = False
+
+            async def aclose(self):
+                self.closed = True
+
+        a = _minimal_agent(use_async=True)
+        client = AsyncClient()
+        a.client = client
+        a.logger = MagicMock()
+
+        a.shutdown()
+
+        assert client.closed is True
+        assert a.client is None
+        a.logger.shutdown.assert_called_once()
 
 
 class TestGetUrl:

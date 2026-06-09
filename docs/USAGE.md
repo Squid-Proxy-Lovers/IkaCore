@@ -198,6 +198,7 @@ Default behavior:
 - OpenAI models use the Responses API by default.
 - Set `use_responses_api=False` to target OpenAI Chat Completions.
 - Anthropic, Gemini, DeepSeek, and OpenRouter URLs are inferred from `model_id`.
+- Codex model IDs ending in `-codex`, such as `gpt-5.3-codex`, route to the Codex backend.
 - If you pass an explicit non-OpenAI `api_url`, that URL is respected.
 
 Example:
@@ -212,6 +213,34 @@ agent = IkaBaseAgent(
     use_responses_api=False,
 )
 ```
+
+#### Codex Auth
+
+IkaCore supports the Codex backend at `https://chatgpt.com/backend-api/codex/responses`. Codex bills against the caller's ChatGPT plan and uses a bearer token, not an OpenAI API key.
+
+The provider does not read local credentials automatically. `api_key` is treated as the literal bearer token, matching the other providers. You can source that bearer from an environment variable, a secret store, or the optional `codex_auth.get_bearer()` helper.
+
+```python
+import os
+
+from IkaCore import IkaBaseAgent
+from IkaModel.codex import CODEX_API_URL, codex_auth
+
+bearer = os.getenv("CODEX_BEARER") or codex_auth.get_bearer()
+
+agent = IkaBaseAgent(
+    name="codex_agent",
+    description="Uses the Codex backend",
+    prompt="Reply briefly.",
+    model_id="gpt-5.3-codex",
+    api_key=bearer,
+    api_url=CODEX_API_URL,
+)
+```
+
+`codex_auth.get_bearer()` reads `~/.codex/auth.json`, or `$CODEX_HOME/auth.json` when `CODEX_HOME` is set. It refreshes the access token when it is close to expiry and writes the refreshed token back to `auth.json`. If `auth.json` does not exist, run `codex login` first.
+
+Bare `gpt-5.x` model names do not auto-route to Codex because they overlap with standard OpenAI Responses models. For those, pass `api_url=CODEX_API_URL` explicitly. A Codex `401` means the bearer was rejected; refresh the token with `codex_auth.get_bearer(force_refresh=True)` and retry.
 
 ### Workflows
 
@@ -287,6 +316,14 @@ Useful options:
 - `show_usage_level0=True`
 - `IKA_DUMP_REQUESTS=/path/to/dir` to dump request/response payloads for debugging
 
+Optional live provider smoke tests are available for checking real provider plumbing outside normal CI:
+
+```bash
+IKACORE_LIVE_PROVIDER_TESTS=1 OPENAI_API_KEY=... pytest src/IkaTest/test_live_provider_smoke.py
+```
+
+The live smoke suite supports OpenAI, Anthropic, DeepSeek, Gemini, and OpenRouter. When live smoke is enabled, at least one provider must be fully configured. For providers without stable project defaults, set the matching `IKACORE_LIVE_<PROVIDER>_MODEL` variable before running it.
+
 ### Examples
 
 The repo includes runnable examples in `examples/`:
@@ -297,4 +334,4 @@ The repo includes runnable examples in `examples/`:
 - `example_workflow.py`
 - `example_workflow_advanced.py`
 
-These examples are source-checkout examples and currently add `src/` to `sys.path` directly.
+These examples assume the package is installed, for example with `pip install -e .`, and should not mutate `sys.path`.

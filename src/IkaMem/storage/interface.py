@@ -1,7 +1,13 @@
+# pyright: strict
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
 from typing import Any
 
 
-class Storage:
+class Storage(ABC):
+    @abstractmethod
     def save(self, value: Any, metadata: dict[str, Any]) -> None:
         """Save a value to storage with associated metadata.
         
@@ -9,8 +15,8 @@ class Storage:
             value: The value to store
             metadata: Metadata associated with the value
         """
-        pass
 
+    @abstractmethod
     def search(
         self, query: str, limit: int, score_threshold: float
     ) -> list[Any]:
@@ -25,8 +31,7 @@ class Storage:
         Returns:
             list of matching entries
         """
-        return []
 
+    @abstractmethod
     def reset(self) -> None:
-        pass
-
+        """Clear all stored values."""

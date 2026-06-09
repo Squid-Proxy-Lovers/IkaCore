@@ -1,5 +1,6 @@
+import importlib.util
+import uuid
 from pathlib import Path
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -21,3 +22,21 @@ def test_runtime_and_examples_do_not_mutate_sys_path():
     for path in FILES_WITHOUT_SYS_PATH_MUTATION:
         content = path.read_text(encoding="utf-8")
         assert "sys.path.insert" not in content, f"unexpected sys.path mutation in {path}"
+
+
+def test_examples_import_without_credentials(monkeypatch):
+    for env_name in (
+        "API_KEY",
+        "API_KEY2",
+        "OPENROUTER_API_KEY",
+        "CODEX_BEARER",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    for path in sorted((REPO_ROOT / "examples").glob("example_*.py")):
+        module_name = f"_ikacore_example_{path.stem}_{uuid.uuid4().hex}"
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        assert spec is not None
+        assert spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)

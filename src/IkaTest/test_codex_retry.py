@@ -17,25 +17,18 @@ Covers:
       * non-transient stream-level response.failed bubbles
 """
 import email.utils
-import sys
 import time
-from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 import pytest
 
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
-
 from IkaModel.codex.chat_helpers_codex import (
-    _CodexRetryableStreamError,
     _classify_stream_error,
+    _CodexRetryableStreamError,
     _parse_retry_after,
     request_codex,
 )
-
 
 # ----------------------------------------------------------------------
 # _classify_stream_error

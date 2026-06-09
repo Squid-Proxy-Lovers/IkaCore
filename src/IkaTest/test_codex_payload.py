@@ -11,19 +11,11 @@ Covers:
     tool pins, multiple required tools → "required", none → "auto".
   - Tool parameter shape (object root) gets additionalProperties:false.
 """
-import sys
-from pathlib import Path
-
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
-
 import pytest
 
-from IkaModel.base import BareBoneModel, AgentTool, ToolArgs
+from IkaModel.base import AgentTool, BareBoneModel, ToolArgs
 from IkaModel.codex import CODEX_API_URL, build_codex_request
 from IkaModel.codex.codex_responses import codex_responses_fill_payload
-
 
 # ----------------------------------------------------------------------
 # Fixtures

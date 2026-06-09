@@ -1,33 +1,43 @@
-import json
+from __future__ import annotations
+
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, List
+from typing import TYPE_CHECKING, Any, List, Optional
 
-from IkaCore.cli_output import get_cli_output, OutputType
+from IkaCore.cli_output import OutputType, get_cli_output
 
+from . import model_metadata
+
+if TYPE_CHECKING:
+    from IkaMem import LTMemory
 
 _LOG = logging.getLogger(__name__)
 
-_GLOBAL_LONG_TERM_MEMORY: Optional["LTMemory"] = None 
+_GLOBAL_LONG_TERM_MEMORY: Optional["LTMemory"] = None
+
+# Backward-compatible alias for callers that imported the old constant from
+# IkaModel.base. The table itself lives in model_metadata.py.
+TOKENMAX_MAPPING = model_metadata.TOKENMAX_MAPPING
 
 
 class AgentEndException(RuntimeError):
     """Raised when agent_end (or equivalent) signals immediate completion."""
 
-    def __init__(self, response: Optional[dict] = None, final_text: Optional[str] = None):
+    def __init__(self, response: Optional[dict[str, Any]] = None, final_text: Optional[str] = None):
         super().__init__("agent_end requested termination")
-        self.response = response or {}
-        self.final_text = final_text or (self.response.get("content") if isinstance(self.response, dict) else None)
+        self.response: dict[str, Any] = response or {}
+        response_content = self.response.get("content")
+        self.final_text = final_text or (response_content if isinstance(response_content, str) else None)
 
 
 class HumanInputRequired(RuntimeError):
     """Raised when HITL execution must pause for human input."""
 
-    def __init__(self, payload: Optional[dict] = None):
+    def __init__(self, payload: Optional[dict[str, Any]] = None):
         super().__init__("human input required")
-        self.payload = payload or {}
+        self.payload: dict[str, Any] = payload or {}
 
 
 def load_gemini_payload():
@@ -51,50 +61,14 @@ Do not continue making tool calls after the task is complete. The agent_end tool
 CRITICAL: MAKE SURE YOUR FINAL ANSWER IS ANSWER THE ORGINAL TASK, MAKE SURE YOUR RESPONSE IS VERY DETAILED AND COMPLETE!
 """
 
-TOKENMAX_MAPPING = {
-    "gpt-4o": 128000,                    # 128K tokens context window :contentReference[oaicite:2]{index=2}
-    "gpt-4.1": 1000000,                  # 1M tokens context window :contentReference[oaicite:3]{index=3}
-    "gpt-4.1-mini": 1000000,             # same 1M tokens context :contentReference[oaicite:4]{index=4}
-    "gpt-4.1-nano": 1000000,             # same 1M tokens context :contentReference[oaicite:5]{index=5}
-    "gpt-5": 1000000,                    # GPT-5 family
-    "gpt-5-mini": 1000000,               # GPT-5 mini
-    "gpt-5.3-codex": 400000,             # GPT-5.3 Codex (400K context)
-    "o4": 200000,                        # o4 reasoning model family
-    "o4-mini": 200000,                   # o4-mini reasoning model
-    "claude-2": 100000,                  # ~100K context (historical) :contentReference[oaicite:6]{index=6}
-    "claude-2.1": 200000,                # ~200K context (expanded) :contentReference[oaicite:7]{index=7}
-    "claude-3-haiku": 200000,            # typical 200K context :contentReference[oaicite:8]{index=8}
-    "claude-3-sonnet": 200000,           # typical 200K context :contentReference[oaicite:9]{index=9}
-    "claude-3-opus": 200000,             # typical 200K context :contentReference[oaicite:10]{index=10}
-    "claude-sonnet-4": 200000,           # base context (200K) :contentReference[oaicite:11]{index=11}
-    "claude-opus-4": 200000,              # base context window :contentReference[oaicite:12]{index=12}
-    "claude-sonnet-4 (1M beta)": 1000000,
-    "gemini-1.5-pro": 1000000,            # 1M token window on many configs :contentReference[oaicite:14]{index=14}
-    "gemini-2.5-pro": 1000000,            # ~1M token window :contentReference[oaicite:15]{index=15}
-    "gemini-3-pro": 1000000,              # ~1M token window reported :contentReference[oaicite:16]{index=16}
-    "deepseek-v3.2": 131072,              # ~131K tokens context window :contentReference[oaicite:18]{index=18}
-    "deepseek-v3.2-speciale": 131072,     # similar ~131K context :contentReference[oaicite:19]{index=19}
-    "deepseek-r1": 131072,                # ~131K context (preview/hosted) :contentReference[oaicite:20]{index=20}
-    "deepseek-v4-flash": 1000000,         # 1M context per V4 launch (apr 2026)
-    "deepseek-v4-pro": 1000000,           # 1M context per V4 launch (apr 2026)
-    "deepseek-chat": 1000000,             # legacy alias → routes to v4-flash; retires 2026-07-24
-    "deepseek-reasoner": 1000000,         # legacy alias → routes to v4-flash thinking-mode; retires 2026-07-24
-    # OpenRouter models (common defaults)
-    "llama-3.1-70b": 131072,
-    "llama-3.1-8b": 131072,
-    "qwen-2.5-72b": 131072,
-}
-
-
-
 @dataclass
 class ToolArgs:
     type: str
     description: str
     agent: Optional[str] = None
     data: Optional[Any] = None
-    metadata: Optional[dict] = None
-    properties: Optional[dict] = None
+    metadata: Optional[dict[str, Any]] = None
+    properties: Optional[dict[str, Any]] = None
     
     # we are going to assume that all args are required
 
@@ -163,7 +137,7 @@ class BareBoneModel:
         parallel_tool_calls: bool = False,
         agent_name: Optional[str] = None,
         agent_hierarchy: Optional[List[str]] = None,
-        suppress_init_output: bool = False,
+        suppress_init_output: bool = True,
         reasoning_effort: Optional[str] = None,
         use_responses_api: bool = True,
         force_control_tool_on_max_tool_calls: bool = True,
@@ -195,6 +169,7 @@ class BareBoneModel:
         self.use_responses_api = use_responses_api
         self.force_control_tool_on_max_tool_calls = force_control_tool_on_max_tool_calls
         self.forced_tool_name: Optional[str] = None
+        self._current_step: int = 0
 
         # Display prompts using CLI output (unless suppressed)
         if not suppress_init_output:

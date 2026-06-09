@@ -1,31 +1,46 @@
-import json
-import uuid
-import logging
-from typing import Any, Dict, List, Optional, Tuple
+# pyright: strict
+# pyright: reportUnusedFunction=false
 
+import json
+import logging
+import uuid
+from typing import Optional, cast
+
+from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
+
+from ..base import BareBoneModel
+from ..request_interface import agent_tools_for_payload
 from .openrouter import openrouter_fill_payload
-from ..request_interface import _apply_tools_filter_for_payload, _restore_tools_after_payload
 
 LOG = logging.getLogger(__name__)
+ProviderRequest = tuple[str, dict[str, str], JsonDict]
+ProviderRound = tuple[str, Optional[str], list[JsonDict], int]
+MessageList = list[JsonDict]
+
+
+def _token_count(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    return 0
 
 
 def build_openrouter_request(
-    barebone_model: Any,
-    messages: List[dict],
-    message_history: dict
-) -> Tuple[str, Dict[str, str], dict]:
+    barebone_model: BareBoneModel,
+    messages: MessageList,
+    message_history: JsonDict
+) -> ProviderRequest:
     """Build OpenRouter API request (URL, headers, payload)."""
-    _apply_tools_filter_for_payload(barebone_model)
-
     # Extract OpenRouter-specific config if present
     plugins = getattr(barebone_model, 'openrouter_plugins', None)
     response_format = getattr(barebone_model, 'openrouter_response_format', None)
 
     payload = openrouter_fill_payload(
         barebone_model, messages, message_history,
-        plugins=plugins, response_format=response_format
+        plugins=plugins, response_format=response_format,
+        agent_tools=agent_tools_for_payload(barebone_model),
     )
-    _restore_tools_after_payload(barebone_model)
 
     # Build headers
     headers = {
@@ -34,23 +49,25 @@ def build_openrouter_request(
     }
 
     # Add optional attribution headers
-    if hasattr(barebone_model, 'http_referer'):
-        headers["HTTP-Referer"] = barebone_model.http_referer
-    if hasattr(barebone_model, 'x_title'):
-        headers["X-Title"] = barebone_model.x_title
+    http_referer = getattr(barebone_model, 'http_referer', None)
+    if isinstance(http_referer, str):
+        headers["HTTP-Referer"] = http_referer
+    x_title = getattr(barebone_model, 'x_title', None)
+    if isinstance(x_title, str):
+        headers["X-Title"] = x_title
 
     return barebone_model.api_url, headers, payload
 
 
-def parse_openrouter_response(data: dict, model_id: str) -> Tuple[str, Optional[str], List[dict], int]:
+def parse_openrouter_response(data: JsonDict, model_id: str) -> ProviderRound:
     """Parse OpenRouter API response (OpenAI-compatible with cost field)."""
     # OpenRouter can return 200 with an error body when the upstream provider fails (e.g. 502)
     if "error" in data:
-        err = data["error"]
-        msg = err.get("message", "Unknown error")
-        meta = err.get("metadata", {}) or {}
-        raw = meta.get("raw", "")
-        provider = meta.get("provider_name", "")
+        err = json_dict(data.get("error"))
+        msg = string_value(err.get("message"), "Unknown error")
+        meta = json_dict(err.get("metadata"))
+        raw = string_value(meta.get("raw"))
+        provider = string_value(meta.get("provider_name"))
         detail = f"{msg}"
         if provider:
             detail += f" (provider: {provider})"
@@ -59,21 +76,24 @@ def parse_openrouter_response(data: dict, model_id: str) -> Tuple[str, Optional[
         raise ValueError(f"OpenRouter returned error: {detail}")
     if "choices" not in data or not data["choices"]:
         raise ValueError("OpenRouter response missing 'choices'")
-    message_obj = data["choices"][0]["message"]
-    content = message_obj.get("content") or ""
-    tool_calls = message_obj.get("tool_calls", []) or []
+    choices = cast(list[JsonDict], data["choices"])
+    message_obj = json_dict(choices[0].get("message"))
+    content = string_value(message_obj.get("content"))
+    raw_tool_calls: object = message_obj.get("tool_calls", []) or []
+    tool_calls = cast(list[JsonDict], raw_tool_calls) if isinstance(raw_tool_calls, list) else []
 
     # Extract usage info
-    usage = data.get("usage", {})
-    tokens = usage.get("total_tokens", 0)
+    usage = json_dict(data.get("usage"))
+    tokens = _token_count(usage.get("total_tokens"))
     cost = usage.get("cost", 0.0)  # OpenRouter-specific
 
     # Log cost for tracking
-    if cost > 0:
+    if isinstance(cost, (int, float)) and cost > 0:
         LOG.debug(f"OpenRouter request cost: ${cost:.6f}")
 
     # Check for reasoning content (o1/o3 models + OpenRouter reasoning field)
-    reasoning_content = message_obj.get("reasoning_content") or message_obj.get("reasoning")
+    reasoning_value = message_obj.get("reasoning_content") or message_obj.get("reasoning")
+    reasoning_content = string_value(reasoning_value) if reasoning_value else None
 
     # Log GLM reasoning to file for analysis
     if reasoning_content and "glm" in (model_id or "").lower():
@@ -81,29 +101,29 @@ def parse_openrouter_response(data: dict, model_id: str) -> Tuple[str, Optional[
         log_path = _os.environ.get("GLM_REASONING_LOG")
         if log_path:
             try:
-                with open(log_path, "a") as f:
+                with open(log_path, "a", encoding="utf-8") as f:
                     f.write(f"\n===== {model_id} =====\n")
                     f.write(reasoning_content[:4000])
                     f.write(f"\n---\ntool_calls: {len(tool_calls)}\n")
                     f.write("=" * 40 + "\n")
-            except Exception:
+            except (OSError, TypeError, ValueError):
                 pass
 
     return content, reasoning_content, tool_calls, tokens
 
 
 def append_openrouter_tool_messages(
-    messages: List[dict],
-    message_history: dict,
+    messages: MessageList,
+    message_history: JsonDict,
     content: str,
     reasoning_content: Optional[str],
-    executed_tool_call_list: List[dict],
-    tool_messages: List[dict],
+    executed_tool_call_list: list[JsonDict],
+    tool_messages: MessageList,
     tokens: int,
     repeated_warning_msg: str = ""
 ) -> None:
     """Append tool messages to conversation history (OpenAI-compatible)."""
-    assistant_msg = {"role": "assistant", "content": content}
+    assistant_msg: JsonDict = {"role": "assistant", "content": content}
     if reasoning_content:
         assistant_msg["reasoning_content"] = reasoning_content
     if executed_tool_call_list:
@@ -118,7 +138,7 @@ def append_openrouter_tool_messages(
     # Update message history
     if executed_tool_call_list:
         msg_id = str(uuid.uuid4())
-        message_history["messages"][msg_id] = {
+        history_section(message_history, "messages")[msg_id] = {
             "message": json.dumps(assistant_msg),
             "tokens": tokens,
             "type": "assistant_with_tools",
@@ -126,7 +146,7 @@ def append_openrouter_tool_messages(
 
     for tool_msg in tool_messages:
         msg_id = str(uuid.uuid4())
-        message_history["messages"][msg_id] = {
+        history_section(message_history, "messages")[msg_id] = {
             "message": json.dumps(tool_msg),
             "tokens": 0,
             "type": "tool",

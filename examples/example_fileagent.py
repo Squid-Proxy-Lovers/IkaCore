@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from IkaCore import IkaBaseAgent, IkaTools
 
@@ -16,18 +17,6 @@ def _load_key():
                 if line.startswith("openrouter="):
                     return line.split("=", 1)[1].strip()
     return os.getenv("OPENROUTER_API_KEY") or os.getenv("API_KEY")
-
-
-API_KEY = _load_key()
-if not API_KEY:
-    raise ValueError("Set OPENROUTER_API_KEY or API_KEY, or add openrouter=<key> to examples/keys.cfg")
-if not API_KEY.startswith("sk-or-"):
-    raise ValueError(
-        "OpenRouter key must start with sk-or-. Get a valid key at https://openrouter.ai/keys "
-        "and set it in examples/keys.cfg (openrouter=<key>) or OPENROUTER_API_KEY"
-    )
-if not MODEL_ID:
-    raise ValueError("MODEL_ID is not set")
 
 
 SYSTEM_PROMPT = """ You are a general purpose agent. You can use the tools provided to you to achieve your goal."""
@@ -48,11 +37,20 @@ Rules:
 """
 
 def main():
+    api_key = _load_key()
+    if not api_key:
+        raise ValueError("Set OPENROUTER_API_KEY or API_KEY, or add openrouter=<key> to examples/keys.cfg")
+    if not api_key.startswith("sk-or-"):
+        raise ValueError(
+            "OpenRouter key must start with sk-or-. Get a valid key at https://openrouter.ai/keys "
+            "and set it in examples/keys.cfg (openrouter=<key>) or OPENROUTER_API_KEY"
+        )
+    if not MODEL_ID:
+        raise ValueError("MODEL_ID is not set")
 
     def read_file_execute(file_path: str) -> str:
-        return open(file_path, "r").read()
-
-
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
 
     get_pwd = IkaTools(
         name="get_pwd",
@@ -62,7 +60,7 @@ def main():
         },
         execute_function=lambda _: os.getcwd(),
     )
-    
+
     list_files = IkaTools(
         name="list_files",
         description="List files in a directory",
@@ -70,11 +68,10 @@ def main():
             "directory_path": {
                 "type": "string",
                 "description": "The path to the directory to list files from",
-                "required": True
+                "required": True,
             },
         },
         execute_function=lambda x: os.listdir(x["directory_path"]),
-        #required=True,
     )
 
     read_file = IkaTools(
@@ -94,11 +91,12 @@ def main():
         prompt=PROMPT,
         tools=[get_pwd, read_file, list_files],
         model_id=MODEL_ID,
-        api_key=API_KEY,
+        api_key=api_key,
         maxsteps=30,
         logging_level=3,
     )
     agent.execution()
+
 
 if __name__ == "__main__":
     main()

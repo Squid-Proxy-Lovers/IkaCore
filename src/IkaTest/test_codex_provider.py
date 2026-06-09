@@ -9,13 +9,6 @@ Covers:
   - IkaBaseAgent.geturl() picks CODEX_API_URL for "-codex" model IDs.
   - Bare codex slugs without api_url still go to OpenAI by default.
 """
-import sys
-from pathlib import Path
-
-src = Path(__file__).resolve().parent.parent
-if str(src) not in sys.path:
-    sys.path.insert(0, str(src))
-
 import pytest
 
 from IkaCore.agent_helpers import AgentHelpersMixin

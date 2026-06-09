@@ -2,17 +2,7 @@ import os
 from typing import List
 
 from IkaCore import IkaBaseAgent, IkaStage
-from IkaCore.workflow import (
-    IkaWorkflow,
-    WorkflowNode,
-    WorkflowEdge,
-    WorkflowCompressionHook,
-)
-
-API_KEY = os.getenv("API_KEY")
-MODEL_ID = os.getenv("MODEL_ID", "deepseek-chat")
-if not API_KEY:
-    raise ValueError("API_KEY is not set")
+from IkaCore.workflow import IkaWorkflow, WorkflowCompressionHook, WorkflowEdge, WorkflowNode
 
 
 def truncate_compress(contexts: List[str], _agent: IkaBaseAgent) -> str:
@@ -23,21 +13,21 @@ def truncate_compress(contexts: List[str], _agent: IkaBaseAgent) -> str:
     return merged[:cap] + ("..." if len(merged) > cap else "")
 
 
-def build_sync_workflow(compress_hook: WorkflowCompressionHook) -> IkaWorkflow:
+def build_sync_workflow(compress_hook: WorkflowCompressionHook, api_key: str, model_id: str) -> IkaWorkflow:
     stg0 = IkaStage(
         name="gather",
         prompt="Expand on the topic. If a research subagent is available, you may delegate to it. Then call stage_end.",
         tools=[],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        model_id=model_id,
+        api_key=api_key,
         stage_max_step=20,
     )
     stg1 = IkaStage(
         name="refine",
         prompt="Critically refine the content. If a critic subagent is available, you may use it. Then call stage_end.",
         tools=[],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        model_id=model_id,
+        api_key=api_key,
         stage_max_step=20,
     )
 
@@ -48,8 +38,8 @@ def build_sync_workflow(compress_hook: WorkflowCompressionHook) -> IkaWorkflow:
         prompt="Process the topic you receive: first gather and expand, then refine.",
         tools=[],
         Stages=[stg0, stg1],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        model_id=model_id,
+        api_key=api_key,
         maxsteps=50,
         logging_level=2,
     )
@@ -60,8 +50,8 @@ def build_sync_workflow(compress_hook: WorkflowCompressionHook) -> IkaWorkflow:
         system_prompt="You are a researcher. Reply in one short paragraph.",
         prompt="Expand on the topic given. Be concise.",
         tools=[],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        model_id=model_id,
+        api_key=api_key,
         logging_level=2,
     )
 
@@ -71,8 +61,8 @@ def build_sync_workflow(compress_hook: WorkflowCompressionHook) -> IkaWorkflow:
         system_prompt="You are a critic. Reply in one short paragraph.",
         prompt="Critically refine or improve the text you receive. Be concise.",
         tools=[],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        model_id=model_id,
+        api_key=api_key,
         logging_level=2,
     )
 
@@ -82,8 +72,8 @@ def build_sync_workflow(compress_hook: WorkflowCompressionHook) -> IkaWorkflow:
         system_prompt="You are a synthesizer. Produce a short final answer.",
         prompt="Synthesize the information you receive into a clear, final answer in 2-3 sentences.",
         tools=[],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        model_id=model_id,
+        api_key=api_key,
         logging_level=2,
     )
 
@@ -110,15 +100,15 @@ def build_sync_workflow(compress_hook: WorkflowCompressionHook) -> IkaWorkflow:
     )
 
 
-def build_async_workflow() -> IkaWorkflow:
+def build_async_workflow(api_key: str, model_id: str) -> IkaWorkflow:
     brainstorm = IkaBaseAgent(
         name="brainstorm",
         description="Brainstorms from multiple angles",
         system_prompt="You are a brainstormer. Reply in one short paragraph.",
         prompt="Analyze the topic you receive.",
         tools=[],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        model_id=model_id,
+        api_key=api_key,
         logging_level=2,
     )
 
@@ -128,8 +118,8 @@ def build_async_workflow() -> IkaWorkflow:
         system_prompt="You are a decider. Produce a short conclusion.",
         prompt="From the analyses you receive, pick the best points and give a 2-3 sentence conclusion.",
         tools=[],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        model_id=model_id,
+        api_key=api_key,
         logging_level=2,
     )
 
@@ -160,9 +150,14 @@ def build_async_workflow() -> IkaWorkflow:
 
 
 def run_sync() -> None:
-    print("="*100)
+    api_key = os.getenv("API_KEY")
+    model_id = os.getenv("MODEL_ID", "deepseek-chat")
+    if not api_key:
+        raise ValueError("API_KEY is not set")
+
+    print("=" * 100)
     print("Running sync workflow:")
-    workflow = build_sync_workflow(compress_hook=truncate_compress)
+    workflow = build_sync_workflow(compress_hook=truncate_compress, api_key=api_key, model_id=model_id)
     results = workflow.run(initial_context="Explain the basics of machine learning and why it matters.")
     for name, res in results.items():
         summary = res.summary or ""
@@ -175,9 +170,14 @@ def run_sync() -> None:
 
 
 def run_async() -> None:
-    print("="*100)
+    api_key = os.getenv("API_KEY")
+    model_id = os.getenv("MODEL_ID", "deepseek-chat")
+    if not api_key:
+        raise ValueError("API_KEY is not set")
+
+    print("=" * 100)
     print("Running async workflow:")
-    workflow = build_async_workflow()
+    workflow = build_async_workflow(api_key=api_key, model_id=model_id)
     results = workflow.run(initial_context="The future of renewable energy.", use_async=True)
     for name, res in results.items():
         summary = res.summary or ""

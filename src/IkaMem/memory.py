@@ -1,15 +1,30 @@
-from typing import Any, Optional
+# pyright: strict
+
+from __future__ import annotations
+
+from typing import Any, Optional, Protocol
+
+
+class StorageBackend(Protocol):
+    def save(self, value: Any, metadata: dict[str, Any]) -> None:
+        ...
+
+    def search(self, query: str, limit: int, score_threshold: float) -> list[Any]:
+        ...
+
+    def reset(self) -> None:
+        ...
 
 
 class Memory:
-    def __init__(self, storage: Any):
+    def __init__(self, storage: StorageBackend) -> None:
         """
         init memory.
         
         Args:
             storage: storage backend 
         """
-        self.storage = storage
+        self.storage: StorageBackend = storage
         self._agent: Optional[str] = None
         self._task: Optional[str] = None
 

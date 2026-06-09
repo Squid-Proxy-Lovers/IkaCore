@@ -1,55 +1,67 @@
+# pyright: strict
+
 import json
+import os
 import sqlite3
+from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
-from datetime import datetime, timezone
 
 
-class CheckpointStore:
-
-    def __init__(self, db_path: str = "checkpoints.db") -> None:
-        self.db_path = str(db_path)
-        self._init_db()
+class CheckpointSchemaMixin:
+    db_path: str
 
     def _init_db(self) -> None:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS checkpoints (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    uid TEXT NOT NULL UNIQUE,
-                    scope TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    created_at DATETIME NOT NULL
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS checkpoints (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        uid TEXT NOT NULL UNIQUE,
+                        scope TEXT NOT NULL,
+                        payload_json TEXT NOT NULL,
+                        created_at DATETIME NOT NULL
+                    )
+                    """
                 )
-                """
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_checkpoints_uid ON checkpoints(uid)"
-            )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_checkpoints_uid ON checkpoints(uid)"
+                )
+        self._chmod_private()
 
+    def _chmod_private(self) -> None:
+        try:
+            os.chmod(self.db_path, 0o600)
+        except OSError:
+            pass
+
+
+class CheckpointPersistenceMixin(CheckpointSchemaMixin):
     def save_checkpoint(self, scope: str, payload: dict[str, Any], uid: Optional[str] = None) -> str:
         checkpoint_uid = uid or str(uuid4())
         payload_json = json.dumps(payload)
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO checkpoints (uid, scope, payload_json, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    checkpoint_uid,
-                    scope,
-                    payload_json,
-                    datetime.now(timezone.utc).isoformat(),
-                ),
-            )
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO checkpoints (uid, scope, payload_json, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        checkpoint_uid,
+                        scope,
+                        payload_json,
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
         return checkpoint_uid
 
     def load_checkpoint(self, uid: str) -> Optional[dict[str, Any]]:
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             cursor = conn.execute(
                 """
                 SELECT payload_json FROM checkpoints WHERE uid = ? LIMIT 1
@@ -61,9 +73,17 @@ class CheckpointStore:
             return None
         try:
             return json.loads(row[0])
-        except Exception:
-            return None
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Checkpoint '{uid}' contains invalid JSON") from e
 
     def delete_checkpoint(self, uid: str) -> None:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM checkpoints WHERE uid = ?", (uid,))
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            with conn:
+                conn.execute("DELETE FROM checkpoints WHERE uid = ?", (uid,))
+
+
+class CheckpointStore(CheckpointPersistenceMixin):
+
+    def __init__(self, db_path: str = "checkpoints.db") -> None:
+        self.db_path = str(db_path)
+        self._init_db()

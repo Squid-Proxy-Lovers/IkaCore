@@ -1,24 +1,7 @@
 import os
-from time import time
 import subprocess
 
 from IkaCore import IkaBaseAgent, IkaStage, IkaTools
-
-API_KEY = os.getenv("API_KEY")
-MODEL_ID = os.getenv("MODEL_ID", "deepseek-chat")
-if not API_KEY:
-    raise ValueError("API_KEY is not set")
-if not MODEL_ID:
-    raise ValueError("MODEL_ID is not set")
-
-API_KEY2 = os.getenv("API_KEY2")
-MODEL_ID2 = os.getenv("MODEL_ID2", "gpt-4o-mini")
-if not API_KEY2:
-    raise ValueError("API_KEY2 is not set")
-if not MODEL_ID2:
-    raise ValueError("MODEL_ID2 is not set")
-    
-
 
 SYSTEM_PROMPT = """You are a general purpose agent. You can use the tools provided to you to achieve your goal."""
 
@@ -108,6 +91,20 @@ def read_files_execute(x: dict) -> str:
 
 
 def main():
+    api_key = os.getenv("API_KEY")
+    model_id = os.getenv("MODEL_ID", "deepseek-chat")
+    if not api_key:
+        raise ValueError("API_KEY is not set")
+    if not model_id:
+        raise ValueError("MODEL_ID is not set")
+
+    api_key2 = os.getenv("API_KEY2")
+    model_id2 = os.getenv("MODEL_ID2", "gpt-4o-mini")
+    if not api_key2:
+        raise ValueError("API_KEY2 is not set")
+    if not model_id2:
+        raise ValueError("MODEL_ID2 is not set")
+
     get_tree = IkaTools(
         name="get_tree",
         description="Get the tree of the directory that the user has requested",
@@ -156,18 +153,18 @@ def main():
         name="list_stage",
         prompt=STAGE1,
         tools=[list_files, get_pwd, get_tree],
-        model_id=MODEL_ID2,
+        model_id=model_id2,
         hitl=True,
-        api_key=API_KEY2,
+        api_key=api_key2,
         stage_max_step=30,
     )
 
     read_stage = IkaStage(
         name="read_stage",
         prompt=STAGE2,
-        tools=[read_file,get_tree],
-        model_id=MODEL_ID2,
-        api_key=API_KEY2,
+        tools=[read_file, get_tree],
+        model_id=model_id2,
+        api_key=api_key2,
         stage_max_step=30,
         checkpoint=True,
     )
@@ -176,11 +173,10 @@ def main():
         name="summarize_stage",
         prompt=STAGE3,
         tools=[],
-        allowed_back_to=[1,2],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        allowed_back_to=[1, 2],
+        model_id=model_id,
+        api_key=api_key,
     )
-
 
     agent = IkaBaseAgent(
         name="example_system",
@@ -189,19 +185,20 @@ def main():
         prompt=PROMPT,
         tools=[],
         Stages=[list_stage, read_stage, summarize_stage],
-        model_id=MODEL_ID,
-        api_key=API_KEY,
+        model_id=model_id,
+        api_key=api_key,
         checkpoint=True,
         logging_level=2,
         maxsteps=100,
     )
     # start_time = time()
-    finalmsg = agent.execution(checkpoint_uid="df16883c-e384-4d15-bf11-faf547a69b81")
-    #finalmsg = agent.execution()
+    agent.execution(checkpoint_uid="df16883c-e384-4d15-bf11-faf547a69b81")
+    # finalmsg = agent.execution()
     # end_time = time()
     # # print("-"*100)
     # # print(f"Time taken: {end_time - start_time} seconds")
     # # print(finalmsg)
+
 
 if __name__ == "__main__":
     main()
