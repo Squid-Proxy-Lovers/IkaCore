@@ -101,7 +101,7 @@ def parse_openrouter_response(data: JsonDict, model_id: str) -> ProviderRound:
         log_path = _os.environ.get("GLM_REASONING_LOG")
         if log_path:
             try:
-                with open(log_path, "a") as f:
+                with open(log_path, "a", encoding="utf-8") as f:
                     f.write(f"\n===== {model_id} =====\n")
                     f.write(reasoning_content[:4000])
                     f.write(f"\n---\ntool_calls: {len(tool_calls)}\n")
