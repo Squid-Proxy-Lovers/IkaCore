@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
+from contextvars import copy_context
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
@@ -20,7 +22,18 @@ from ..base import AgentEndException, HumanInputRequired
 from .tool_result_formatters import format_provider_tool_results
 
 LOG = logging.getLogger(__name__)
-_tool_executor_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool-exec")
+def _tool_executor_max_workers() -> int:
+    raw = os.environ.get("IKA_TOOL_EXECUTOR_MAX_WORKERS", "32")
+    try:
+        return max(8, int(raw))
+    except (TypeError, ValueError):
+        return 32
+
+
+_tool_executor_pool = ThreadPoolExecutor(
+    max_workers=_tool_executor_max_workers(),
+    thread_name_prefix="tool-exec",
+)
 _TOOL_EXECUTOR_LOCK = threading.Lock()
 ToolExecutorMap = dict[str, ToolExecutor]
 ToolMetadata = dict[str, JsonDict]
@@ -42,7 +55,10 @@ def _ensure_tool_executor_pool() -> ThreadPoolExecutor:
     with _TOOL_EXECUTOR_LOCK:
         is_shutdown = getattr(_tool_executor_pool, "_shutdown", False)
         if is_shutdown:
-            _tool_executor_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool-exec")
+            _tool_executor_pool = ThreadPoolExecutor(
+                max_workers=_tool_executor_max_workers(),
+                thread_name_prefix="tool-exec",
+            )
     return _tool_executor_pool
 
 
@@ -50,7 +66,10 @@ def _reset_tool_executor_pool() -> ThreadPoolExecutor:
     """Force-create a fresh executor pool after a scheduling race."""
     global _tool_executor_pool
     with _TOOL_EXECUTOR_LOCK:
-        _tool_executor_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool-exec")
+        _tool_executor_pool = ThreadPoolExecutor(
+            max_workers=_tool_executor_max_workers(),
+            thread_name_prefix="tool-exec",
+        )
     return _tool_executor_pool
 
 
@@ -132,11 +151,13 @@ def execute_tool(
     try:
         executor_pool = _ensure_tool_executor_pool()
         try:
-            future = executor_pool.submit(executor_fn, validated_args)
+            ctx = copy_context()
+            future = executor_pool.submit(ctx.run, executor_fn, validated_args)
         except RuntimeError:
             # Pool can be shut down by lifecycle races; recreate once and retry.
             executor_pool = _reset_tool_executor_pool()
-            future = executor_pool.submit(executor_fn, validated_args)
+            ctx = copy_context()
+            future = executor_pool.submit(ctx.run, executor_fn, validated_args)
         result: object = future.result(timeout=timeout)
 
         result_str = result if isinstance(result, str) else json.dumps(result)
@@ -329,7 +350,17 @@ def _execute_parallel_tool_plan(
     try:
         futures: dict[Any, tuple[str, str]] = {}
         for tool_name, args, tool_call_id in plan.parallel_calls:
-            future = executor_pool.submit(execute_tool, tool_name, args, tool_executors, timeout, agent_hierarchy, step)
+            ctx = copy_context()
+            future = executor_pool.submit(
+                ctx.run,
+                execute_tool,
+                tool_name,
+                args,
+                tool_executors,
+                timeout,
+                agent_hierarchy,
+                step,
+            )
             futures[future] = (tool_name, tool_call_id)
 
         for future in futures:

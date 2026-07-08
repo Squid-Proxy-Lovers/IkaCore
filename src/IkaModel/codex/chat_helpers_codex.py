@@ -34,7 +34,12 @@ from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict,
 from ..base import BareBoneModel
 from ..codex_constants import CODEX_API_URL
 from ..model_metadata import CODEX_KNOWN_MODELS
-from ..request_interface import agent_tools_for_payload
+from ..request_interface import (
+    IkaRequestCancelled,
+    agent_tools_for_payload,
+    register_request_abort_callback,
+    request_cancelled,
+)
 from .codex_responses import codex_responses_fill_payload
 
 LOG = logging.getLogger(__name__)
@@ -236,6 +241,8 @@ def _iter_sse(response: httpx.Response) -> Iterator[tuple[Optional[str], object]
     """
     current_event: Optional[str] = None
     for line in response.iter_lines():
+        if request_cancelled():
+            raise IkaRequestCancelled("codex request cancelled")
         # httpx strips the trailing newline but leaves the line as-is.
         if not line:
             current_event = None
@@ -385,13 +392,26 @@ def _request_codex_once(
     wait_seconds: int,
 ) -> Optional[_CodexResponseShim]:
     with httpx.stream("POST", api_url, headers=headers, json=payload, timeout=timeout) as response:
-        rate_headers = _codex_rate_headers(response)
-        if response.status_code == 200:
-            data = _collect_stream(response)
-            return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
+        unregister_abort = register_request_abort_callback(response.close)
+        try:
+            if request_cancelled():
+                raise IkaRequestCancelled("codex request cancelled")
 
-        body = response.read().decode("utf-8", "replace")
-        _handle_codex_non_200(response, body, backoff, attempt, max_retries, wait_seconds)
+            rate_headers = _codex_rate_headers(response)
+            if response.status_code == 200:
+                data = _collect_stream(response)
+                return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
+
+            body = response.read().decode("utf-8", "replace")
+            if request_cancelled():
+                raise IkaRequestCancelled("codex request cancelled")
+            _handle_codex_non_200(response, body, backoff, attempt, max_retries, wait_seconds)
+        finally:
+            if unregister_abort is not None:
+                try:
+                    unregister_abort()
+                except Exception:
+                    pass
     return None
 
 
@@ -421,6 +441,9 @@ def _request_codex_with_retries(
     for attempt in range(max_retries):
         backoff = wait_seconds * (2 ** attempt)
         try:
+            if request_cancelled():
+                raise IkaRequestCancelled("codex request cancelled")
+
             response = _request_codex_once(
                 api_url,
                 headers,
@@ -435,6 +458,8 @@ def _request_codex_with_retries(
                 return response
             continue
 
+        except IkaRequestCancelled:
+            raise
         except _CodexRetryableStreamError as error:
             last_exc = error
             _retry_codex_exception(
@@ -442,12 +467,16 @@ def _request_codex_with_retries(
                 backoff, attempt, max_retries, error,
             )
         except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as error:
+            if request_cancelled():
+                raise IkaRequestCancelled("codex request cancelled") from error
             last_exc = error
             _retry_codex_exception(
                 "codex request timeout: %s",
                 backoff, attempt, max_retries, error,
             )
         except httpx.HTTPError as error:
+            if request_cancelled():
+                raise IkaRequestCancelled("codex request cancelled") from error
             last_exc = error
             _retry_codex_exception(
                 "codex http error: %s",

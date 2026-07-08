@@ -5,8 +5,9 @@ import asyncio
 import copy
 import json
 import logging
+import threading
 import time
-from typing import Any, Optional, cast
+from typing import Any, Callable, Optional, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
@@ -33,6 +34,10 @@ _SENSITIVE_QUERY_NAMES = {
     "token",
 }
 _RETRYABLE_UNEXPECTED_EXCEPTIONS = (RuntimeError, ValueError, TypeError, OSError)
+_request_control = threading.local()
+
+_RequestAbortRegistrar = Callable[[Callable[[], None]], Optional[Callable[[], None]]]
+_RequestCancelChecker = Callable[[], bool]
 
 
 class IkaAPIError(RuntimeError):
@@ -51,6 +56,46 @@ class IkaTimeoutError(IkaAPIError):
 
 class IkaHTTPError(IkaAPIError):
     pass
+
+
+class IkaRequestCancelled(IkaAPIError):
+    pass
+
+
+def set_request_abort_registrar(
+    registrar: Optional[_RequestAbortRegistrar],
+) -> Optional[_RequestAbortRegistrar]:
+    """Install a thread-local registrar for aborting active provider requests."""
+    previous = cast(Optional[_RequestAbortRegistrar], getattr(_request_control, "abort_registrar", None))
+    setattr(_request_control, "abort_registrar", registrar)
+    return previous
+
+
+def register_request_abort_callback(callback: Callable[[], None]) -> Optional[Callable[[], None]]:
+    """Register a callback that aborts the active provider request, if supported."""
+    registrar = cast(Optional[_RequestAbortRegistrar], getattr(_request_control, "abort_registrar", None))
+    if registrar is None:
+        return None
+    return registrar(callback)
+
+
+def set_request_cancel_checker(
+    checker: Optional[_RequestCancelChecker],
+) -> Optional[_RequestCancelChecker]:
+    """Install a thread-local predicate used to identify intentional cancels."""
+    previous = cast(Optional[_RequestCancelChecker], getattr(_request_control, "cancel_checker", None))
+    setattr(_request_control, "cancel_checker", checker)
+    return previous
+
+
+def request_cancelled() -> bool:
+    checker = cast(Optional[_RequestCancelChecker], getattr(_request_control, "cancel_checker", None))
+    if checker is None:
+        return False
+    try:
+        return bool(checker())
+    except Exception:
+        return False
 
 
 def _int_value(value: object) -> int:
