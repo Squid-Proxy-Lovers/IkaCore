@@ -9,7 +9,7 @@ import logging
 import os
 import threading
 from contextvars import copy_context
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from typing import Any, Optional, cast
@@ -65,12 +65,17 @@ def _ensure_tool_executor_pool() -> ThreadPoolExecutor:
 def _reset_tool_executor_pool() -> ThreadPoolExecutor:
     """Force-create a fresh executor pool after a scheduling race."""
     global _tool_executor_pool
+    old_pool: ThreadPoolExecutor | None = None
     with _TOOL_EXECUTOR_LOCK:
+        old_pool = _tool_executor_pool
         _tool_executor_pool = ThreadPoolExecutor(
             max_workers=_tool_executor_max_workers(),
             thread_name_prefix="tool-exec",
         )
-    return _tool_executor_pool
+        new_pool = _tool_executor_pool
+    if old_pool is not None:
+        old_pool.shutdown(wait=False, cancel_futures=True)
+    return new_pool
 
 
 def validate_tool_args(
@@ -174,6 +179,7 @@ def execute_tool(
     except FutureTimeoutError:
         if future is not None:
             future.cancel()
+        _reset_tool_executor_pool()
         timeout_msg = f"Tool '{tool_name}' execution timed out after {timeout}s"
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
         LOG.warning(timeout_msg)
@@ -363,30 +369,38 @@ def _execute_parallel_tool_plan(
             )
             futures[future] = (tool_name, tool_call_id)
 
-        for future in futures:
-            tool_name, tool_call_id = futures[future]
-            try:
-                wrapper_timeout = timeout + 5.0
-                result = future.result(timeout=wrapper_timeout)
-                plan.tool_call_id_to_result[tool_call_id] = result
-                tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
-            except AgentEndException:
-                raise
-            except HumanInputRequired as exc:
-                interrupt_data = exc.payload
-                plan.tool_call_id_to_result[tool_call_id] = json.dumps({"__ika_interrupt__": True, **(exc.payload or {})})
-                tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
-                break
-            except FutureTimeoutError:
+        pending = set(futures)
+        wrapper_timeout = timeout + 5.0
+        try:
+            for future in as_completed(pending, timeout=wrapper_timeout):
+                pending.discard(future)
+                tool_name, tool_call_id = futures[future]
+                try:
+                    result = future.result()
+                    plan.tool_call_id_to_result[tool_call_id] = result
+                    tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+                except AgentEndException:
+                    raise
+                except HumanInputRequired as exc:
+                    interrupt_data = exc.payload
+                    plan.tool_call_id_to_result[tool_call_id] = json.dumps({"__ika_interrupt__": True, **(exc.payload or {})})
+                    tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+                    for remaining in pending:
+                        remaining.cancel()
+                    break
+                except Exception as e:
+                    error_msg = f"Parallel tool execution error: {str(e)}"
+                    LOG.error(error_msg)
+                    plan.tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
+                    tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+        except FutureTimeoutError:
+            _reset_tool_executor_pool()
+            timeout_label = f"{wrapper_timeout}s"
+            for future in pending:
+                tool_name, tool_call_id = futures[future]
                 future.cancel()
-                timeout_label = f"{timeout + 5.0}s"
                 error_msg = f"Parallel tool execution timed out after {timeout_label} for '{tool_name}'"
                 LOG.warning(error_msg)
-                plan.tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
-                tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
-            except Exception as e:
-                error_msg = f"Parallel tool execution error: {str(e)}"
-                LOG.error(error_msg)
                 plan.tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
                 tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
     finally:
