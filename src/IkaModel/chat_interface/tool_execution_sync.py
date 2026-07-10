@@ -41,6 +41,29 @@ ScheduledToolCall = tuple[str, object, str]
 ToolCallBatchResult = tuple[list[JsonDict], list[str], dict[str, int], list[JsonDict], Optional[JsonDict]]
 
 
+def _max_tool_result_chars() -> int:
+    raw = os.environ.get("IKA_TOOL_RESULT_MAX_CHARS", "1000000")
+    try:
+        return max(20000, int(raw))
+    except (TypeError, ValueError):
+        return 1000000
+
+
+def truncate_tool_result(result: str, tool_name: str = "tool") -> str:
+    """Keep provider tool outputs below request field limits."""
+    max_chars = _max_tool_result_chars()
+    if len(result) <= max_chars:
+        return result
+    marker = (
+        f"\n\n[IkaCore truncated {tool_name} result: original length {len(result)} chars; "
+        f"set IKA_TOOL_RESULT_MAX_CHARS to adjust. Showing head and tail.]\n\n"
+    )
+    budget = max(0, max_chars - len(marker))
+    head = budget // 2
+    tail = budget - head
+    return result[:head] + marker + result[-tail:]
+
+
 @dataclass
 class ToolCallPlan:
     tool_call_order: list[JsonDict]
@@ -166,12 +189,11 @@ def execute_tool(
         result: object = future.result(timeout=timeout)
 
         result_str = result if isinstance(result, str) else json.dumps(result)
+        result_str = truncate_tool_result(result_str, tool_name)
         cli.tool_result(tool_name, result_str, hierarchy, step)
 
         LOG.debug(f"[TOOL END] Finished tool '{tool_name}'")
-        if isinstance(result, str):
-            return result
-        return json.dumps(result)
+        return result_str
     except AgentEndException:
         raise
     except HumanInputRequired:

@@ -22,6 +22,7 @@ from .tool_execution_sync import (
     ToolMetadata,
     finalize_tool_call_plan,
     prepare_tool_call_plan,
+    truncate_tool_result,
     validate_tool_args,
 )
 
@@ -67,12 +68,11 @@ async def async_execute_tool(
             )
 
         result_str = result if isinstance(result, str) else json.dumps(result)
+        result_str = truncate_tool_result(result_str, tool_name)
         cli.tool_result(tool_name, result_str, hierarchy, step)
 
         LOG.debug(f"[TOOL END] Finished tool '{tool_name}' (async)")
-        if isinstance(result, str):
-            return result
-        return json.dumps(result)
+        return result_str
     except AgentEndException:
         raise
     except HumanInputRequired:

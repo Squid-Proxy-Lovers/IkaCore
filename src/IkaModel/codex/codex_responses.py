@@ -26,6 +26,7 @@ standard Responses API conventions.
 from __future__ import annotations
 
 import json
+import os
 from typing import Optional, cast
 
 from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
@@ -71,6 +72,28 @@ def _wrap_assistant_content(content: object) -> list[JsonDict]:
     return [{"type": "output_text", "text": str(content)}]
 
 
+def _max_codex_tool_output_chars() -> int:
+    raw = os.environ.get("IKA_CODEX_TOOL_OUTPUT_MAX_CHARS", "9000000")
+    try:
+        return max(20000, min(9000000, int(raw)))
+    except (TypeError, ValueError):
+        return 9000000
+
+
+def _truncate_codex_tool_output(output: str) -> str:
+    max_chars = _max_codex_tool_output_chars()
+    if len(output) <= max_chars:
+        return output
+    marker = (
+        f"\n\n[IkaCore truncated Codex tool output: original length {len(output)} chars; "
+        f"Codex accepts at most 10485760 chars per tool output. Showing head and tail.]\n\n"
+    )
+    budget = max(0, max_chars - len(marker))
+    head = budget // 2
+    tail = budget - head
+    return output[:head] + marker + output[-tail:]
+
+
 def _default_message_history() -> JsonDict:
     return {
         "system": {"message": "", "tokens": 0},
@@ -108,10 +131,11 @@ def _append_codex_context(input_items: list[JsonDict], message_history: JsonDict
 
 def _codex_tool_output_item(message: JsonDict) -> JsonDict:
     content = message.get("content", "")
+    output = content if isinstance(content, str) else json.dumps(content)
     return {
         "type": "function_call_output",
         "call_id": string_value(message.get("tool_call_id")),
-        "output": content if isinstance(content, str) else json.dumps(content),
+        "output": _truncate_codex_tool_output(output),
     }
 
 
@@ -144,10 +168,12 @@ def _codex_user_items(message: JsonDict) -> list[JsonDict]:
     for block in cast(list[object], content):
         block_data = cast(JsonDict, block) if isinstance(block, dict) else {}
         if block_data.get("type") == "tool_result":
+            output = block_data.get("content", "")
+            output_str = output if isinstance(output, str) else json.dumps(output)
             items.append({
                 "type": "function_call_output",
                 "call_id": string_value(block_data.get("tool_use_id")),
-                "output": block_data.get("content", ""),
+                "output": _truncate_codex_tool_output(output_str),
             })
         else:
             items.append({
