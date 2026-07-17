@@ -109,6 +109,7 @@ class _FakeStreamCtx:
         self._body = body
         self.headers = headers or {}
         self._events = events or []
+        self.closed = False
 
     def __enter__(self):
         return self
@@ -118,6 +119,9 @@ class _FakeStreamCtx:
 
     def read(self):
         return self._body
+
+    def close(self):
+        self.closed = True
 
     def iter_lines(self):
         for line in self._events:
