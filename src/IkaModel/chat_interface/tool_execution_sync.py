@@ -257,7 +257,7 @@ def _handle_empty_required_args(
 def _decode_tool_arguments(tool_name: str, args_raw: object) -> tuple[object, Optional[str]]:
     try:
         args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
-    except (json.JSONDecodeError, TypeError) as e:
+    except (ValueError, TypeError) as e:
         LOG.warning(f"Failed to parse tool arguments for {tool_name}: {e}")
         return None, json.dumps({
             "error": f"Malformed JSON in arguments for tool '{tool_name}': {e}. "
