@@ -17,6 +17,7 @@ Covers:
       * non-transient stream-level response.failed bubbles
 """
 import email.utils
+import threading
 import time
 from unittest.mock import patch
 
@@ -122,6 +123,24 @@ class _FakeStreamCtx:
     def iter_lines(self):
         for line in self._events:
             yield line
+
+    def close(self):
+        return None
+
+
+class _BlockingStreamCtx(_FakeStreamCtx):
+    def __init__(self):
+        super().__init__(200)
+        self.closed = threading.Event()
+
+    def iter_lines(self):
+        yield 'event: response.created'
+        yield 'data: {"type":"response.created","response":{"id":"r","output":[]}}'
+        yield ''
+        self.closed.wait(timeout=2)
+
+    def close(self):
+        self.closed.set()
 
 
 def _completed_event_stream():
@@ -235,6 +254,24 @@ class TestRequestCodexRetryLoop:
         assert resp.status_code == 200
         assert calls["n"] == 2
 
+    def test_incomplete_stream_retried(self):
+        calls = {"n": 0}
+
+        def side_effect(*_args, **_kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _FakeStreamCtx(200, events=[
+                    'event: response.created',
+                    'data: {"type":"response.created","response":{"id":"r","output":[]}}',
+                    '',
+                ])
+            return _FakeStreamCtx(200, events=_completed_event_stream())
+
+        with patch("httpx.stream", side_effect=side_effect), patch("time.sleep"):
+            response = request_codex("u", {}, {}, timeout=1, max_retries=2, wait_seconds=1)
+        assert response.status_code == 200
+        assert calls["n"] == 2
+
     def test_non_transient_stream_failure_bubbles(self):
         calls = {"n": 0}
 
@@ -265,6 +302,13 @@ class TestRequestCodexRetryLoop:
             resp = request_codex("u", {}, {}, timeout=1, max_retries=3, wait_seconds=1)
         assert resp.status_code == 200
         assert calls["n"] == 2
+
+    def test_absolute_timeout_is_not_extended_by_open_stream(self):
+        with patch("httpx.stream", return_value=_BlockingStreamCtx()):
+            started = time.monotonic()
+            with pytest.raises(httpx.ReadTimeout, match="absolute"):
+                request_codex("u", {}, {}, timeout=0.02, max_retries=1, wait_seconds=1)
+        assert time.monotonic() - started < 1
 
     def test_forces_stream_true_in_payload(self):
         captured = {}

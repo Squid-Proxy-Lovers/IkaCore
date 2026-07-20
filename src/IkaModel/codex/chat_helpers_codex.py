@@ -22,6 +22,7 @@ from __future__ import annotations
 import email.utils
 import json
 import logging
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -30,6 +31,7 @@ from typing import Any, Optional, cast
 import httpx
 
 from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
+from IkaCore.cli_output import OutputType, get_cli_output
 
 from ..base import BareBoneModel
 from ..codex_constants import CODEX_API_URL
@@ -119,6 +121,13 @@ def _sleep_before_retry(
     max_retries: int,
     *log_args: Any,
 ) -> None:
+    get_cli_output().emit(
+        OutputType.AGENT_RESPONSE,
+        f"Transient Codex backend failure; retrying in {delay:.1f}s "
+        f"(attempt {attempt + 1}/{max_retries})",
+        ["API"],
+        step=0,
+    )
     LOG.warning(
         f"{log_message}; retrying in %.1fs (attempt %d/%d)",
         *log_args,
@@ -282,6 +291,7 @@ def _collect_stream(response: httpx.Response) -> JsonDict:
     envelope: JsonDict = {}
     collected_items: list[JsonDict] = []
     output_text_chunks: list[str] = []
+    completed = False
 
     for _event, obj in _iter_sse(response):
         obj_data = json_dict(obj)
@@ -298,6 +308,7 @@ def _collect_stream(response: httpx.Response) -> JsonDict:
             if resp:
                 envelope = resp
         elif t == "response.completed":
+            completed = True
             resp = json_dict(obj_data.get("response"))
             if resp:
                 # Keep the latest envelope (it has the final ``usage`` and
@@ -313,6 +324,8 @@ def _collect_stream(response: httpx.Response) -> JsonDict:
             if isinstance(delta, str):
                 output_text_chunks.append(delta)
 
+    if not completed:
+        raise _CodexRetryableStreamError("codex stream ended before response.completed")
     if not envelope:
         raise RuntimeError("codex stream ended without a response envelope")
 
@@ -392,14 +405,42 @@ def _request_codex_once(
     wait_seconds: int,
 ) -> Optional[_CodexResponseShim]:
     with httpx.stream("POST", api_url, headers=headers, json=payload, timeout=timeout) as response:
-        unregister_abort = register_request_abort_callback(response.close)
+        close_response = getattr(response, "close", None)
+        unregister_abort = register_request_abort_callback(close_response) if callable(close_response) else None
+        request_deadline_reached = threading.Event()
+        deadline_timer: Optional[threading.Timer] = None
+
+        def _expire_request() -> None:
+            request_deadline_reached.set()
+            if callable(close_response):
+                close_response()
+
         try:
             if request_cancelled():
                 raise IkaRequestCancelled("codex request cancelled")
 
             rate_headers = _codex_rate_headers(response)
             if response.status_code == 200:
-                data = _collect_stream(response)
+                if timeout > 0 and callable(close_response):
+                    deadline_timer = threading.Timer(float(timeout), _expire_request)
+                    deadline_timer.daemon = True
+                    deadline_timer.start()
+                try:
+                    data = _collect_stream(response)
+                except (httpx.HTTPError, RuntimeError, ValueError, TypeError, OSError) as error:
+                    if request_cancelled():
+                        raise IkaRequestCancelled("codex request cancelled") from error
+                    if request_deadline_reached.is_set():
+                        raise httpx.ReadTimeout(
+                            f"codex request exceeded absolute {timeout}s deadline"
+                        ) from error
+                    raise
+                if request_cancelled():
+                    raise IkaRequestCancelled("codex request cancelled")
+                if request_deadline_reached.is_set():
+                    raise httpx.ReadTimeout(
+                        f"codex request exceeded absolute {timeout}s deadline"
+                    )
                 return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
 
             body = response.read().decode("utf-8", "replace")
@@ -407,6 +448,8 @@ def _request_codex_once(
                 raise IkaRequestCancelled("codex request cancelled")
             _handle_codex_non_200(response, body, backoff, attempt, max_retries, wait_seconds)
         finally:
+            if deadline_timer is not None:
+                deadline_timer.cancel()
             if unregister_abort is not None:
                 try:
                     unregister_abort()
