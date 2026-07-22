@@ -15,6 +15,51 @@ JsonDict = dict[str, Any]
 
 
 class SimpleLoopGuardMixin(StageExecutionRuntimeMixin):
+    def _completion_contract_error(self) -> str:
+        """Return an actionable error when a caller-defined contract is unmet."""
+        check = getattr(self, "completion_check", None)
+        if not callable(check):
+            return ""
+        try:
+            result = check()
+        except Exception as exc:  # The contract itself must fail closed.
+            return f"completion contract check raised {type(exc).__name__}: {exc}"
+        if isinstance(result, tuple):
+            valid = bool(result[0]) if result else False
+            detail = str(result[1]) if len(result) > 1 and result[1] else ""
+        else:
+            valid = bool(result)
+            detail = ""
+        if valid:
+            return ""
+        return detail or str(
+            getattr(self, "completion_feedback", "Required structured submission is missing or incomplete.")
+        )
+
+    def _inject_completion_repair(
+        self,
+        messages: list[JsonDict],
+        barebone_model: Any,
+        error: str,
+        step_num: int,
+    ) -> int:
+        """Continue the live conversation once so the model can repair submission."""
+        feedback = (
+            "STRUCTURED COMPLETION REQUIRED: Your attempted completion was rejected because "
+            f"{error} Use the task-specific submit_* tool with a complete payload, then call "
+            "agent_end again. Preserve your analysis and prior tool evidence; do not restart it."
+        )
+        messages.append({"role": "user", "content": feedback})
+        self._tool_call_counts.pop("agent_end", None)
+        model_counts = getattr(barebone_model, "_tool_call_counts", None)
+        if isinstance(model_counts, dict):
+            model_counts.pop("agent_end", None)
+        repair_steps = max(1, int(getattr(self, "completion_repair_steps", 8)))
+        self.maxsteps = max(self.maxsteps, step_num + repair_steps)
+        if self.logger:
+            self.logger.log_action(feedback)
+        return step_num
+
     def _simple_turn_has_no_progress(self, turn: AgentChatTurn, step_num: int) -> bool:
         no_progress = not turn.tool_calls and not turn.last_content and not turn.executed_tool_calls
         if no_progress and step_num > 0:
@@ -201,62 +246,88 @@ class SimpleExecutionRuntimeMixin(SimpleIterationMixin):
         last_agent_end_text = None
         step_num = 0
         extension_count = 0
+        completion_repairs = 0
+        completion_repair_limit = max(0, int(getattr(self, "completion_repair_limit", 1)))
 
-        while step_num < self.maxsteps:
-            current_step, step_start = self._start_simple_step(
-                runtime.cli,
-                runtime.current_hierarchy,
-                step_num,
-            )
+        while True:
+            while step_num < self.maxsteps:
+                current_step, step_start = self._start_simple_step(
+                    runtime.cli,
+                    runtime.current_hierarchy,
+                    step_num,
+                )
 
-            turn = self._run_chat_turn(
-                barebone_model,
-                messages,
-                tool_executors,
-                current_stage_index=None,
-                total_stages=0,
-                context_label="run_simple",
-            )
-            last_content = turn.last_content
+                turn = self._run_chat_turn(
+                    barebone_model,
+                    messages,
+                    tool_executors,
+                    current_stage_index=None,
+                    total_stages=0,
+                    context_label="run_simple",
+                )
+                last_content = turn.last_content
 
-            if self._simple_turn_has_no_progress(turn, step_num):
-                break
+                if self._simple_turn_has_no_progress(turn, step_num):
+                    break
 
-            agent_end_called, agent_end_text = self._parse_simple_control(
-                turn,
-                runtime.cli,
-                runtime.current_hierarchy,
-                current_step,
-            )
-            if agent_end_called and agent_end_text:
-                last_agent_end_text = agent_end_text
-            if agent_end_called:
-                return self._finish_simple_agent_end(
-                    agent_end_text,
+                agent_end_called, agent_end_text = self._parse_simple_control(
                     turn,
                     runtime.cli,
                     runtime.current_hierarchy,
                     current_step,
+                )
+                if agent_end_called and agent_end_text:
+                    last_agent_end_text = agent_end_text
+                if agent_end_called:
+                    contract_error = self._completion_contract_error()
+                    if not contract_error:
+                        return self._finish_simple_agent_end(
+                            agent_end_text,
+                            turn,
+                            runtime.cli,
+                            runtime.current_hierarchy,
+                            current_step,
+                            step_num,
+                            step_start,
+                        )
+                    if completion_repairs >= completion_repair_limit:
+                        raise RuntimeError(f"Structured completion contract failed: {contract_error}")
+                    self._log_simple_step(
+                        step_num,
+                        turn.last_content,
+                        turn.tool_calls,
+                        turn.response,
+                        time.time() - step_start,
+                    )
+                    completion_repairs += 1
+                    step_num += 1
+                    self._inject_completion_repair(messages, barebone_model, contract_error, step_num)
+                    continue
+
+                step_num, extension_count, should_continue = self._finish_simple_non_terminal_step(
+                    turn,
+                    messages,
+                    runtime,
+                    current_step,
                     step_num,
                     step_start,
+                    extension_count,
                 )
+                if should_continue:
+                    continue
 
-            step_num, extension_count, should_continue = self._finish_simple_non_terminal_step(
-                turn,
-                messages,
-                runtime,
-                current_step,
-                step_num,
-                step_start,
-                extension_count,
-            )
-            if should_continue:
+            contract_error = self._completion_contract_error()
+            if contract_error:
+                if completion_repairs >= completion_repair_limit:
+                    raise RuntimeError(f"Structured completion contract failed: {contract_error}")
+                completion_repairs += 1
+                self._inject_completion_repair(messages, barebone_model, contract_error, step_num)
                 continue
 
-        return self._finalize_simple_after_max_steps(
-            runtime.system_prompt,
-            runtime.current_hierarchy,
-            runtime.cli,
-            last_agent_end_text,
-            last_content,
-        )
+            return self._finalize_simple_after_max_steps(
+                runtime.system_prompt,
+                runtime.current_hierarchy,
+                runtime.cli,
+                last_agent_end_text,
+                last_content,
+            )

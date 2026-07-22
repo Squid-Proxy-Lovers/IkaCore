@@ -849,6 +849,42 @@ class TestExecutionRuntimeHelpers:
             "",
         )
 
+    def test_run_simple_repairs_structured_completion_in_same_live_runtime(self):
+        a = _minimal_agent(maxsteps=2)
+        barebone = SimpleNamespace(_tool_call_counts={"agent_end": 1})
+        runtime = SimpleRuntimeContext(
+            system_prompt="system",
+            current_hierarchy=["A"],
+            barebone_model=barebone,
+            messages=[],
+            tool_executors={},
+            cli=MagicMock(),
+        )
+        a._prepare_simple_runtime = MagicMock(return_value=runtime)
+        a._start_simple_step = MagicMock(return_value=(1, 0.0))
+        a._run_chat_turn = MagicMock(side_effect=[
+            self._turn(last_content="first", content_before_tools="first"),
+            self._turn(last_content="second", content_before_tools="second"),
+        ])
+        a._simple_turn_has_no_progress = MagicMock(return_value=False)
+        a._parse_simple_control = MagicMock(return_value=(True, "done"))
+        a._finish_simple_agent_end = MagicMock(return_value=("done", "done"))
+        a._log_simple_step = MagicMock()
+        a.completion_check = MagicMock(side_effect=[
+            (False, "submit tool was not called"),
+            (True, ""),
+        ])
+        a.completion_repair_limit = 1
+        a.completion_repair_steps = 3
+
+        assert a.run_simple() == ("done", "done")
+
+        a._prepare_simple_runtime.assert_called_once()
+        assert a._run_chat_turn.call_count == 2
+        assert "submit tool was not called" in runtime.messages[0]["content"]
+        assert "Preserve your analysis" in runtime.messages[0]["content"]
+        assert "agent_end" not in barebone._tool_call_counts
+
     def test_run_simple_extends_after_text_only_progress_at_step_limit(self):
         a = _minimal_agent(maxsteps=1, max_step_extensions=1, extend_steps_by=1)
         runtime = SimpleRuntimeContext(

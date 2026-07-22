@@ -13,9 +13,14 @@ import pytest
 
 from IkaCore.agent_helpers import AgentHelpersMixin
 from IkaModel.codex import CODEX_API_URL, is_codex_url
+from IkaModel.model_metadata import CODEX_KNOWN_MODELS
 from IkaModel.request_interface import get_provider
 
 geturl = AgentHelpersMixin.geturl
+
+
+def test_gpt_5_6_variants_are_known_codex_slugs():
+    assert {"gpt-5.6-sol", "gpt-5.6-terra"} <= CODEX_KNOWN_MODELS
 
 
 # ----------------------------------------------------------------------
