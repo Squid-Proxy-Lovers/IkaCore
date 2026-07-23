@@ -121,9 +121,16 @@ def _sleep_before_retry(
     max_retries: int,
     *log_args: Any,
 ) -> None:
+    normalized_message = log_message.lower()
+    if "request timeout" in normalized_message:
+        retry_notice = "Codex request exceeded its local timeout"
+    elif "http error" in normalized_message:
+        retry_notice = "Codex transport error"
+    else:
+        retry_notice = "Transient Codex backend failure"
     get_cli_output().emit(
         OutputType.AGENT_RESPONSE,
-        f"Transient Codex backend failure; retrying in {delay:.1f}s "
+        f"{retry_notice}; retrying in {delay:.1f}s "
         f"(attempt {attempt + 1}/{max_retries})",
         ["API"],
         step=0,
@@ -239,7 +246,7 @@ class _CodexResponseShim:
             )
 
 
-def _iter_sse(response: httpx.Response) -> Iterator[tuple[Optional[str], object]]:
+def _iter_sse(response: httpx.Response, absolute_deadline: Optional[float] = None) -> Iterator[tuple[Optional[str], object]]:
     """
     Yield (event_name, parsed_json) from a Server-Sent Events stream.
 
@@ -250,6 +257,8 @@ def _iter_sse(response: httpx.Response) -> Iterator[tuple[Optional[str], object]
     """
     current_event: Optional[str] = None
     for line in response.iter_lines():
+        if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
+            raise httpx.ReadTimeout("codex request exceeded absolute stream deadline")
         if request_cancelled():
             raise IkaRequestCancelled("codex request cancelled")
         # httpx strips the trailing newline but leaves the line as-is.
@@ -270,7 +279,7 @@ def _iter_sse(response: httpx.Response) -> Iterator[tuple[Optional[str], object]
                 continue
 
 
-def _collect_stream(response: httpx.Response) -> JsonDict:
+def _collect_stream(response: httpx.Response, absolute_deadline: Optional[float] = None) -> JsonDict:
     """
     Walk the SSE stream and return the final response dict.
 
@@ -293,7 +302,7 @@ def _collect_stream(response: httpx.Response) -> JsonDict:
     output_text_chunks: list[str] = []
     completed = False
 
-    for _event, obj in _iter_sse(response):
+    for _event, obj in _iter_sse(response, absolute_deadline=absolute_deadline):
         obj_data = json_dict(obj)
         if not obj_data:
             continue
@@ -404,6 +413,7 @@ def _request_codex_once(
     max_retries: int,
     wait_seconds: int,
 ) -> Optional[_CodexResponseShim]:
+    request_started = time.monotonic()
     with httpx.stream("POST", api_url, headers=headers, json=payload, timeout=timeout) as response:
         close_response = getattr(response, "close", None)
         unregister_abort = register_request_abort_callback(close_response) if callable(close_response) else None
@@ -421,12 +431,18 @@ def _request_codex_once(
 
             rate_headers = _codex_rate_headers(response)
             if response.status_code == 200:
+                absolute_deadline = request_started + float(timeout) if timeout > 0 else None
                 if timeout > 0 and callable(close_response):
-                    deadline_timer = threading.Timer(float(timeout), _expire_request)
+                    remaining = max(0.0, absolute_deadline - time.monotonic())
+                    if remaining <= 0:
+                        raise httpx.ReadTimeout(
+                            f"codex request exceeded absolute {timeout}s deadline before streaming"
+                        )
+                    deadline_timer = threading.Timer(remaining, _expire_request)
                     deadline_timer.daemon = True
                     deadline_timer.start()
                 try:
-                    data = _collect_stream(response)
+                    data = _collect_stream(response, absolute_deadline=absolute_deadline)
                 except (httpx.HTTPError, RuntimeError, ValueError, TypeError, OSError) as error:
                     if request_cancelled():
                         raise IkaRequestCancelled("codex request cancelled") from error

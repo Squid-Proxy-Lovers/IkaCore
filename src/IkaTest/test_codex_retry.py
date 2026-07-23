@@ -143,6 +143,18 @@ class _BlockingStreamCtx(_FakeStreamCtx):
         self.closed.set()
 
 
+class _DrippingStreamCtx(_FakeStreamCtx):
+    """A stream that stays active forever and ignores close()."""
+
+    def __init__(self):
+        super().__init__(200)
+
+    def iter_lines(self):
+        while True:
+            time.sleep(0.005)
+            yield ": keepalive"
+
+
 def _completed_event_stream():
     """A valid minimal SSE stream that exits with response.completed."""
     return [
@@ -303,8 +315,41 @@ class TestRequestCodexRetryLoop:
         assert resp.status_code == 200
         assert calls["n"] == 2
 
+    def test_local_timeout_notice_is_not_labeled_as_a_backend_failure(self):
+        calls = {"n": 0}
+        notices = []
+
+        def side_effect(*a, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise httpx.ReadTimeout("slow")
+            return _FakeStreamCtx(200, events=_completed_event_stream())
+
+        class _Output:
+            def emit(self, _output_type, message, *_args, **_kwargs):
+                notices.append(message)
+
+        with patch("httpx.stream", side_effect=side_effect), \
+             patch("time.sleep"), \
+             patch(
+                 "IkaModel.codex.chat_helpers_codex.get_cli_output",
+                 return_value=_Output(),
+             ):
+            request_codex("u", {}, {}, timeout=1, max_retries=2, wait_seconds=1)
+
+        assert notices == [
+            "Codex request exceeded its local timeout; retrying in 1.0s (attempt 1/2)"
+        ]
+
     def test_absolute_timeout_is_not_extended_by_open_stream(self):
         with patch("httpx.stream", return_value=_BlockingStreamCtx()):
+            started = time.monotonic()
+            with pytest.raises(httpx.ReadTimeout, match="absolute"):
+                request_codex("u", {}, {}, timeout=0.02, max_retries=1, wait_seconds=1)
+        assert time.monotonic() - started < 1
+
+    def test_absolute_timeout_is_not_extended_by_dripping_stream(self):
+        with patch("httpx.stream", return_value=_DrippingStreamCtx()):
             started = time.monotonic()
             with pytest.raises(httpx.ReadTimeout, match="absolute"):
                 request_codex("u", {}, {}, timeout=0.02, max_retries=1, wait_seconds=1)

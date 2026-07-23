@@ -5,6 +5,50 @@ import httpx
 import pytest
 
 from IkaModel import request_interface as ri
+
+
+def test_context_retry_override_applies_and_restores(monkeypatch):
+    observed = []
+
+    def fake_request_codex(
+        _api_url,
+        _headers,
+        _payload,
+        timeout,
+        max_retries,
+        wait_seconds,
+    ):
+        observed.append((timeout, max_retries, wait_seconds))
+        return object()
+
+    monkeypatch.setattr(
+        "IkaModel.codex.chat_helpers_codex.request_codex",
+        fake_request_codex,
+    )
+
+    previous = ri.set_request_max_retries(1)
+    try:
+        ri.api_request_retry(
+            "https://chatgpt.com/backend-api/codex/responses",
+            {},
+            {},
+            max_retries=3,
+            wait_seconds=7,
+            timeout=11,
+        )
+    finally:
+        ri.set_request_max_retries(previous)
+
+    ri.api_request_retry(
+        "https://chatgpt.com/backend-api/codex/responses",
+        {},
+        {},
+        max_retries=3,
+        wait_seconds=7,
+        timeout=11,
+    )
+
+    assert observed == [(11, 1, 7), (11, 3, 7)]
 from IkaModel.request_interface import (
     IkaAPIError,
     _error_text_from_response,

@@ -2,6 +2,7 @@
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false
 
 import asyncio
+import contextvars
 import copy
 import json
 import logging
@@ -35,6 +36,10 @@ _SENSITIVE_QUERY_NAMES = {
 }
 _RETRYABLE_UNEXPECTED_EXCEPTIONS = (RuntimeError, ValueError, TypeError, OSError)
 _request_control = threading.local()
+_request_max_retries: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
+    "ika_request_max_retries",
+    default=None,
+)
 
 _RequestAbortRegistrar = Callable[[Callable[[], None]], Optional[Callable[[], None]]]
 _RequestCancelChecker = Callable[[], bool]
@@ -60,6 +65,19 @@ class IkaHTTPError(IkaAPIError):
 
 class IkaRequestCancelled(IkaAPIError):
     pass
+
+
+def set_request_max_retries(max_retries: Optional[int]) -> Optional[int]:
+    """Set a context-local provider retry override and return the previous value."""
+    previous = _request_max_retries.get()
+    normalized = None if max_retries is None else max(1, int(max_retries))
+    _request_max_retries.set(normalized)
+    return previous
+
+
+def _effective_request_max_retries(default: int) -> int:
+    override = _request_max_retries.get()
+    return override if override is not None else max(1, int(default))
 
 
 def set_request_abort_registrar(
@@ -406,6 +424,7 @@ def api_request_retry(
     timeout: float = 900.0,
     client: Optional[httpx.Client] = None,
 ) -> httpx.Response:
+    max_retries = _effective_request_max_retries(max_retries)
     # codex backend forces streaming (rejects stream:false). Dispatch into the
     # codex client, which drains the SSE stream and returns a Response-shaped
     # shim so callers continue to call .json() / .status_code as usual.
@@ -468,6 +487,7 @@ async def async_api_request_retry(
     timeout: float = 900.0,
     client: Optional[httpx.AsyncClient] = None
 ) -> httpx.Response:
+    max_retries = _effective_request_max_retries(max_retries)
     # codex backend requires streaming — defer to the sync codex client via a
     # threadpool. We don't have an async SSE collector yet; running the sync
     # path off-loop avoids blocking the event loop in async callers.
