@@ -444,33 +444,57 @@ def api_request_retry(
     debug_enabled = LOG.isEnabledFor(logging.DEBUG)
 
     for attempt in range(max_retries):
+        if request_cancelled():
+            raise IkaRequestCancelled("provider request cancelled")
+        unregister_abort = None
         try:
             if debug_enabled:
                 _log_http_request("HTTPX", api_url, headers, payload, attempt, max_retries)
 
             post = client.post if client is not None else httpx.post
+            if client is not None:
+                unregister_abort = register_request_abort_callback(client.close)
             response = post(api_url, headers=headers, json=payload, timeout=timeout)
 
             if debug_enabled:
                 _log_http_response("HTTPX", response)
 
+            if request_cancelled():
+                raise IkaRequestCancelled("provider request cancelled")
             if response.status_code == 200:
                 return response
 
             delay, last_exception = _response_retry_delay_and_error(response, wait_seconds, attempt, max_retries)
+            if request_cancelled():
+                raise IkaRequestCancelled("provider request cancelled")
             time.sleep(delay)
 
         except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout):
+            if request_cancelled():
+                raise IkaRequestCancelled("provider request cancelled")
             delay, last_exception = _timeout_retry_delay_and_error(timeout, wait_seconds, attempt, max_retries)
             time.sleep(delay)
 
         except httpx.HTTPError as e:
+            if request_cancelled():
+                raise IkaRequestCancelled("provider request cancelled") from e
             delay, last_exception = _http_retry_delay_and_error(e, wait_seconds, attempt, max_retries)
             time.sleep(delay)
 
+        except IkaRequestCancelled:
+            raise
+
         except _RETRYABLE_UNEXPECTED_EXCEPTIONS as e:
+            if request_cancelled():
+                raise IkaRequestCancelled("provider request cancelled") from e
             delay, last_exception = _unexpected_retry_delay_and_error(e, wait_seconds, attempt, max_retries)
             time.sleep(delay)
+        finally:
+            if unregister_abort is not None:
+                try:
+                    unregister_abort()
+                except Exception:
+                    pass
 
     if last_exception:
         raise last_exception
