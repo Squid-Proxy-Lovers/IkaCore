@@ -13,9 +13,15 @@ import pytest
 
 from IkaCore.agent_helpers import AgentHelpersMixin
 from IkaModel.codex import CODEX_API_URL, is_codex_url
+from IkaModel.model_metadata import CODEX_KNOWN_MODELS
 from IkaModel.request_interface import get_provider
 
 geturl = AgentHelpersMixin.geturl
+
+
+def test_current_codex_models_are_registered():
+    """Current Codex-only GPT-5.6 model slugs should be accepted without warnings."""
+    assert {"gpt-5.6-sol", "gpt-5.6-terra"} <= CODEX_KNOWN_MODELS
 
 
 # ----------------------------------------------------------------------
@@ -45,6 +51,8 @@ def test_get_provider_by_url(url, expected):
     ("GPT-5.3-CODEX",   "codex"),
     # Bare codex slugs are ambiguous (also valid OpenAI Responses models)
     # — should NOT auto-route to codex.
+    ("gpt-5.6-sol",     "openai_responses"),
+    ("gpt-5.6-terra",   "openai_responses"),
     ("gpt-5.5",         "openai_responses"),
     ("gpt-5.4",         "openai_responses"),
     ("gpt-5.4-mini",    "openai_responses"),
