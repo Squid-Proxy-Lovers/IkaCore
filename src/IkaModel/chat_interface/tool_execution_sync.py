@@ -103,7 +103,7 @@ def execute_tool(
     tool_name: str,
     tool_args: object,
     tool_executors: ToolExecutorMap,
-    timeout: float = 900.0,
+    timeout: Optional[float] = 900.0,
     agent_hierarchy: Optional[list[str]] = None,
     step: int = 0,
 ) -> str:
@@ -315,7 +315,7 @@ prepare_tool_call_plan = _prepare_tool_call_plan
 def _execute_parallel_tool_plan(
     plan: ToolCallPlan,
     tool_executors: ToolExecutorMap,
-    timeout: float,
+    timeout: Optional[float],
     agent_hierarchy: Optional[list[str]],
     step: int,
     tool_call_counts: dict[str, int],
@@ -335,7 +335,10 @@ def _execute_parallel_tool_plan(
         for future in futures:
             tool_name, tool_call_id = futures[future]
             try:
-                wrapper_timeout = timeout + 5.0
+                # ``None`` is the standard "wait indefinitely" value for
+                # concurrent futures. Preserve that contract instead of
+                # attempting timeout arithmetic after the tool has completed.
+                wrapper_timeout = None if timeout is None else timeout + 5.0
                 result = future.result(timeout=wrapper_timeout)
                 plan.tool_call_id_to_result[tool_call_id] = result
                 tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
@@ -348,7 +351,11 @@ def _execute_parallel_tool_plan(
                 break
             except FutureTimeoutError:
                 future.cancel()
-                timeout_label = f"{timeout + 5.0}s"
+                timeout_label = (
+                    "the configured deadline"
+                    if timeout is None
+                    else f"{timeout + 5.0}s"
+                )
                 error_msg = f"Parallel tool execution timed out after {timeout_label} for '{tool_name}'"
                 LOG.warning(error_msg)
                 plan.tool_call_id_to_result[tool_call_id] = json.dumps({"error": error_msg})
@@ -366,7 +373,7 @@ def _execute_parallel_tool_plan(
 def _execute_sequential_tool_plan(
     plan: ToolCallPlan,
     tool_executors: ToolExecutorMap,
-    timeout: float,
+    timeout: Optional[float],
     agent_hierarchy: Optional[list[str]],
     step: int,
     tool_call_counts: dict[str, int],
@@ -414,7 +421,7 @@ def execute_tool_calls(
     tool_calls: list[JsonDict],
     tool_executors: ToolExecutorMap,
     provider: str,
-    timeout: float = 900.0,
+    timeout: Optional[float] = 900.0,
     tool_metadata: Optional[ToolMetadata] = None,
     agent_hierarchy: Optional[list[str]] = None,
     step: int = 0,

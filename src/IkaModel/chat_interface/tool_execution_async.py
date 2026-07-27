@@ -31,7 +31,7 @@ async def async_execute_tool(
     tool_name: str,
     tool_args: object,
     tool_executors: ToolExecutorMap,
-    timeout: float = 900.0,
+    timeout: Optional[float] = 900.0,
     agent_hierarchy: Optional[list[str]] = None,
     step: int = 0
 ) -> str:
@@ -92,7 +92,7 @@ async def async_execute_tool(
 async def _execute_parallel_tool_plan_async(
     plan: ToolCallPlan,
     tool_executors: ToolExecutorMap,
-    timeout: float,
+    timeout: Optional[float],
     agent_hierarchy: Optional[list[str]],
     step: int,
     tool_call_counts: dict[str, int],
@@ -131,7 +131,7 @@ async def _execute_parallel_tool_plan_async(
 async def _execute_sequential_tool_plan_async(
     plan: ToolCallPlan,
     tool_executors: ToolExecutorMap,
-    timeout: float,
+    timeout: Optional[float],
     agent_hierarchy: Optional[list[str]],
     step: int,
     tool_call_counts: dict[str, int],
@@ -154,7 +154,7 @@ async def async_execute_tool_calls(
     tool_calls: list[JsonDict],
     tool_executors: ToolExecutorMap,
     provider: str,
-    timeout: float = 900.0,
+    timeout: Optional[float] = 900.0,
     tool_metadata: Optional[ToolMetadata] = None,
     agent_hierarchy: Optional[list[str]] = None,
     step: int = 0,

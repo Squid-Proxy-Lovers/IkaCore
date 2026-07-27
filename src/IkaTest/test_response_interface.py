@@ -236,6 +236,29 @@ def test_execute_tool_calls_keeps_parallel_errors_ordered_with_successful_result
     assert counts == {"ok": 1, "boom": 1}
 
 
+def test_execute_tool_calls_preserves_successful_parallel_result_without_timeout():
+    calls = []
+
+    def save_result(args):
+        calls.append(args)
+        return {"saved": args["finding_id"]}
+
+    with patch("IkaModel.chat_interface.tool_execution_sync.get_cli_output", return_value=MagicMock()):
+        formatted, tool_results, counts, executed, interrupt = ri.execute_tool_calls(
+            [_tool_call("save_result", '{"finding_id":"finding-1"}', "save")],
+            {"save_result": save_result},
+            "openai",
+            timeout=None,
+        )
+
+    assert calls == [{"finding_id": "finding-1"}]
+    assert json.loads(tool_results[0]) == {"saved": "finding-1"}
+    assert json.loads(formatted[0]["content"]) == {"saved": "finding-1"}
+    assert counts == {"save_result": 1}
+    assert [call["id"] for call in executed] == ["save"]
+    assert interrupt is None
+
+
 def test_async_execute_tool_reports_common_errors_and_runs_sync_or_async_executors():
     async def run_case():
         cli = MagicMock()
