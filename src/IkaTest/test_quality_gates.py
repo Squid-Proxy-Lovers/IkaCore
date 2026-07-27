@@ -82,6 +82,8 @@ KNOWN_BROAD_EXCEPTION_BOUNDARIES = Counter({
     ("src/IkaModel/chat_interface/tool_execution_async.py", "async_execute_tool"): 1,
     ("src/IkaModel/chat_interface/tool_execution_sync.py", "_execute_parallel_tool_plan"): 1,
     ("src/IkaModel/chat_interface/tool_execution_sync.py", "execute_tool"): 1,
+    ("src/IkaModel/codex/chat_helpers_codex.py", "_request_codex_once"): 1,
+    ("src/IkaModel/request_interface.py", "request_cancelled"): 1,
 })
 
 

@@ -5,8 +5,9 @@ import asyncio
 import copy
 import json
 import logging
+import threading
 import time
-from typing import Any, Optional, cast
+from typing import Any, Callable, Optional, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
@@ -33,6 +34,10 @@ _SENSITIVE_QUERY_NAMES = {
     "token",
 }
 _RETRYABLE_UNEXPECTED_EXCEPTIONS = (RuntimeError, ValueError, TypeError, OSError)
+_request_control = threading.local()
+
+_RequestAbortRegistrar = Callable[[Callable[[], None]], Optional[Callable[[], None]]]
+_RequestCancelChecker = Callable[[], bool]
 
 
 class IkaAPIError(RuntimeError):
@@ -51,6 +56,67 @@ class IkaTimeoutError(IkaAPIError):
 
 class IkaHTTPError(IkaAPIError):
     pass
+
+
+class IkaRequestCancelled(IkaAPIError):
+    pass
+
+
+def set_request_abort_registrar(
+    registrar: Optional[_RequestAbortRegistrar],
+) -> Optional[_RequestAbortRegistrar]:
+    """Install a thread-local registrar for aborting active provider requests."""
+    previous = cast(Optional[_RequestAbortRegistrar], getattr(_request_control, "abort_registrar", None))
+    setattr(_request_control, "abort_registrar", registrar)
+    return previous
+
+
+def register_request_abort_callback(callback: Callable[[], None]) -> Optional[Callable[[], None]]:
+    """Register a callback that aborts the active provider request, if supported."""
+    registrar = cast(Optional[_RequestAbortRegistrar], getattr(_request_control, "abort_registrar", None))
+    if registrar is None:
+        return None
+    return registrar(callback)
+
+
+def set_request_cancel_checker(
+    checker: Optional[_RequestCancelChecker],
+) -> Optional[_RequestCancelChecker]:
+    """Install a thread-local predicate used to identify intentional cancels."""
+    previous = cast(Optional[_RequestCancelChecker], getattr(_request_control, "cancel_checker", None))
+    setattr(_request_control, "cancel_checker", checker)
+    return previous
+
+
+def set_request_max_retries(max_retries: Optional[int]) -> Optional[int]:
+    """Override provider request attempts for the current worker thread.
+
+    The public request helpers historically default to three attempts.  A
+    per-thread override lets one bounded pipeline phase use a stricter retry
+    policy without changing concurrent agents or every IkaCore caller.
+    """
+    previous = cast(Optional[int], getattr(_request_control, "max_retries", None))
+    if max_retries is None:
+        if hasattr(_request_control, "max_retries"):
+            delattr(_request_control, "max_retries")
+    else:
+        setattr(_request_control, "max_retries", max(1, int(max_retries)))
+    return previous
+
+
+def _effective_max_retries(default: int) -> int:
+    override = cast(Optional[int], getattr(_request_control, "max_retries", None))
+    return max(1, override if override is not None else default)
+
+
+def request_cancelled() -> bool:
+    checker = cast(Optional[_RequestCancelChecker], getattr(_request_control, "cancel_checker", None))
+    if checker is None:
+        return False
+    try:
+        return bool(checker())
+    except Exception:
+        return False
 
 
 def _int_value(value: object) -> int:
@@ -361,6 +427,7 @@ def api_request_retry(
     timeout: float = 900.0,
     client: Optional[httpx.Client] = None,
 ) -> httpx.Response:
+    max_retries = _effective_max_retries(max_retries)
     # codex backend forces streaming (rejects stream:false). Dispatch into the
     # codex client, which drains the SSE stream and returns a Response-shaped
     # shim so callers continue to call .json() / .status_code as usual.
@@ -423,6 +490,7 @@ async def async_api_request_retry(
     timeout: float = 900.0,
     client: Optional[httpx.AsyncClient] = None
 ) -> httpx.Response:
+    max_retries = _effective_max_retries(max_retries)
     # codex backend requires streaming — defer to the sync codex client via a
     # threadpool. We don't have an async SSE collector yet; running the sync
     # path off-loop avoids blocking the event loop in async callers.

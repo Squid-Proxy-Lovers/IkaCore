@@ -23,33 +23,29 @@ import email.utils
 import json
 import logging
 import time
-import uuid
 from collections.abc import Iterator
 from typing import Any, Optional, cast
 
 import httpx
 
-from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
+from IkaCore.agent_runtime_payloads import JsonDict, json_dict, string_value
 
 from ..base import BareBoneModel
 from ..codex_constants import CODEX_API_URL
 from ..model_metadata import CODEX_KNOWN_MODELS
-from ..request_interface import agent_tools_for_payload
+from ..request_interface import (
+    IkaRequestCancelled,
+    agent_tools_for_payload,
+    register_request_abort_callback,
+    request_cancelled,
+)
 from .codex_responses import codex_responses_fill_payload
+from .response_parsing import append_codex_tool_messages, parse_codex_response
 
 LOG = logging.getLogger(__name__)
 
 ProviderRequest = tuple[str, dict[str, str], JsonDict]
-ProviderRound = tuple[str, Optional[str], list[JsonDict], int]
 MessageList = list[JsonDict]
-
-
-def _token_count(value: object) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, (int, float)):
-        return int(value)
-    return 0
 
 
 class _CodexRetryableStreamError(RuntimeError):
@@ -236,6 +232,8 @@ def _iter_sse(response: httpx.Response) -> Iterator[tuple[Optional[str], object]
     """
     current_event: Optional[str] = None
     for line in response.iter_lines():
+        if request_cancelled():
+            raise IkaRequestCancelled("codex request cancelled")
         # httpx strips the trailing newline but leaves the line as-is.
         if not line:
             current_event = None
@@ -385,13 +383,26 @@ def _request_codex_once(
     wait_seconds: int,
 ) -> Optional[_CodexResponseShim]:
     with httpx.stream("POST", api_url, headers=headers, json=payload, timeout=timeout) as response:
-        rate_headers = _codex_rate_headers(response)
-        if response.status_code == 200:
-            data = _collect_stream(response)
-            return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
+        unregister_abort = register_request_abort_callback(response.close)
+        try:
+            if request_cancelled():
+                raise IkaRequestCancelled("codex request cancelled")
 
-        body = response.read().decode("utf-8", "replace")
-        _handle_codex_non_200(response, body, backoff, attempt, max_retries, wait_seconds)
+            rate_headers = _codex_rate_headers(response)
+            if response.status_code == 200:
+                data = _collect_stream(response)
+                return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
+
+            body = response.read().decode("utf-8", "replace")
+            if request_cancelled():
+                raise IkaRequestCancelled("codex request cancelled")
+            _handle_codex_non_200(response, body, backoff, attempt, max_retries, wait_seconds)
+        finally:
+            if unregister_abort is not None:
+                try:
+                    unregister_abort()
+                except Exception:
+                    pass
     return None
 
 
@@ -421,6 +432,9 @@ def _request_codex_with_retries(
     for attempt in range(max_retries):
         backoff = wait_seconds * (2 ** attempt)
         try:
+            if request_cancelled():
+                raise IkaRequestCancelled("codex request cancelled")
+
             response = _request_codex_once(
                 api_url,
                 headers,
@@ -435,6 +449,8 @@ def _request_codex_with_retries(
                 return response
             continue
 
+        except IkaRequestCancelled:
+            raise
         except _CodexRetryableStreamError as error:
             last_exc = error
             _retry_codex_exception(
@@ -442,12 +458,16 @@ def _request_codex_with_retries(
                 backoff, attempt, max_retries, error,
             )
         except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as error:
+            if request_cancelled():
+                raise IkaRequestCancelled("codex request cancelled") from error
             last_exc = error
             _retry_codex_exception(
                 "codex request timeout: %s",
                 backoff, attempt, max_retries, error,
             )
         except httpx.HTTPError as error:
+            if request_cancelled():
+                raise IkaRequestCancelled("codex request cancelled") from error
             last_exc = error
             _retry_codex_exception(
                 "codex http error: %s",
@@ -477,112 +497,3 @@ def request_codex(
         max_retries,
         wait_seconds,
     )
-
-
-# ---------------------------------------------------------------------------
-# Response parsing
-# ---------------------------------------------------------------------------
-
-def parse_codex_response(
-    data: JsonDict,
-    model_id: str,
-) -> ProviderRound:
-    """
-    Parse a final codex response dict (the ``response.completed`` event's
-    ``response`` payload) into the internal (content, reasoning, tool_calls,
-    tokens) tuple used by IkaCore.
-    """
-    content = ""
-    tool_calls: list[JsonDict] = []
-    reasoning_content: Optional[str] = None
-
-    raw_output: object = data.get("output", []) or []
-    output = cast(list[object], raw_output) if isinstance(raw_output, list) else []
-    for item in output:
-        item_data = json_dict(item)
-        item_type = item_data.get("type", "")
-        if item_type == "message":
-            raw_blocks: object = item_data.get("content", []) or []
-            blocks = cast(list[object], raw_blocks) if isinstance(raw_blocks, list) else []
-            for block in blocks:
-                block_data = json_dict(block)
-                if block_data.get("type") == "output_text":
-                    content += string_value(block_data.get("text"))
-        elif item_type == "function_call":
-            tool_calls.append({
-                "id": item_data.get("call_id", item_data.get("id", "")),
-                "type": "function",
-                "function": {
-                    "name": item_data.get("name", ""),
-                    "arguments": item_data.get("arguments", "{}"),
-                },
-            })
-        elif item_type == "reasoning":
-            # The codex backend serves reasoning summaries (and optionally
-            # encrypted_content). We only keep the summary text here; the
-            # encrypted_content carry-over is a future optimization.
-            raw_summary: object = item_data.get("summary") or []
-            summary = cast(list[object], raw_summary) if isinstance(raw_summary, list) else []
-            if summary:
-                parts = [string_value(cast(JsonDict, s).get("text")) for s in summary if isinstance(s, dict)]
-                joined = "\n".join(p for p in parts if p)
-                if joined:
-                    reasoning_content = joined
-
-    if not content and data.get("output_text"):
-        content = string_value(data.get("output_text"))
-
-    usage = json_dict(data.get("usage"))
-    fallback_tokens = _token_count(usage.get("input_tokens")) + _token_count(usage.get("output_tokens"))
-    tokens = _token_count(usage.get("total_tokens")) or fallback_tokens
-
-    return content, reasoning_content, tool_calls, tokens
-
-
-# ---------------------------------------------------------------------------
-# Tool message recording
-# ---------------------------------------------------------------------------
-
-def append_codex_tool_messages(
-    messages: MessageList,
-    message_history: JsonDict,
-    content: str,
-    reasoning_content: Optional[str],
-    executed_tool_call_list: list[JsonDict],
-    tool_messages: MessageList,
-    tokens: int,
-    repeated_warning_msg: str = "",
-) -> None:
-    """
-    Record the assistant's turn and its tool outputs in the running
-    conversation. Matches the openai_responses convention: the codex
-    payload builder converts role=='tool' messages into the
-    ``function_call_output`` form when it next reads ``messages``.
-    """
-    assistant_msg: JsonDict = {"role": "assistant", "content": content}
-    if reasoning_content:
-        assistant_msg["reasoning_content"] = reasoning_content
-    if executed_tool_call_list:
-        assistant_msg["tool_calls"] = executed_tool_call_list
-
-    messages.append(assistant_msg)
-    messages.extend(tool_messages)
-
-    if repeated_warning_msg:
-        messages.append({"role": "user", "content": repeated_warning_msg})
-
-    if executed_tool_call_list:
-        msg_id = str(uuid.uuid4())
-        history_section(message_history, "messages")[msg_id] = {
-            "message": json.dumps(assistant_msg),
-            "tokens": tokens,
-            "type": "assistant_with_tools",
-        }
-
-    for tool_msg in tool_messages:
-        msg_id = str(uuid.uuid4())
-        history_section(message_history, "messages")[msg_id] = {
-            "message": json.dumps(tool_msg),
-            "tokens": 0,
-            "type": "tool",
-        }
