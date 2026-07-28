@@ -165,6 +165,54 @@ class TestCollectStream:
         with pytest.raises(_CodexRetryableStreamError):
             _collect_stream(_FakeStreamResponse(lines))
 
+    def test_official_nested_failed_error_is_retryable(self):
+        lines = _frame("response.failed", {
+            "type": "response.failed",
+            "response": {
+                "status": "failed",
+                "error": {
+                    "code": "server_is_overloaded",
+                    "message": "busy",
+                },
+            },
+        })
+        with pytest.raises(_CodexRetryableStreamError):
+            _collect_stream(_FakeStreamResponse(lines))
+
+    def test_top_level_error_after_partial_output_is_retryable(self):
+        lines = (
+            _frame("response.created", {
+                "type": "response.created",
+                "response": {"id": "r1", "status": "in_progress", "output": []},
+            })
+            + _frame("response.output_text.delta", {
+                "type": "response.output_text.delta",
+                "delta": "partial",
+            })
+            + _frame("error", {
+                "type": "error",
+                "code": "server_is_overloaded",
+                "message": "busy",
+            })
+        )
+        with pytest.raises(_CodexRetryableStreamError):
+            _collect_stream(_FakeStreamResponse(lines))
+
+    def test_sse_event_name_is_used_when_json_type_is_absent(self):
+        lines = (
+            _frame("response.created", {
+                "response": {"id": "r1", "output": []},
+            })
+            + _frame("response.completed", {
+                "response": {
+                    "id": "r1",
+                    "status": "completed",
+                    "output": [],
+                },
+            })
+        )
+        assert _collect_stream(_FakeStreamResponse(lines))["id"] == "r1"
+
     def test_non_retryable_failed_raises_plain_runtime_error(self):
         lines = _frame("response.failed", {
             "type": "response.failed",
@@ -176,8 +224,66 @@ class TestCollectStream:
 
     def test_no_envelope_raises(self):
         """Stream that ends without created / in_progress / completed."""
-        with pytest.raises(RuntimeError, match="envelope"):
+        with pytest.raises(
+            _CodexRetryableStreamError,
+            match="before response.completed",
+        ):
             _collect_stream(_FakeStreamResponse([]))
+
+    def test_created_without_completed_is_retryable_truncation(self):
+        lines = _frame("response.created", {
+            "type": "response.created",
+            "response": {
+                "id": "r1",
+                "status": "in_progress",
+                "output": [],
+            },
+        })
+        with pytest.raises(
+            _CodexRetryableStreamError,
+            match="after a response envelope",
+        ):
+            _collect_stream(_FakeStreamResponse(lines))
+
+    @pytest.mark.parametrize("status", ["failed", "error"])
+    def test_completed_event_rejects_explicit_failure_status(self, status):
+        lines = (
+            _frame("response.created", {
+                "type": "response.created",
+                "response": {"id": "r1", "output": []},
+            })
+            + _frame("response.completed", {
+                "type": "response.completed",
+                "response": {
+                    "id": "r1",
+                    "status": status,
+                    "error": {"type": "invalid_request_error"},
+                    "output": [],
+                },
+            })
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            _collect_stream(_FakeStreamResponse(lines))
+        assert not isinstance(
+            exc_info.value,
+            _CodexRetryableStreamError,
+        )
+
+    def test_incomplete_event_is_explicit_non_retryable_terminal(self):
+        lines = _frame("response.incomplete", {
+            "type": "response.incomplete",
+            "response": {
+                "id": "r1",
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+            },
+        })
+        with pytest.raises(RuntimeError, match="incomplete") as exc_info:
+            _collect_stream(_FakeStreamResponse(lines))
+        assert not isinstance(
+            exc_info.value,
+            _CodexRetryableStreamError,
+        )
 
 
 # ----------------------------------------------------------------------

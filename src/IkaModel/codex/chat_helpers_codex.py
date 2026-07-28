@@ -24,7 +24,6 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import Iterator
 from typing import Any, Optional, cast
 
 import httpx
@@ -36,12 +35,23 @@ from ..codex_constants import CODEX_API_URL
 from ..model_metadata import CODEX_KNOWN_MODELS
 from ..request_interface import agent_tools_for_payload
 from .codex_responses import codex_responses_fill_payload
+from .codex_stream import CodexRetryableStreamError as _CodexRetryableStreamError
+from .codex_stream import classify_stream_error as _classify_stream_error
+from .codex_stream import collect_stream as _collect_stream
+from .codex_stream import iter_sse as _iter_sse
 
 LOG = logging.getLogger(__name__)
 
 ProviderRequest = tuple[str, dict[str, str], JsonDict]
 ProviderRound = tuple[str, Optional[str], list[JsonDict], int]
 MessageList = list[JsonDict]
+
+__all__ = [
+    "_CodexRetryableStreamError",
+    "_classify_stream_error",
+    "_collect_stream",
+    "_iter_sse",
+]
 
 
 def _token_count(value: object) -> int:
@@ -50,35 +60,6 @@ def _token_count(value: object) -> int:
     if isinstance(value, (int, float)):
         return int(value)
     return 0
-
-
-class _CodexRetryableStreamError(RuntimeError):
-    """Stream-level codex failure that should be retried (server-side hiccup,
-    transient internal error, etc.). The outer retry loop catches this
-    specifically; a plain RuntimeError indicates a non-retryable error."""
-
-
-# Error type/code strings that the OpenAI Responses backend uses for transient
-# faults. Anything not in here is treated as a caller error and is not retried.
-_RETRYABLE_STREAM_ERROR_TYPES = {
-    "server_error", "internal_error", "engine_error",
-    "rate_limit_exceeded", "rate_limit_error", "overloaded_error",
-}
-_RETRYABLE_STREAM_ERROR_CODES = {
-    "server_error", "internal_error",
-    "rate_limit_exceeded", "model_overloaded",
-}
-
-
-def _classify_stream_error(err_obj: object) -> bool:
-    """Return True if this stream-level error looks transient."""
-    if not isinstance(err_obj, dict):
-        # Unknown shape — be conservative: don't retry, surface to caller.
-        return False
-    error_data = cast(JsonDict, err_obj)
-    et = string_value(error_data.get("type")).lower()
-    code = string_value(error_data.get("code")).lower()
-    return et in _RETRYABLE_STREAM_ERROR_TYPES or code in _RETRYABLE_STREAM_ERROR_CODES
 
 
 def _parse_retry_after(header_value: Optional[str], default: float) -> float:
@@ -223,105 +204,6 @@ class _CodexResponseShim:
                 request=None,  # type: ignore[arg-type]
                 response=self,  # type: ignore[arg-type]
             )
-
-
-def _iter_sse(response: httpx.Response) -> Iterator[tuple[Optional[str], object]]:
-    """
-    Yield (event_name, parsed_json) from a Server-Sent Events stream.
-
-    SSE frames are separated by blank lines. Each frame is a sequence of
-    ``event:``/``data:`` lines. We only care about the data payload (JSON);
-    the event name is mirrored from the ``type`` field of the JSON itself
-    on the codex backend, but we honor an explicit ``event:`` line too.
-    """
-    current_event: Optional[str] = None
-    for line in response.iter_lines():
-        # httpx strips the trailing newline but leaves the line as-is.
-        if not line:
-            current_event = None
-            continue
-        if line.startswith("event:"):
-            current_event = line[6:].strip()
-            continue
-        if line.startswith("data:"):
-            data = line[5:].strip()
-            if not data or data == "[DONE]":
-                continue
-            try:
-                yield current_event, json.loads(data)
-            except json.JSONDecodeError:
-                LOG.debug("Skipping unparseable SSE data line: %r", data[:200])
-                continue
-
-
-def _collect_stream(response: httpx.Response) -> JsonDict:
-    """
-    Walk the SSE stream and return the final response dict.
-
-    Codex SSE delivers the response in pieces:
-    - ``response.created`` / ``response.in_progress`` carry the envelope
-      (id, model, usage, status, ...) with an empty ``output: []``.
-    - Each output item (assistant message, function_call, reasoning) arrives
-      in its own ``response.output_item.added`` → ... → ``response.output_item.done``
-      sequence. The ``done`` event holds the final item shape.
-    - ``response.completed`` arrives last, but its ``response.output`` is
-      typically still empty on the codex backend. We use it for its envelope
-      (especially the final ``usage``) and graft the collected items in.
-
-    Text deltas via ``response.output_text.delta`` are tracked only as a
-    fallback for cases where ``output_item.done`` doesn't arrive (shouldn't
-    happen in practice but keeps us defensive).
-    """
-    envelope: JsonDict = {}
-    collected_items: list[JsonDict] = []
-    output_text_chunks: list[str] = []
-
-    for _event, obj in _iter_sse(response):
-        obj_data = json_dict(obj)
-        if not obj_data:
-            continue
-        t = obj_data.get("type", "")
-        if t == "response.failed" or t == "response.error":
-            err = obj_data.get("error") or json_dict(obj_data.get("response")).get("error")
-            if _classify_stream_error(err):
-                raise _CodexRetryableStreamError(f"codex stream transient failure: {err}")
-            raise RuntimeError(f"codex response failed: {err}")
-        elif t in ("response.created", "response.in_progress"):
-            resp = json_dict(obj_data.get("response"))
-            if resp:
-                envelope = resp
-        elif t == "response.completed":
-            resp = json_dict(obj_data.get("response"))
-            if resp:
-                # Keep the latest envelope (it has the final ``usage`` and
-                # any updated status fields), but its output[] is empty so
-                # we'll fill it from collected_items below.
-                envelope = resp
-        elif t == "response.output_item.done":
-            item = json_dict(obj_data.get("item"))
-            if item:
-                collected_items.append(item)
-        elif t == "response.output_text.delta":
-            delta = obj_data.get("delta")
-            if isinstance(delta, str):
-                output_text_chunks.append(delta)
-
-    if not envelope:
-        raise RuntimeError("codex stream ended without a response envelope")
-
-    # Replace the (typically empty) envelope output with the items we
-    # collected from output_item.done events.
-    if collected_items:
-        envelope["output"] = collected_items
-    elif output_text_chunks and not envelope.get("output"):
-        # Last-resort fallback: synthesize a message item from raw text deltas.
-        envelope["output"] = [{
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "output_text", "text": "".join(output_text_chunks)}],
-        }]
-
-    return envelope
 
 
 def _codex_rate_headers(response: httpx.Response) -> dict[str, str]:

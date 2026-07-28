@@ -34,25 +34,45 @@ from IkaModel.codex.chat_helpers_codex import (
 # _classify_stream_error
 # ----------------------------------------------------------------------
 
-@pytest.mark.parametrize("err,retryable", [
-    ({"type": "server_error"},                  True),
-    ({"type": "internal_error"},                True),
-    ({"type": "engine_error"},                  True),
-    ({"type": "rate_limit_exceeded"},           True),
-    ({"type": "rate_limit_error"},              True),
-    ({"type": "overloaded_error"},              True),
-    ({"code": "rate_limit_exceeded"},           True),
-    ({"code": "server_error"},                  True),
-    ({"code": "model_overloaded"},              True),
-    ({"type": "invalid_request_error"},         False),
-    ({"type": "context_length_exceeded"},       False),
-    ({"code": "context_length_exceeded"},       False),
-    (None,                                      False),
-    ("just a string",                           False),
-    ({},                                        False),
+@pytest.mark.parametrize("field", ["type", "code"])
+@pytest.mark.parametrize("identifier", [
+    "server_error",
+    "internal_error",
+    "engine_error",
+    "rate_limit_exceeded",
+    "rate_limit_error",
+    "overloaded_error",
+    "model_overloaded",
+    "server_is_overloaded",
 ])
-def test_classify_stream_error(err, retryable):
-    assert _classify_stream_error(err) is retryable
+def test_classify_stream_error_accepts_transient_identifier_under_either_key(
+    field,
+    identifier,
+):
+    assert _classify_stream_error({field: identifier})
+
+
+def test_classify_stream_error_normalizes_case_and_outer_whitespace():
+    assert _classify_stream_error(
+        {"code": "  SERVER_IS_OVERLOADED  "}
+    )
+
+
+@pytest.mark.parametrize("err", [
+    {"type": "invalid_request_error"},
+    {"type": "context_length_exceeded"},
+    {"code": "context_length_exceeded"},
+    {"code": "insufficient_quota"},
+    {
+        "type": "invalid_request_error",
+        "message": "request mentions server_is_overloaded",
+    },
+    None,
+    "just a string",
+    {},
+])
+def test_classify_stream_error_rejects_non_transient_or_unknown_errors(err):
+    assert not _classify_stream_error(err)
 
 
 # ----------------------------------------------------------------------
@@ -234,6 +254,119 @@ class TestRequestCodexRetryLoop:
             resp = request_codex("u", {}, {}, timeout=1, max_retries=3, wait_seconds=1)
         assert resp.status_code == 200
         assert calls["n"] == 2
+
+    def test_server_is_overloaded_then_success_retries_and_discards_partial_output(self):
+        calls = {"n": 0}
+
+        def side_effect(*a, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _FakeStreamCtx(200, events=[
+                    'event: response.created',
+                    'data: {"type":"response.created","response":{"id":"partial","output":[]}}',
+                    '',
+                    'event: response.output_text.delta',
+                    'data: {"type":"response.output_text.delta","delta":"discard me"}',
+                    '',
+                    'event: error',
+                    'data: {"type":"error","code":"server_is_overloaded","message":"busy"}',
+                    '',
+                ])
+            return _FakeStreamCtx(200, events=_completed_event_stream())
+
+        with patch("httpx.stream", side_effect=side_effect), patch("time.sleep"):
+            resp = request_codex(
+                "u",
+                {},
+                {},
+                timeout=1,
+                max_retries=3,
+                wait_seconds=1,
+            )
+
+        assert calls["n"] == 2
+        assert resp.json()["id"] == "r"
+        assert resp.json()["output"] == []
+
+    def test_persistent_server_is_overloaded_uses_three_total_attempts(self):
+        calls = {"n": 0}
+        sleeps = []
+
+        def side_effect(*a, **kw):
+            calls["n"] += 1
+            return _FakeStreamCtx(200, events=[
+                'event: response.failed',
+                'data: {"type":"response.failed","response":{"status":"failed","error":{"code":"server_is_overloaded"}}}',
+                '',
+            ])
+
+        with patch("httpx.stream", side_effect=side_effect), patch(
+            "time.sleep",
+            side_effect=lambda seconds: sleeps.append(seconds),
+        ):
+            with pytest.raises(_CodexRetryableStreamError):
+                request_codex(
+                    "u",
+                    {},
+                    {},
+                    timeout=1,
+                    max_retries=3,
+                    wait_seconds=1,
+                )
+
+        assert calls["n"] == 3
+        assert sleeps == [1, 2]
+
+    def test_truncated_http_200_stream_retries(self):
+        calls = {"n": 0}
+
+        def side_effect(*a, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _FakeStreamCtx(200, events=[
+                    'event: response.created',
+                    'data: {"type":"response.created","response":{"id":"partial","status":"in_progress","output":[]}}',
+                    '',
+                ])
+            return _FakeStreamCtx(200, events=_completed_event_stream())
+
+        with patch("httpx.stream", side_effect=side_effect), patch("time.sleep"):
+            resp = request_codex(
+                "u",
+                {},
+                {},
+                timeout=1,
+                max_retries=3,
+                wait_seconds=1,
+            )
+
+        assert calls["n"] == 2
+        assert resp.json()["id"] == "r"
+
+    def test_explicit_incomplete_stream_does_not_retry(self):
+        calls = {"n": 0}
+
+        def side_effect(*a, **kw):
+            calls["n"] += 1
+            return _FakeStreamCtx(200, events=[
+                'event: response.incomplete',
+                'data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}',
+                '',
+            ])
+
+        with patch("httpx.stream", side_effect=side_effect), patch("time.sleep"):
+            with pytest.raises(RuntimeError, match="incomplete") as exc_info:
+                request_codex(
+                    "u",
+                    {},
+                    {},
+                    timeout=1,
+                    max_retries=3,
+                    wait_seconds=1,
+                )
+
+        assert not isinstance(exc_info.value, _CodexRetryableStreamError)
+        assert calls["n"] == 1
 
     def test_non_transient_stream_failure_bubbles(self):
         calls = {"n": 0}
