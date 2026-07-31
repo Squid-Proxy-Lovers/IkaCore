@@ -22,6 +22,7 @@ from __future__ import annotations
 import email.utils
 import json
 import logging
+import random
 import threading
 import time
 import uuid
@@ -70,10 +71,11 @@ class _CodexRetryableStreamError(RuntimeError):
 _RETRYABLE_STREAM_ERROR_TYPES = {
     "server_error", "internal_error", "engine_error",
     "rate_limit_exceeded", "rate_limit_error", "overloaded_error",
+    "server_is_overloaded",
 }
 _RETRYABLE_STREAM_ERROR_CODES = {
     "server_error", "internal_error",
-    "rate_limit_exceeded", "model_overloaded",
+    "rate_limit_exceeded", "model_overloaded", "server_is_overloaded",
 }
 
 
@@ -121,6 +123,8 @@ def _sleep_before_retry(
     max_retries: int,
     *log_args: Any,
 ) -> None:
+    jitter = random.uniform(0.0, min(delay * 0.25, 5.0)) if delay > 0 else 0.0
+    sleep_delay = delay + jitter
     normalized_message = log_message.lower()
     if "request timeout" in normalized_message:
         retry_notice = "Codex request exceeded its local timeout"
@@ -130,7 +134,7 @@ def _sleep_before_retry(
         retry_notice = "Transient Codex backend failure"
     get_cli_output().emit(
         OutputType.AGENT_RESPONSE,
-        f"{retry_notice}; retrying in {delay:.1f}s "
+        f"{retry_notice}; retrying in {sleep_delay:.1f}s "
         f"(attempt {attempt + 1}/{max_retries})",
         ["API"],
         step=0,
@@ -138,11 +142,11 @@ def _sleep_before_retry(
     LOG.warning(
         f"{log_message}; retrying in %.1fs (attempt %d/%d)",
         *log_args,
-        delay,
+        sleep_delay,
         attempt + 1,
         max_retries,
     )
-    time.sleep(delay)
+    time.sleep(sleep_delay)
 
 
 def is_codex_url(api_url: Optional[str]) -> bool:

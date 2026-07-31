@@ -42,9 +42,11 @@ from IkaModel.codex.chat_helpers_codex import (
     ({"type": "rate_limit_exceeded"},           True),
     ({"type": "rate_limit_error"},              True),
     ({"type": "overloaded_error"},              True),
+    ({"type": "server_is_overloaded"},          True),
     ({"code": "rate_limit_exceeded"},           True),
     ({"code": "server_error"},                  True),
     ({"code": "model_overloaded"},              True),
+    ({"code": "server_is_overloaded"},          True),
     ({"type": "invalid_request_error"},         False),
     ({"type": "context_length_exceeded"},       False),
     ({"code": "context_length_exceeded"},       False),
@@ -256,7 +258,7 @@ class TestRequestCodexRetryLoop:
             if calls["n"] == 1:
                 return _FakeStreamCtx(200, events=[
                     'event: response.failed',
-                    'data: {"type":"response.failed","error":{"type":"server_error"}}',
+                    'data: {"type":"response.failed","error":{"code":"server_is_overloaded"}}',
                     '',
                 ])
             return _FakeStreamCtx(200, events=_completed_event_stream())
@@ -331,6 +333,10 @@ class TestRequestCodexRetryLoop:
 
         with patch("httpx.stream", side_effect=side_effect), \
              patch("time.sleep"), \
+             patch(
+                 "IkaModel.codex.chat_helpers_codex.random.uniform",
+                 return_value=0.0,
+             ), \
              patch(
                  "IkaModel.codex.chat_helpers_codex.get_cli_output",
                  return_value=_Output(),
