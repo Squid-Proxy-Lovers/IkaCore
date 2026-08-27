@@ -18,9 +18,14 @@ _MODEL_METADATA_RESOURCE = "data/model_metadata.json"
 
 def _load_model_metadata() -> dict[str, Any]:
     try:
-        raw = files(__package__ or "IkaModel").joinpath(_MODEL_METADATA_RESOURCE).read_text(encoding="utf-8")
-    except FileNotFoundError as e:
-        raise RuntimeError(f"missing model metadata resource: {_MODEL_METADATA_RESOURCE}") from e
+        from src.resources import read_text as read_ika_resource
+
+        raw = read_ika_resource(f"IkaCore/src/IkaModel/{_MODEL_METADATA_RESOURCE}")
+    except (ImportError, ModuleNotFoundError, OSError):
+        try:
+            raw = files(__package__ or "IkaModel").joinpath(_MODEL_METADATA_RESOURCE).read_text(encoding="utf-8")
+        except FileNotFoundError as e:
+            raise RuntimeError(f"missing model metadata resource: {_MODEL_METADATA_RESOURCE}") from e
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:

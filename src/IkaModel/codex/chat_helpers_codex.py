@@ -108,7 +108,7 @@ def _sleep_before_retry(
 def is_codex_url(api_url: Optional[str]) -> bool:
     if not api_url:
         return False
-    return "chatgpt.com/backend-api/codex" in api_url.lower()
+    return "/backend-api/codex/" in api_url.lower()
 
 
 # ---------------------------------------------------------------------------

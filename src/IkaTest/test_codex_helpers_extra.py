@@ -28,6 +28,11 @@ def _frame(event, obj):
     return [f"event: {event}", f"data: {json.dumps(obj)}", ""]
 
 
+def test_codex_url_accepts_a_scoped_gateway_endpoint():
+    assert is_codex_url("http://172.30.0.1:18081/backend-api/codex/responses")
+    assert not is_codex_url("https://api.openai.com/v1/responses")
+
+
 def test_retry_after_falls_back_when_http_date_parser_raises():
     with patch("IkaModel.codex.chat_helpers_codex.email.utils.parsedate_to_datetime", side_effect=ValueError("bad")):
         assert _parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT", default=9) == 9.0

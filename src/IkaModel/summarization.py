@@ -26,6 +26,12 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 
 def _load_prompt(relative_path: str, fallback: str) -> str:
+    try:
+        from src.resources import read_text as read_ika_resource
+
+        return read_ika_resource(f"IkaCore/src/IkaModel/prompts/{relative_path}").strip()
+    except (ImportError, ModuleNotFoundError, OSError):
+        pass
     path = _PROMPTS_DIR / relative_path
     try:
         with open(path, "r", encoding="utf-8") as f:

@@ -197,7 +197,12 @@ class BareBoneModel:
 
 _SUMMARY_PROMPT_PATH = Path(__file__).parent / "summary_prompt"
 try:
-    with open(_SUMMARY_PROMPT_PATH, "r", encoding="utf-8") as f:
-        SUMMARY_PROMPT = f.read()
-except FileNotFoundError:
-    SUMMARY_PROMPT = "Please summarize the following conversation history concisely, preserving key information and context."
+    from src.resources import read_text as _read_ika_resource
+
+    SUMMARY_PROMPT = _read_ika_resource("IkaCore/src/IkaModel/summary_prompt")
+except (ImportError, ModuleNotFoundError, OSError):
+    try:
+        with open(_SUMMARY_PROMPT_PATH, "r", encoding="utf-8") as f:
+            SUMMARY_PROMPT = f.read()
+    except FileNotFoundError:
+        SUMMARY_PROMPT = "Please summarize the following conversation history concisely, preserving key information and context."
