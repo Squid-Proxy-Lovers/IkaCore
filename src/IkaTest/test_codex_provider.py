@@ -31,6 +31,7 @@ def test_current_codex_models_are_registered():
 @pytest.mark.parametrize("url,expected", [
     ("https://chatgpt.com/backend-api/codex/responses",     "codex"),
     ("https://CHATGPT.com/backend-api/codex/responses",     "codex"),  # case-insensitive
+    ("http://172.30.0.1:18081/backend-api/codex/responses",  "codex"),
     ("https://api.openai.com/v1/responses",                 "openai_responses"),
     ("https://api.openai.com/v1/chat/completions",          "openai"),
     ("https://api.deepseek.com/chat/completions",           "deepseek"),

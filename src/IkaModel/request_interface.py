@@ -35,6 +35,11 @@ _SENSITIVE_QUERY_NAMES = {
 _RETRYABLE_UNEXPECTED_EXCEPTIONS = (RuntimeError, ValueError, TypeError, OSError)
 
 
+def _is_codex_endpoint(api_url: Optional[str]) -> bool:
+    """Recognize both the upstream Codex URL and an audit-scoped gateway."""
+    return bool(api_url and "/backend-api/codex/" in api_url.lower())
+
+
 class IkaAPIError(RuntimeError):
     def __init__(self, message: str, status_code: Optional[int] = None):
         super().__init__(message)
@@ -364,7 +369,7 @@ def api_request_retry(
     # codex backend forces streaming (rejects stream:false). Dispatch into the
     # codex client, which drains the SSE stream and returns a Response-shaped
     # shim so callers continue to call .json() / .status_code as usual.
-    if api_url and "chatgpt.com/backend-api/codex" in api_url.lower():
+    if _is_codex_endpoint(api_url):
         from .codex.chat_helpers_codex import request_codex
         return cast(
             httpx.Response,
@@ -426,7 +431,7 @@ async def async_api_request_retry(
     # codex backend requires streaming — defer to the sync codex client via a
     # threadpool. We don't have an async SSE collector yet; running the sync
     # path off-loop avoids blocking the event loop in async callers.
-    if api_url and "chatgpt.com/backend-api/codex" in api_url.lower():
+    if _is_codex_endpoint(api_url):
         from .codex.chat_helpers_codex import request_codex
         return cast(
             httpx.Response,

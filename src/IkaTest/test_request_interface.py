@@ -141,6 +141,17 @@ def test_sync_api_retry_dispatches_codex_and_retries_http_errors():
         ) is codex_response
     request_codex.assert_called_once()
 
+    with patch("IkaModel.codex.chat_helpers_codex.request_codex", return_value=codex_response) as request_codex:
+        assert api_request_retry(
+            "http://172.30.0.1:18081/backend-api/codex/responses",
+            {},
+            {"input": []},
+            max_retries=2,
+            wait_seconds=1,
+            timeout=5,
+        ) is codex_response
+    request_codex.assert_called_once()
+
     responses = [httpx.ConnectError("temporary"), httpx.Response(200, json={"ok": True})]
     with patch("IkaModel.request_interface.httpx.post", side_effect=responses):
         with patch("IkaModel.request_interface.time.sleep") as sleep:
@@ -189,17 +200,22 @@ def test_async_api_retry_dispatches_codex_closes_owned_client_and_raises_last_er
     codex_response = httpx.Response(200, json={"ok": "codex"})
 
     async def run_codex():
-        with patch("IkaModel.codex.chat_helpers_codex.request_codex", return_value=codex_response) as request_codex:
-            response = await async_api_request_retry(
-                "https://chatgpt.com/backend-api/codex/responses",
-                {},
-                {"input": []},
-                max_retries=2,
-                wait_seconds=1,
-                timeout=5,
-            )
-        request_codex.assert_called_once()
-        return response
+        for endpoint in (
+            "https://chatgpt.com/backend-api/codex/responses",
+            "http://172.30.0.1:18081/backend-api/codex/responses",
+        ):
+            with patch("IkaModel.codex.chat_helpers_codex.request_codex", return_value=codex_response) as request_codex:
+                response = await async_api_request_retry(
+                    endpoint,
+                    {},
+                    {"input": []},
+                    max_retries=2,
+                    wait_seconds=1,
+                    timeout=5,
+                )
+            request_codex.assert_called_once()
+            assert response is codex_response
+        return codex_response
 
     assert asyncio.run(run_codex()) is codex_response
 

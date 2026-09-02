@@ -136,7 +136,7 @@ MODEL_PROVIDER_RULES = (
 )
 
 URL_PROVIDER_CONTAINS = (
-    ("chatgpt.com/backend-api/codex", "codex"),
+    ("/backend-api/codex/", "codex"),
     ("openrouter.ai", "openrouter"),
     ("deepseek.com", "deepseek"),
     ("generativelanguage.googleapis.com", "gemini"),
