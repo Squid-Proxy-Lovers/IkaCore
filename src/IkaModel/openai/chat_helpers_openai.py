@@ -53,7 +53,8 @@ def parse_openai_response(data: JsonDict, model_id: str) -> ProviderRound:
     raw_tool_calls: object = message_obj.get("tool_calls", []) or []
     tool_calls = cast(list[JsonDict], raw_tool_calls) if isinstance(raw_tool_calls, list) else []
     tokens = _token_count(json_dict(data.get("usage")).get("total_tokens"))
-    reasoning_content = None
+    reasoning_value = message_obj.get("reasoning_content")
+    reasoning_content = string_value(reasoning_value) if reasoning_value else None
     
     return content, reasoning_content, tool_calls, tokens
 

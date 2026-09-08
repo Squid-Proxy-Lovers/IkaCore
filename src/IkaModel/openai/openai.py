@@ -128,10 +128,14 @@ def openai_fill_payload(
     }
     _apply_generation_config(payload, model)
 
+    is_zai_endpoint = "api.z.ai/" in str(getattr(model, "api_url", "")).lower()
+    if is_zai_endpoint:
+        payload["thinking"] = {"type": "enabled"}
+
     # reasoning_effort is not supported with function tools on /v1/chat/completions.
     # Keep it only when tools are absent (or when using the Responses API path elsewhere).
     agent_tools = model.agent_tools if agent_tools is None else agent_tools
-    if getattr(model, "reasoning_effort", None) and not agent_tools:
+    if getattr(model, "reasoning_effort", None) and not agent_tools and not is_zai_endpoint:
         payload["reasoning_effort"] = model.reasoning_effort
     if agent_tools:
         _apply_tool_config(payload, model, agent_tools)

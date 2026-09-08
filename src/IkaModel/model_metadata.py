@@ -145,7 +145,7 @@ URL_PROVIDER_CONTAINS = (
 
 URL_PROVIDER_SUFFIXES = (
     ("/v1/responses", "openai_responses"),
-    ("/v1/chat/completions", "openai"),
+    ("/chat/completions", "openai"),
 )
 
 MODEL_COST_ALIASES = {
@@ -157,6 +157,7 @@ MODEL_COST_ALIASES = {
 OPENAI_MAX_COMPLETION_TOKEN_MARKERS = ("gpt-4.1", "gpt-5", "o1", "o3", "o4")
 OPENAI_DEFAULT_TEMPERATURE_ONLY_MARKERS = ("gpt-5", "o1", "o3", "o4")
 OPENAI_CHAT_COMPLETION_OUTPUT_CAPS = (
+    (("glm-5",), 131072),
     (("gpt-4o-mini",), 16384),
     (("gpt-4o",), 16384),
     (("gpt-3.5",), 4096),
