@@ -1,9 +1,10 @@
 # IkaCore runtime development draft
 
 This draft establishes the compatibility requirements for future core-runtime
-work. It contains no imported feature patches or copied experimental code.
-The production runtime remains unchanged while candidate improvements are
-implemented and reviewed individually.
+work. Reviewed framework/test source proposals are captured under
+[`development/v2`](../../development/v2/README.md) for incremental porting.
+No candidate source is imported or installed. The production runtime remains
+unchanged while improvements are implemented and reviewed individually.
 
 ## Compatibility requirements
 
