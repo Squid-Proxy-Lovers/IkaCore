@@ -1,0 +1,2023 @@
+{
+  "baseline_commit": "7be824334b296ba3a43c86f4bb860494aa2a2de6",
+  "exports": {
+    "IkaCore": [
+      "IkaBaseAgent",
+      "IkaStage",
+      "IkaTools",
+      "IkaWorkflow",
+      "WorkflowEdge",
+      "WorkflowNode",
+      "WorkflowResult"
+    ],
+    "IkaMem": [
+      "Memory",
+      "STMemory",
+      "LTMemory",
+      "STMemItem",
+      "LTMemItem",
+      "Storage",
+      "Mem0Store"
+    ],
+    "IkaModel": [
+      "AgentTool",
+      "BareBoneModel",
+      "ToolArgs",
+      "async_api_request_retry",
+      "async_chat",
+      "async_execute_tool",
+      "async_execute_tool_calls",
+      "async_summarise_message_history",
+      "chat",
+      "execute_tool_calls",
+      "get_global_long_term_memory",
+      "get_provider",
+      "init_global_long_term_memory",
+      "summarise_message_history"
+    ]
+  },
+  "signatures": {
+    "IkaCore.IkaBaseAgent": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "description",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "prompt",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "system_prompt",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "start_prompt",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "end_prompt",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tools",
+        "required": false
+      },
+      {
+        "default": "''",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "model_id",
+        "required": false
+      },
+      {
+        "default": "''",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "api_key",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "api_url",
+        "required": false
+      },
+      {
+        "default": "50000",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_tokens",
+        "required": false
+      },
+      {
+        "default": "0.0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "temperature",
+        "required": false
+      },
+      {
+        "default": "True",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "use_responses_api",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "checkpoint",
+        "required": false
+      },
+      {
+        "default": "'checkpoints.db'",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "checkpoint_db_path",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "Stages",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "subagents",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "next_agent",
+        "required": false
+      },
+      {
+        "default": "100",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "maxsteps",
+        "required": false
+      },
+      {
+        "default": "900",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "step_timeout",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "rate_limit_per_min",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "per_tool_rate_limit",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "memory",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "memory_access",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "final_answer_check",
+        "required": false
+      },
+      {
+        "default": "0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "logging_level",
+        "required": false
+      },
+      {
+        "default": "'logs.txt'",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "logging_file",
+        "required": false
+      },
+      {
+        "default": "True",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "show_usage_level0",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "summarize_final",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "use_async",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_tool_rounds",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_tool_calls",
+        "required": false
+      },
+      {
+        "default": "2",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_step_extensions",
+        "required": false
+      },
+      {
+        "default": "3",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "extend_steps_by",
+        "required": false
+      },
+      {
+        "default": "2",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_stage_extensions",
+        "required": false
+      },
+      {
+        "default": "3",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "extend_stage_steps_by",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "reasoning_effort",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaBaseAgent.apply_workflow_stage_wiring": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "stage_wiring",
+        "required": true
+      }
+    ],
+    "IkaCore.IkaBaseAgent.build_simple_tools": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      }
+    ],
+    "IkaCore.IkaBaseAgent.build_stage": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "stage",
+        "required": true
+      }
+    ],
+    "IkaCore.IkaBaseAgent.build_tool_executors": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tools",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "memory_access",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "long_term_filter",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "subagents",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "parent_hierarchy",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "stage",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "stage_index",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "remaining_steps",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaBaseAgent.chat_wrapper": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "barebone_model",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "messages",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_executors",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "logger",
+        "required": false
+      },
+      {
+        "default": "900.0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "timeout",
+        "required": false
+      },
+      {
+        "default": "5",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_tool_rounds",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_tool_calls",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "current_stage_index",
+        "required": false
+      },
+      {
+        "default": "0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "total_stages",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "client",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaBaseAgent.clone_for_run": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "name",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "prompt",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "KEYWORD_ONLY",
+        "name": "include_history",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaBaseAgent.execute_stage": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "stage_index",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "remaining_steps",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "resume_input",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaBaseAgent.execution": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "checkpoint_uid",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "resume_input",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaBaseAgent.final_prompt": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "stage",
+        "required": true
+      }
+    ],
+    "IkaCore.IkaBaseAgent.get_barebone": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "system_prompt",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "agent_tools",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "parent_hierarchy",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "suppress_init_output",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "model_overrides",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "content_prompt_override",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaBaseAgent.geturl": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "model_id",
+        "required": true
+      },
+      {
+        "default": "True",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "use_responses_api",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaBaseAgent.init_short_term_memory": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "embedder_config",
+        "required": true
+      }
+    ],
+    "IkaCore.IkaBaseAgent.inject_workflow_context": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "context",
+        "required": true
+      }
+    ],
+    "IkaCore.IkaBaseAgent.load_checkpoint": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "uid",
+        "required": true
+      }
+    ],
+    "IkaCore.IkaBaseAgent.parse_control_calls": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_calls",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "stage",
+        "required": true
+      },
+      {
+        "default": "0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "current_stage_idx",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "response_content",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaBaseAgent.run_simple": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      }
+    ],
+    "IkaCore.IkaBaseAgent.shutdown": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      }
+    ],
+    "IkaCore.IkaStage": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "prompt",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tools",
+        "required": true
+      },
+      {
+        "default": "100",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "stage_max_step",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "subagents",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "allowed_back_to",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "hitl",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "memory_access",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "long_term_filter",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "checkpoint",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "model_id",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "api_key",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "api_url",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_tokens",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "temperature",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaTools": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "description",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "parameters",
+        "required": true
+      },
+      {
+        "default": "0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "limit_calls",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "required",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "execute_function",
+        "required": false
+      },
+      {
+        "default": "True",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "parallel",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "id",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaTools.execute": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "parameters",
+        "required": true
+      }
+    ],
+    "IkaCore.IkaWorkflow": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "description",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "nodes",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "edges",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "compress_hook",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "start_node",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "async_executor",
+        "required": false
+      },
+      {
+        "default": "30",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_parallel_workers",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaWorkflow.run": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "initial_context",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "use_async",
+        "required": false
+      }
+    ],
+    "IkaCore.IkaWorkflow.run_async": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "initial_context",
+        "required": false
+      }
+    ],
+    "IkaCore.WorkflowEdge": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "source",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "target",
+        "required": true
+      },
+      {
+        "default": "'next'",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "edge_type",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "stage_index",
+        "required": false
+      }
+    ],
+    "IkaCore.WorkflowNode": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "agent",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "stage_wiring",
+        "required": false
+      },
+      {
+        "default": "1",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "instances",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "instance_inputs",
+        "required": false
+      }
+    ],
+    "IkaCore.WorkflowResult": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "final",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "summary",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "history",
+        "required": true
+      },
+      {
+        "default": "<factory>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "child_summaries",
+        "required": false
+      }
+    ],
+    "IkaCore.checkpoint.CheckpointStore": [
+      {
+        "default": "'checkpoints.db'",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "db_path",
+        "required": false
+      }
+    ],
+    "IkaCore.checkpoint.CheckpointStore.delete_checkpoint": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "uid",
+        "required": true
+      }
+    ],
+    "IkaCore.checkpoint.CheckpointStore.load_checkpoint": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "uid",
+        "required": true
+      }
+    ],
+    "IkaCore.checkpoint.CheckpointStore.save_checkpoint": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "scope",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "payload",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "uid",
+        "required": false
+      }
+    ],
+    "IkaMem.LTMemItem": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "agent",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "task",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "expected_output",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "datetime",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "quality",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "metadata",
+        "required": false
+      }
+    ],
+    "IkaMem.LTMemory": [
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "embedder_config",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "storage",
+        "required": false
+      }
+    ],
+    "IkaMem.LTMemory.reset": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      }
+    ],
+    "IkaMem.LTMemory.save": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "value",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "metadata",
+        "required": false
+      }
+    ],
+    "IkaMem.LTMemory.search": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "query",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "limit",
+        "required": false
+      },
+      {
+        "default": "0.6",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "score_threshold",
+        "required": false
+      }
+    ],
+    "IkaMem.Mem0Store": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "memory_type",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "config",
+        "required": false
+      }
+    ],
+    "IkaMem.Mem0Store.reset": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      }
+    ],
+    "IkaMem.Mem0Store.save": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "value",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "metadata",
+        "required": true
+      }
+    ],
+    "IkaMem.Mem0Store.search": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "query",
+        "required": true
+      },
+      {
+        "default": "5",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "limit",
+        "required": false
+      },
+      {
+        "default": "0.6",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "score_threshold",
+        "required": false
+      }
+    ],
+    "IkaMem.Memory": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "storage",
+        "required": true
+      }
+    ],
+    "IkaMem.Memory.reset": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      }
+    ],
+    "IkaMem.Memory.save": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "value",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "metadata",
+        "required": false
+      }
+    ],
+    "IkaMem.Memory.search": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "query",
+        "required": true
+      },
+      {
+        "default": "5",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "limit",
+        "required": false
+      },
+      {
+        "default": "0.6",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "score_threshold",
+        "required": false
+      }
+    ],
+    "IkaMem.STMemItem": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "data",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "agent",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "metadata",
+        "required": false
+      }
+    ],
+    "IkaMem.STMemory": [
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "embedder_config",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "storage",
+        "required": false
+      }
+    ],
+    "IkaMem.STMemory.reset": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      }
+    ],
+    "IkaMem.STMemory.save": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "value",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "metadata",
+        "required": false
+      }
+    ],
+    "IkaMem.STMemory.search": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "query",
+        "required": true
+      },
+      {
+        "default": "5",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "limit",
+        "required": false
+      },
+      {
+        "default": "0.6",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "score_threshold",
+        "required": false
+      }
+    ],
+    "IkaMem.Storage": [],
+    "IkaMem.Storage.reset": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      }
+    ],
+    "IkaMem.Storage.save": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "value",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "metadata",
+        "required": true
+      }
+    ],
+    "IkaMem.Storage.search": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "self",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "query",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "limit",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "score_threshold",
+        "required": true
+      }
+    ],
+    "IkaModel.AgentTool": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "id",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "description",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "args",
+        "required": true
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "required",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "parallel",
+        "required": false
+      },
+      {
+        "default": "0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "limit_calls",
+        "required": false
+      }
+    ],
+    "IkaModel.AgentTool.validate": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name",
+        "required": true
+      }
+    ],
+    "IkaModel.BareBoneModel": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "model_id",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "api_key",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "api_url",
+        "required": true
+      },
+      {
+        "default": "'\\nYou are a member in a complex Agentic system, every behavior you take is to help the system achieve its goals.\\n\\nIMPORTANT: When you have completed your assigned task, you MUST call the agent_end tool with your final answer. \\nDo not continue making tool calls after the task is complete. The agent_end tool signals that you have finished and provides your final output.\\nCRITICAL: MAKE SURE YOUR FINAL ANSWER IS ANSWER THE ORGINAL TASK, MAKE SURE YOUR RESPONSE IS VERY DETAILED AND COMPLETE!\\n'",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "system_prompt",
+        "required": false
+      },
+      {
+        "default": "''",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "content_prompt",
+        "required": false
+      },
+      {
+        "default": "20000",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_tokens",
+        "required": false
+      },
+      {
+        "default": "0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "temperature",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "parallel_tool_calls",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "agent_name",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "agent_hierarchy",
+        "required": false
+      },
+      {
+        "default": "True",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "suppress_init_output",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "reasoning_effort",
+        "required": false
+      },
+      {
+        "default": "True",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "use_responses_api",
+        "required": false
+      },
+      {
+        "default": "True",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "force_control_tool_on_max_tool_calls",
+        "required": false
+      }
+    ],
+    "IkaModel.ToolArgs": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "type",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "description",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "agent",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "data",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "metadata",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "properties",
+        "required": false
+      }
+    ],
+    "IkaModel.async_api_request_retry": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "api_url",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "headers",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "payload",
+        "required": true
+      },
+      {
+        "default": "3",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_retries",
+        "required": false
+      },
+      {
+        "default": "10",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "wait_seconds",
+        "required": false
+      },
+      {
+        "default": "900.0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "timeout",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "client",
+        "required": false
+      }
+    ],
+    "IkaModel.async_chat": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "barebone_model",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "messages",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "message_history",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_executors",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "logger",
+        "required": false
+      },
+      {
+        "default": "900.0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "timeout",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "client",
+        "required": false
+      },
+      {
+        "default": "5",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_tool_rounds",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_tool_calls",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "current_stage_index",
+        "required": false
+      },
+      {
+        "default": "0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "total_stages",
+        "required": false
+      }
+    ],
+    "IkaModel.async_execute_tool": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_name",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_args",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_executors",
+        "required": true
+      },
+      {
+        "default": "900.0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "timeout",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "agent_hierarchy",
+        "required": false
+      },
+      {
+        "default": "0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "step",
+        "required": false
+      }
+    ],
+    "IkaModel.async_execute_tool_calls": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_calls",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_executors",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "provider",
+        "required": true
+      },
+      {
+        "default": "900.0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "timeout",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_metadata",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "agent_hierarchy",
+        "required": false
+      },
+      {
+        "default": "0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "step",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_call_counts",
+        "required": false
+      }
+    ],
+    "IkaModel.async_summarise_message_history": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "barebone_model",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "message_history",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "client",
+        "required": false
+      },
+      {
+        "default": "True",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "use_same_model",
+        "required": false
+      },
+      {
+        "default": "'default'",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "prompt_kind",
+        "required": false
+      },
+      {
+        "default": "True",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "write_to_history",
+        "required": false
+      }
+    ],
+    "IkaModel.chat": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "barebone_model",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "messages",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "message_history",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_executors",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "logger",
+        "required": false
+      },
+      {
+        "default": "900.0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "timeout",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "client",
+        "required": false
+      },
+      {
+        "default": "5",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_tool_rounds",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "max_tool_calls",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "current_stage_index",
+        "required": false
+      },
+      {
+        "default": "0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "total_stages",
+        "required": false
+      }
+    ],
+    "IkaModel.execute_tool_calls": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_calls",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_executors",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "provider",
+        "required": true
+      },
+      {
+        "default": "900.0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "timeout",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_metadata",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "agent_hierarchy",
+        "required": false
+      },
+      {
+        "default": "0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "step",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "tool_call_counts",
+        "required": false
+      }
+    ],
+    "IkaModel.get_global_long_term_memory": [],
+    "IkaModel.get_provider": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "model_id",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "api_url",
+        "required": false
+      },
+      {
+        "default": "True",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "use_responses_api",
+        "required": false
+      }
+    ],
+    "IkaModel.init_global_long_term_memory": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "embedder_config",
+        "required": true
+      },
+      {
+        "default": "10",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "search_limit",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "filter_func",
+        "required": false
+      }
+    ],
+    "IkaModel.summarise_message_history": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "barebone_model",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "message_history",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "client",
+        "required": false
+      }
+    ]
+  }
+}

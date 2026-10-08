@@ -64,6 +64,11 @@ Supported live smoke variables:
 
 ## Current Cleanup Priorities
 
+The [IkaCore v2 core-runtime consolidation draft](docs/v2/README.md) records the
+unmerged runtime proposals and the compatibility gates for porting them. Existing
+public call shapes/defaults and v1 checkpoint databases must remain compatible;
+run `pytest src/IkaTest/test_v2_compatibility.py` when integrating v2 work.
+
 - keep `python scripts/quality.py` passing
 - keep packaging metadata and docs accurate
 - add regression tests for behavior changes before modifying provider logic
