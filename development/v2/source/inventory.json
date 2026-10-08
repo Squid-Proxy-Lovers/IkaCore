@@ -495,7 +495,8 @@
       "experimental_general_execution/src/IkaGeneral/models.py.txt",
       "experimental_general_execution/src/IkaGeneral/subagent_ops.py.txt",
       "experimental_general_execution/src/IkaTest/test_ika_general_ccp_context.py.txt",
-      "experimental_general_execution/src/IkaTest/test_ika_general_execution_trace.py.txt"
+      "experimental_general_execution/src/IkaTest/test_ika_general_execution_trace.py.txt",
+      "experimental_general_execution/src/IkaGeneral/planning.md.txt"
     ],
     "status": "out of core integration scope; generic library reference only",
     "digests": [
@@ -550,6 +551,43 @@
       {
         "file": "experimental_general_execution/src/IkaTest/test_ika_general_execution_trace.py.txt",
         "sha256": "25dfeabd4bcf6d03dba55d965a375ce9ffe15906a325b2db7448c088a9b9cc29"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/planning.md.txt",
+        "sha256": "b189fa19a6076451bbed79eb1c21f204e263035167f13b3e4987f5f63ee8aeca"
+      }
+    ]
+  },
+  {
+    "feature": "context_recovery",
+    "files": [
+      "context_recovery/src/IkaModel/chat_interface/chat_interface.py.txt",
+      "context_recovery/src/IkaModel/prompts/force_answer_system.txt.txt",
+      "context_recovery/src/IkaModel/prompts/what_remains_system.txt.txt",
+      "context_recovery/src/IkaModel/summarization.py.txt",
+      "context_recovery/src/IkaTest/test_context_fallback_async.py.txt"
+    ],
+    "status": "reference source, pending port and review",
+    "digests": [
+      {
+        "file": "context_recovery/src/IkaModel/chat_interface/chat_interface.py.txt",
+        "sha256": "a47d66e66732c2b61543ea8066cc00e5053001d8be859f9b42ebe19d6ac0a904"
+      },
+      {
+        "file": "context_recovery/src/IkaModel/prompts/force_answer_system.txt.txt",
+        "sha256": "b29c1b39f1f5502f3bf01db537ac63f71623fe53123ba914bd3e3420e2b7d87f"
+      },
+      {
+        "file": "context_recovery/src/IkaModel/prompts/what_remains_system.txt.txt",
+        "sha256": "1af8ffcc1609de15140d523ccd871590b8d3c495c6bc8b4f7abdabd37ff00bce"
+      },
+      {
+        "file": "context_recovery/src/IkaModel/summarization.py.txt",
+        "sha256": "cd24811fd9e620e4ec4254807b58d6fbd319c8dcdf1a905e2e49d8919cefb8c0"
+      },
+      {
+        "file": "context_recovery/src/IkaTest/test_context_fallback_async.py.txt",
+        "sha256": "998e737e85c30cbc48dae06bcd0fc088114e249fc0aa2fe3f9561b23550293f3"
       }
     ]
   }

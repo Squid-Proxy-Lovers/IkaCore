@@ -7,7 +7,7 @@ IkaCore package. Their presence is not a claim that they have been ported or tha
 their behavior is backward-compatible.
 
 `source/inventory.json` lists the feature groups, files, review status, and content
-digests. All 98 Python/reference files were selected from framework/test paths;
+digests. All 104 reference files were selected from framework/test paths;
 Python sources parse successfully and the captured directory has zero Gitleaks
 v8.30.1 default-rule candidates. A scanner cannot certify the absence of every
 secret or decide whether code is confidential.
@@ -18,6 +18,7 @@ Included core proposals:
 - Run/frame snapshots, pause/resume, restart/fork, and compaction.
 - Parent-chain checkpoints, entry checkpoints, tool handling, and diagnostics.
 - Provider/history replay, transport, retries, and workflow scheduling proposals.
+- Additional context-window recovery logic, prompts, and async fallback tests.
 
 Generic general-execution library source is isolated under
 `experimental_general_execution` as review material. It is outside the initial
