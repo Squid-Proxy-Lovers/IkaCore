@@ -208,8 +208,11 @@ class AgentRuntimeUtilityMixin:
         if self.use_async:
             return self.client
         if self.client is None:
-            import httpx
-            self.client = httpx.Client(timeout=self.step_timeout)
+            from IkaModel.request_transport import new_sync_client
+            from IkaModel.runtime_policy import current_runtime_options
+            if current_runtime_options().reuse_connections:
+                return None
+            self.client = new_sync_client(self.step_timeout)
         return self.client
 
     def _enforce_rate_limit(self, per_minute: Optional[float], last_ts_attr: str) -> None:
@@ -220,7 +223,8 @@ class AgentRuntimeUtilityMixin:
         last_ts = getattr(self, last_ts_attr, 0.0)
         elapsed = now - last_ts
         if elapsed < interval:
-            time.sleep(interval - elapsed)
+            from IkaModel.request_lifecycle import sleep_with_controls
+            sleep_with_controls(interval - elapsed, time.sleep)
         setattr(self, last_ts_attr, time.time())
 
     def _enforce_rate_limit_model(self: _RuntimeUtilityState) -> None:

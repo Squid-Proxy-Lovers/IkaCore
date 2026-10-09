@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional, Set, cast
 
 from IkaCore.agents import IkaBaseAgent
 from IkaModel.chat_interface.chat_interface import summarise_message_history
+from IkaModel.runtime_errors import IkaRequestControlError
+from IkaModel.runtime_policy import current_runtime_options
 
 from .workflow_types import WorkflowNode, WorkflowResult, WorkflowStateProtocol
 
@@ -126,6 +128,9 @@ class WorkflowContextMixin(WorkflowGraphMixin):
         merged = "\n\n".join([c for c in contexts if c]) if contexts else ""
         if not merged:
             return ""
+        threshold = current_runtime_options().summary_context_threshold
+        if threshold is not None and max(1, len(merged) // 4) <= threshold:
+            return merged
         try:
             barebone = cast(Any, agent).get_barebone(agent.system_prompt or agent.description or agent.prompt, [])
             history = {
@@ -136,7 +141,9 @@ class WorkflowContextMixin(WorkflowGraphMixin):
             }
             summary = summarise_message_history(barebone, history)
             return summary or merged
-        except (RuntimeError, ValueError, TypeError, KeyError):
+        except (RuntimeError, ValueError, TypeError, KeyError) as error:
+            if isinstance(error, IkaRequestControlError):
+                raise
             return merged
 
     def _apply_stage_wiring(self, node: WorkflowNode) -> None:
@@ -144,6 +151,12 @@ class WorkflowContextMixin(WorkflowGraphMixin):
             node.agent.apply_workflow_stage_wiring(node.stage_wiring)
 
     def _prepare_context(self: WorkflowStateProtocol, node: WorkflowNode, upstream: List[str]) -> str:
+        options = current_runtime_options()
+        if options.dataflow_workflows or options.preserve_workflow_prompts or options.summary_context_threshold is not None:
+            from .workflow_context_cache import compress_once
+            if upstream and node.name == self.start_node and upstream == [getattr(self, "_initial_context", None)]:
+                return upstream[0]
+            return compress_once(self, node, upstream) if upstream else ""
         return self.compress_hook(upstream, node.agent) if upstream else ""
 
 

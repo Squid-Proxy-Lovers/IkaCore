@@ -1,6 +1,7 @@
 """Public workflow API."""
 
 # pyright: strict
+# pyright: reportPrivateUsage=false
 
 from __future__ import annotations
 
@@ -8,10 +9,12 @@ from typing import Dict, List, Optional, Set
 
 from .workflow_async import WorkflowAsyncExecutionMixin
 from .workflow_async_executor import AsyncWorkflowExecutor
+from .workflow_context_cache import reset_context_cache
+from .workflow_snapshots import WorkflowSnapshotMixin
 from .workflow_types import WorkflowCompressionHook, WorkflowEdge, WorkflowNode, WorkflowResult
 
 
-class IkaWorkflow(WorkflowAsyncExecutionMixin):
+class IkaWorkflow(WorkflowSnapshotMixin, WorkflowAsyncExecutionMixin):
     def __init__(
         self,
         name: str,
@@ -48,16 +51,27 @@ class IkaWorkflow(WorkflowAsyncExecutionMixin):
         self._next_reachable_nodes: Set[str] = self._compute_next_reachable_nodes()
 
     def run(self, initial_context: Optional[str] = None, use_async: bool = False) -> Dict[str, WorkflowResult]:
-        if use_async:
-            return self.run_async(initial_context)
+        if self._workflow_snapshot is not None:
+            return self._snapshot_run(lambda: run_workflow(self, initial_context, use_async), initial_context, use_async)
+        return run_workflow(self, initial_context, use_async)
 
-        upstream_contexts: Dict[str, List[str]] = {}
-        if initial_context:
-            upstream_contexts[self.start_node] = [initial_context]
-        self._results = {}
-        self._visiting = set()
-        self._run_node(self.start_node, upstream_contexts)
-        return self._results
+
+def run_workflow(self: IkaWorkflow, initial_context: Optional[str], use_async: bool) -> Dict[str, WorkflowResult]:
+    reset_context_cache(self, initial_context)
+    if use_async:
+        return self.run_async(initial_context)
+    from IkaModel.runtime_policy import current_runtime_options
+    if current_runtime_options().dataflow_workflows:
+        from .workflow_sync_dataflow import run_sync_dataflow
+        return run_sync_dataflow(self, initial_context)
+
+    upstream_contexts: Dict[str, List[str]] = {}
+    if initial_context:
+        upstream_contexts[self.start_node] = [initial_context]
+    self._results = {}
+    self._visiting = set()
+    self._run_node(self.start_node, upstream_contexts)
+    return self._results
 
 
 __all__ = [

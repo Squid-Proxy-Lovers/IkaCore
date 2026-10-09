@@ -6,6 +6,7 @@ import concurrent.futures
 from typing import Any, Dict, List, Optional, Set
 
 from IkaCore.cli_output import get_cli_output
+from IkaModel.runtime_policy import current_runtime_options
 
 from .workflow_core import WorkflowNodeExecutionMixin
 from .workflow_types import WorkflowNode, WorkflowResult, WorkflowStateProtocol
@@ -220,11 +221,21 @@ class WorkflowAsyncResultMixin(WorkflowAsyncActivationMixin):
 
 class WorkflowAsyncExecutionMixin(WorkflowAsyncResultMixin):
     def run_async(self: WorkflowStateProtocol, initial_context: Optional[str] = None) -> Dict[str, WorkflowResult]:
+        from .workflow_context_cache import reset_context_cache
+        reset_context_cache(self, initial_context)
         upstream_contexts, ready_nodes, completed_nodes, pending_nodes, node_futures = self._initial_async_state(
             initial_context
         )
         cli = get_cli_output()
         self._start_async_cli(cli)
+
+        if current_runtime_options().dataflow_workflows:
+            from .workflow_dataflow import DataflowRun
+            try:
+                DataflowRun(self, upstream_contexts, ready_nodes, completed_nodes, pending_nodes, initial_context, cli).run()
+                return self._results
+            finally:
+                self._finish_async_cli(cli)
 
         while ready_nodes or any(node_futures.values()):
             current_futures = self._schedule_ready_async_nodes(

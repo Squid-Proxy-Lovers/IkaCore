@@ -16,6 +16,11 @@ __all__ = [
     "get_provider",
     "init_global_long_term_memory",
     "summarise_message_history",
+    "request_controls",
+    "RuntimeOptions",
+    "runtime_options",
+    "IkaRequestCancelled",
+    "IkaRequestDeadlineExceeded",
 ]
 
 _EXPORTS: dict[str, tuple[str, str]] = {
@@ -33,6 +38,11 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "async_execute_tool_calls": ("IkaModel.chat_interface.chat_interface", "async_execute_tool_calls"),
     "async_execute_tool": ("IkaModel.chat_interface.chat_interface", "async_execute_tool"),
     "async_api_request_retry": ("IkaModel.chat_interface.chat_interface", "async_api_request_retry"),
+    "request_controls": ("IkaModel.request_control", "request_controls"),
+    "RuntimeOptions": ("IkaModel.runtime_policy", "RuntimeOptions"),
+    "runtime_options": ("IkaModel.runtime_policy", "runtime_options"),
+    "IkaRequestCancelled": ("IkaModel.runtime_errors", "IkaRequestCancelled"),
+    "IkaRequestDeadlineExceeded": ("IkaModel.runtime_errors", "IkaRequestDeadlineExceeded"),
 }
 
 

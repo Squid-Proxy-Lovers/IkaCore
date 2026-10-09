@@ -8,6 +8,7 @@ import time
 from typing import Any, Optional
 
 from IkaCore.execution_types import AgentChatTurn, SimpleRuntimeContext
+from IkaModel.execution_hooks import emit_boundary
 
 from .agent_runtime_stage_execution import StageExecutionRuntimeMixin
 
@@ -145,6 +146,7 @@ class SimpleIterationMixin(SimpleProgressMixin):
         step_num: int,
     ) -> tuple[int, float]:
         current_step = step_num + 1
+        emit_boundary("step_entry", {"remaining_steps": self.maxsteps - step_num})
         cli.set_step(self.name, current_step)
         if step_num == 0:
             cli.agent_init(

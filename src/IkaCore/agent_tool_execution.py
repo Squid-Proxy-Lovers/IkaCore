@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 from IkaCore.agent_runtime_payloads import JsonDict, history_section
 from IkaCore.stages import IkaStage
+from IkaCore.tool_runtime_metadata import runtime_executor
 from IkaCore.tools import IkaTools, ToolExecutor, ToolParameters
 
 if TYPE_CHECKING:
@@ -259,7 +260,7 @@ class ExplicitToolExecutorMixin(ControlToolExecutorMixin):
                 continue
             execute_function = getattr(tool, "execute_function", None)
             if execute_function:
-                tool_executors[tool_name] = execute_function
+                tool_executors[tool_name] = runtime_executor(tool, execute_function)
 
         return tool_executors
 

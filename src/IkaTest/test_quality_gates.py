@@ -71,6 +71,9 @@ STRICT_TYPE_DIRECTIVE = "# pyright: strict"
 STRICT_HEADER_LINES = 20
 
 KNOWN_BROAD_EXCEPTION_BOUNDARIES = Counter({
+    # Snapshot instrumentation records failures and re-raises every exception.
+    ("src/IkaModel/execution_hooks.py", "invoke_tool"): 1,
+    ("src/IkaModel/execution_hooks.py", "invoke_async_tool"): 1,
     ("src/IkaCore/agent_memory.py", "LongTermAgentMemorySaveMixin._save_to_long_term"): 1,
     ("src/IkaCore/agent_memory.py", "LongTermAgentMemorySearchMixin._search_long_term"): 2,
     ("src/IkaCore/agent_memory.py", "ShortTermAgentMemoryMixin._save_to_short_term"): 1,

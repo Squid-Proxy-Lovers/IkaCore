@@ -15,6 +15,12 @@ from IkaCore.agent_runtime_payloads import JsonDict
 from IkaCore.cli_output import get_cli_output
 
 from ..base import AgentEndException, HumanInputRequired
+from ..execution_hooks import hooks_enabled, invoke_async_tool, invoke_tool
+from ..request_control import check_request_controls, effective_timeout
+from ..request_lifecycle import await_with_controls
+from ..runtime_errors import IkaRequestControlError
+from ..tool_output import truncate_tool_result
+from ..worker_context import run_in_executor_with_controls
 from .tool_execution_sync import (
     ToolCallBatchResult,
     ToolCallPlan,
@@ -35,6 +41,7 @@ async def async_execute_tool(
     agent_hierarchy: Optional[list[str]] = None,
     step: int = 0
 ) -> str:
+    check_request_controls()
     LOG.debug(f"[TOOL START] Executing tool '{tool_name}' (async)")
     cli = get_cli_output()
     hierarchy = list(agent_hierarchy or []) + [tool_name]
@@ -54,31 +61,36 @@ async def async_execute_tool(
         return json.dumps({"error": error_msg})
 
     executor_fn = tool_executors[tool_name]
+    tool_timeout = getattr(executor_fn, "__tool_timeout__", timeout)
     cli.tool_call(tool_name, validated_args, hierarchy, step)
 
     try:
         loop = asyncio.get_event_loop()
         if inspect.iscoroutinefunction(executor_fn):
-            result = await asyncio.wait_for(executor_fn(validated_args), timeout=timeout)
+            result = await await_with_controls(lambda: asyncio.wait_for(
+                invoke_async_tool(executor_fn, validated_args, tool_name, getattr(executor_fn, "__ika_runtime_metadata__", {}))
+                if hooks_enabled() else executor_fn(validated_args), timeout=effective_timeout(tool_timeout)))
         else:
-            result = await asyncio.wait_for(
-                loop.run_in_executor(None, executor_fn, validated_args),
-                timeout=timeout
-            )
+            result = await await_with_controls(lambda: asyncio.wait_for(
+                run_in_executor_with_controls(loop, invoke_tool, executor_fn, validated_args, tool_name,
+                                              getattr(executor_fn, "__ika_runtime_metadata__", {}))
+                if hooks_enabled() else run_in_executor_with_controls(loop, executor_fn, validated_args),
+                timeout=effective_timeout(tool_timeout)
+            ))
 
-        result_str = result if isinstance(result, str) else json.dumps(result)
+        result_str = truncate_tool_result(result if isinstance(result, str) else json.dumps(result), tool_name)
         cli.tool_result(tool_name, result_str, hierarchy, step)
 
         LOG.debug(f"[TOOL END] Finished tool '{tool_name}' (async)")
-        if isinstance(result, str):
-            return result
-        return json.dumps(result)
+        return result_str
     except AgentEndException:
         raise
     except HumanInputRequired:
         raise
+    except IkaRequestControlError:
+        raise
     except asyncio.TimeoutError:
-        timeout_msg = f"Tool '{tool_name}' execution timed out after {timeout}s"
+        timeout_msg = f"Tool '{tool_name}' execution timed out after {tool_timeout}s"
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
         LOG.warning(timeout_msg)
         return json.dumps({"error": timeout_msg})
@@ -114,6 +126,8 @@ async def _execute_parallel_tool_plan_async(
         tool_name = plan.parallel_calls[i][0] if i < len(plan.parallel_calls) else ""
         tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
         if isinstance(result, Exception):
+            if isinstance(result, IkaRequestControlError):
+                raise result
             if isinstance(result, AgentEndException):
                 raise result
             if isinstance(result, HumanInputRequired):

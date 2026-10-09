@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from IkaCore.agents import IkaBaseAgent as IkaBaseAgent
+    from IkaCore.runtime_control import RuntimeControl as RuntimeControl
+    from IkaCore.snapshot_store import SnapshotStore as SnapshotStore
     from IkaCore.stages import IkaStage as IkaStage
     from IkaCore.tools import IkaTools as IkaTools
     from IkaCore.workflow import IkaWorkflow as IkaWorkflow
@@ -20,6 +22,8 @@ __all__ = [
     "WorkflowEdge",
     "WorkflowNode",
     "WorkflowResult",
+    "SnapshotStore",
+    "RuntimeControl",
 ]
 
 _EXPORTS: dict[str, tuple[str, str]] = {
@@ -30,6 +34,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "WorkflowEdge": ("IkaCore.workflow", "WorkflowEdge"),
     "WorkflowNode": ("IkaCore.workflow", "WorkflowNode"),
     "WorkflowResult": ("IkaCore.workflow", "WorkflowResult"),
+    "SnapshotStore": ("IkaCore.snapshot_store", "SnapshotStore"),
+    "RuntimeControl": ("IkaCore.runtime_control", "RuntimeControl"),
 }
 
 

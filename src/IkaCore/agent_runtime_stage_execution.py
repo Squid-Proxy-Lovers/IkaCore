@@ -135,6 +135,8 @@ class StageExecutionRuntimeMixin(StageExecutionStepMixin):
         step_limit = runtime.step_limit
         extension_count = 0
         while used_steps < step_limit:
+            from IkaModel.execution_hooks import emit_boundary
+            emit_boundary("step_entry", {"remaining_steps": remaining_steps - used_steps})
             turn, step_start = self._run_stage_turn(runtime, stage_index)
             last_content = turn.last_content
             used_steps += 1

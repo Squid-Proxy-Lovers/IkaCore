@@ -220,6 +220,10 @@ class SimpleExecutionDispatchMixin(StagedExecutionDispatchMixin):
             "summary": {"message": "", "tokens": 0},
             "messages": {},
         }
+        from IkaModel.runtime_policy import current_runtime_options
+        if current_runtime_options().preserve_workflow_prompts:
+            next_agent.message_history["first_input"]["message"] = ""
+            next_agent.inject_workflow_context(summary, label="Previous agent summary:")
         return next_agent.execution()
 
     def _run_simple_final_output(self) -> JsonDict:

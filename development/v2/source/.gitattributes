@@ -1,0 +1,2 @@
+# Reference text retains original source formatting for review.
+*.txt -whitespace

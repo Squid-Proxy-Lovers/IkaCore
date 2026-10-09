@@ -18,7 +18,7 @@ _MODEL_METADATA_RESOURCE = "data/model_metadata.json"
 
 def _load_model_metadata() -> dict[str, Any]:
     try:
-        from src.resources import read_text as read_ika_resource
+        from .resource_loader import read_embedded_resource as read_ika_resource
 
         raw = read_ika_resource(f"IkaCore/src/IkaModel/{_MODEL_METADATA_RESOURCE}")
     except (ImportError, ModuleNotFoundError, OSError):

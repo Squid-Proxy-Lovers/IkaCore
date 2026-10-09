@@ -60,6 +60,7 @@ print(result["final_message"])
 
 - [Usage Guide](docs/USAGE.md)
 - [Architecture Notes](docs/indepth.md)
+- [IkaCore v2 draft: opt-in runtime features and compatibility](docs/v2/README.md)
 - [Memory Notes](src/IkaMem/docs/README.md)
 
 Codex support is documented in the [Provider Selection](docs/USAGE.md#provider-selection) section. IkaCore treats Codex auth as opt-in: pass a bearer token as `api_key`, or call `IkaModel.codex.codex_auth.get_bearer()` to read and refresh the Codex CLI token from `~/.codex/auth.json`.

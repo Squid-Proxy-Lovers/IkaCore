@@ -14,6 +14,8 @@ import httpx
 
 from IkaCore.agent_runtime_payloads import JsonDict, json_dict, string_value
 
+from ..request_control import check_request_controls
+
 LOG = logging.getLogger(__name__)
 
 _RETRYABLE_STREAM_ERROR_IDENTIFIERS = frozenset({
@@ -78,6 +80,7 @@ def iter_sse(
     """Yield an explicit event name and parsed JSON for each SSE data line."""
     current_event: Optional[str] = None
     for line in response.iter_lines():
+        check_request_controls()
         if not line:
             current_event = None
             continue

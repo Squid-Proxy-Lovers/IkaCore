@@ -14,7 +14,24 @@ import httpx
 from IkaCore.agent_runtime_payloads import JsonDict, string_value
 from IkaCore.cli_output import OutputType, get_cli_output
 
+from .api_errors import IkaAPIError as IkaAPIError
+from .api_errors import IkaHTTPError as IkaHTTPError
+from .api_errors import IkaRateLimitError as IkaRateLimitError
+from .api_errors import IkaTimeoutError as IkaTimeoutError
 from .model_metadata import get_max_tokens_for_model, get_provider_for_model
+from .request_control import check_request_controls, effective_max_retries, request_lifecycle_active
+from .request_control import register_request_abort_callback as register_request_abort_callback
+from .request_control import request_cancelled as request_cancelled
+from .request_control import request_controls as request_controls
+from .request_control import set_request_abort_registrar as set_request_abort_registrar
+from .request_control import set_request_cancel_checker as set_request_cancel_checker
+from .request_control import set_request_max_retries as set_request_max_retries
+from .request_lifecycle import async_sleep_with_controls, await_with_controls, sleep_with_controls
+from .request_transport import controlled_async_post, controlled_post, new_async_client
+from .runtime_errors import IkaRequestCancelled as IkaRequestCancelled
+from .runtime_errors import IkaRequestControlError
+from .runtime_errors import IkaRequestDeadlineExceeded as IkaRequestDeadlineExceeded
+from .runtime_policy import current_runtime_options
 
 LOG = logging.getLogger(__name__)
 
@@ -38,24 +55,6 @@ _RETRYABLE_UNEXPECTED_EXCEPTIONS = (RuntimeError, ValueError, TypeError, OSError
 def _is_codex_endpoint(api_url: Optional[str]) -> bool:
     """Recognize both the upstream Codex URL and an audit-scoped gateway."""
     return bool(api_url and "/backend-api/codex/" in api_url.lower())
-
-
-class IkaAPIError(RuntimeError):
-    def __init__(self, message: str, status_code: Optional[int] = None):
-        super().__init__(message)
-        self.status_code = status_code
-
-
-class IkaRateLimitError(IkaAPIError):
-    pass
-
-
-class IkaTimeoutError(IkaAPIError):
-    pass
-
-
-class IkaHTTPError(IkaAPIError):
-    pass
 
 
 def _int_value(value: object) -> int:
@@ -175,7 +174,10 @@ def _response_retry_delay_and_error(
     wait_seconds: int,
     attempt: int,
     max_retries: int,
-) -> tuple[int, IkaAPIError]:
+) -> tuple[float, IkaAPIError]:
+    if current_runtime_options().modern_retries:
+        from .modern_retry import response_delay
+        return response_delay(response, attempt, max_retries)
     if _is_rate_limit_error(response):
         wait_time, used_retry_after = _rate_limit_wait_time(response, wait_seconds, attempt)
         _warn_rate_limit(response, wait_time, used_retry_after, attempt, max_retries)
@@ -210,16 +212,22 @@ def _response_retry_delay_and_error(
     )
 
 
-def _timeout_retry_delay_and_error(timeout: float, wait_seconds: int, attempt: int, max_retries: int) -> tuple[int, IkaTimeoutError]:
+def _timeout_retry_delay_and_error(timeout: float, wait_seconds: int, attempt: int, max_retries: int) -> tuple[float, IkaTimeoutError]:
     timeout_msg = f"API request timed out after {timeout}s (attempt {attempt + 1}/{max_retries})"
     LOG.warning(timeout_msg)
     if attempt < max_retries - 1:
+        if current_runtime_options().modern_retries:
+            from .modern_retry import exception_delay
+            return exception_delay(attempt), IkaTimeoutError(timeout_msg)
         return wait_seconds, IkaTimeoutError(timeout_msg)
     raise IkaTimeoutError(timeout_msg)
 
 
-def _http_retry_delay_and_error(error: httpx.HTTPError, wait_seconds: int, attempt: int, max_retries: int) -> tuple[int, IkaHTTPError]:
+def _http_retry_delay_and_error(error: httpx.HTTPError, wait_seconds: int, attempt: int, max_retries: int) -> tuple[float, IkaHTTPError]:
     if attempt < max_retries - 1:
+        if current_runtime_options().modern_retries:
+            from .modern_retry import exception_delay
+            return exception_delay(attempt), IkaHTTPError("provider transport failure")
         LOG.warning(
             f"HTTP error during API request (attempt {attempt + 1}/{max_retries}): {error}. "
             f"Retrying in {wait_seconds} seconds..."
@@ -228,7 +236,9 @@ def _http_retry_delay_and_error(error: httpx.HTTPError, wait_seconds: int, attem
     raise IkaHTTPError(f"HTTP error after {max_retries} attempts: {str(error)}")
 
 
-def _unexpected_retry_delay_and_error(error: Exception, wait_seconds: int, attempt: int, max_retries: int) -> tuple[int, Exception]:
+def _unexpected_retry_delay_and_error(error: Exception, wait_seconds: int, attempt: int, max_retries: int) -> tuple[float, Exception]:
+    if current_runtime_options().modern_retries and not isinstance(error, OSError):
+        raise error
     if attempt < max_retries - 1:
         LOG.warning(
             f"Unexpected error during API request (attempt {attempt + 1}/{max_retries}): {error}. "
@@ -366,6 +376,8 @@ def api_request_retry(
     timeout: float = 900.0,
     client: Optional[httpx.Client] = None,
 ) -> httpx.Response:
+    check_request_controls()
+    max_retries = effective_max_retries(max_retries)
     # codex backend forces streaming (rejects stream:false). Dispatch into the
     # codex client, which drains the SSE stream and returns a Response-shaped
     # shim so callers continue to call .json() / .status_code as usual.
@@ -389,8 +401,8 @@ def api_request_retry(
             if debug_enabled:
                 _log_http_request("HTTPX", api_url, headers, payload, attempt, max_retries)
 
-            post = client.post if client is not None else httpx.post
-            response = post(api_url, headers=headers, json=payload, timeout=timeout)
+            check_request_controls()
+            response = controlled_post(api_url, headers, payload, timeout, client)
 
             if debug_enabled:
                 _log_http_response("HTTPX", response)
@@ -399,19 +411,25 @@ def api_request_retry(
                 return response
 
             delay, last_exception = _response_retry_delay_and_error(response, wait_seconds, attempt, max_retries)
-            time.sleep(delay)
+            sleep_with_controls(delay, time.sleep)
+
+        except IkaRequestControlError:
+            raise
 
         except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout):
             delay, last_exception = _timeout_retry_delay_and_error(timeout, wait_seconds, attempt, max_retries)
-            time.sleep(delay)
+            check_request_controls()
+            sleep_with_controls(delay, time.sleep)
 
         except httpx.HTTPError as e:
             delay, last_exception = _http_retry_delay_and_error(e, wait_seconds, attempt, max_retries)
-            time.sleep(delay)
+            check_request_controls()
+            sleep_with_controls(delay, time.sleep)
 
         except _RETRYABLE_UNEXPECTED_EXCEPTIONS as e:
             delay, last_exception = _unexpected_retry_delay_and_error(e, wait_seconds, attempt, max_retries)
-            time.sleep(delay)
+            check_request_controls()
+            sleep_with_controls(delay, time.sleep)
 
     if last_exception:
         raise last_exception
@@ -428,11 +446,17 @@ async def async_api_request_retry(
     timeout: float = 900.0,
     client: Optional[httpx.AsyncClient] = None
 ) -> httpx.Response:
+    check_request_controls()
+    max_retries = effective_max_retries(max_retries)
     # codex backend requires streaming — defer to the sync codex client via a
     # threadpool. We don't have an async SSE collector yet; running the sync
     # path off-loop avoids blocking the event loop in async callers.
     if _is_codex_endpoint(api_url):
         from .codex.chat_helpers_codex import request_codex
+        if request_lifecycle_active():
+            return cast(httpx.Response, await await_with_controls(
+                lambda: asyncio.to_thread(request_codex, api_url, headers, payload, timeout, max_retries, wait_seconds)
+            ))
         return cast(
             httpx.Response,
             await asyncio.to_thread(
@@ -440,46 +464,58 @@ async def async_api_request_retry(
             ),
         )
 
-    last_exception = None
     should_close_client = client is None
-    debug_enabled = LOG.isEnabledFor(logging.DEBUG)
-
     if client is None:
-        client = httpx.AsyncClient(timeout=timeout)
-
+        client = new_async_client(timeout)
     try:
-        for attempt in range(max_retries):
-            try:
-                if debug_enabled:
-                    _log_http_request("HTTPX ASYNC", api_url, headers, payload, attempt, max_retries)
-
-                response = await client.post(api_url, headers=headers, json=payload)
-
-                if debug_enabled:
-                    _log_http_response("HTTPX ASYNC", response)
-
-                if response.status_code == 200:
-                    return response
-
-                delay, last_exception = _response_retry_delay_and_error(response, wait_seconds, attempt, max_retries)
-                await asyncio.sleep(delay)
-
-            except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout):
-                delay, last_exception = _timeout_retry_delay_and_error(timeout, wait_seconds, attempt, max_retries)
-                await asyncio.sleep(delay)
-
-            except httpx.HTTPError as e:
-                delay, last_exception = _http_retry_delay_and_error(e, wait_seconds, attempt, max_retries)
-                await asyncio.sleep(delay)
-
-            except _RETRYABLE_UNEXPECTED_EXCEPTIONS as e:
-                delay, last_exception = _unexpected_retry_delay_and_error(e, wait_seconds, attempt, max_retries)
-                await asyncio.sleep(delay)
-
-        if last_exception:
-            raise last_exception
-
-        raise IkaAPIError(f"API request failed after {max_retries} attempts")
+        return await _async_retry_loop(api_url, headers, payload, timeout, client, max_retries, wait_seconds)
     finally:
         if should_close_client:
             await client.aclose()
+
+
+async def _async_retry_loop(
+    api_url: str, headers: dict[str, str], payload: JsonDict, timeout: float,
+    client: httpx.AsyncClient, max_retries: int, wait_seconds: int,
+) -> httpx.Response:
+    last_exception = None
+    debug_enabled = LOG.isEnabledFor(logging.DEBUG)
+    for attempt in range(max_retries):
+        try:
+            if debug_enabled:
+                _log_http_request("HTTPX ASYNC", api_url, headers, payload, attempt, max_retries)
+
+            check_request_controls()
+            response = await controlled_async_post(api_url, headers, payload, timeout, client)
+
+            if debug_enabled:
+                _log_http_response("HTTPX ASYNC", response)
+
+            if response.status_code == 200:
+                return response
+
+            delay, last_exception = _response_retry_delay_and_error(response, wait_seconds, attempt, max_retries)
+            await async_sleep_with_controls(delay, asyncio.sleep)
+
+        except IkaRequestControlError:
+            raise
+
+        except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout):
+            delay, last_exception = _timeout_retry_delay_and_error(timeout, wait_seconds, attempt, max_retries)
+            check_request_controls()
+            await async_sleep_with_controls(delay, asyncio.sleep)
+
+        except httpx.HTTPError as e:
+            delay, last_exception = _http_retry_delay_and_error(e, wait_seconds, attempt, max_retries)
+            check_request_controls()
+            await async_sleep_with_controls(delay, asyncio.sleep)
+
+        except _RETRYABLE_UNEXPECTED_EXCEPTIONS as e:
+            delay, last_exception = _unexpected_retry_delay_and_error(e, wait_seconds, attempt, max_retries)
+            check_request_controls()
+            await async_sleep_with_controls(delay, asyncio.sleep)
+
+    if last_exception:
+        raise last_exception
+
+    raise IkaAPIError(f"API request failed after {max_retries} attempts")

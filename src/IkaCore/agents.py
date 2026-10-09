@@ -8,9 +8,11 @@ from IkaCore.agent_helper_support import RawFinalAnswerCheck
 from IkaCore.agent_helpers import AgentHelpersMixin
 from IkaCore.agent_initialization import AgentInitializationMixin
 from IkaCore.agent_memory import AgentMemoryMixin
+from IkaCore.agent_snapshots import AgentSnapshotReplayMixin
 from IkaCore.agent_tools import AgentToolsMixin
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
+from IkaModel.chat_interface.chat_interface import summarise_message_history as summarise_message_history
 
 
 @dataclass
@@ -107,7 +109,8 @@ def _initialize_base_agent(agent: "IkaBaseAgent", config: _AgentConstructorConfi
     )
 
 
-class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, AgentHelpersMixin, AgentInitializationMixin):
+class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, AgentHelpersMixin, AgentInitializationMixin,
+                   AgentSnapshotReplayMixin):
     def __init__(
         self,
         name: str, description: str, prompt: str,

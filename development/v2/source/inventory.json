@@ -1,0 +1,605 @@
+[
+  {
+    "feature": "cancellation/shared",
+    "files": [
+      "cancellation/shared/src/IkaModel/chat_interface/tool_execution_sync.py.txt",
+      "cancellation/shared/src/IkaModel/codex/chat_helpers_codex.py.txt",
+      "cancellation/shared/src/IkaModel/request_interface.py.txt"
+    ],
+    "status": "adapted into opt-in core runtime with regression tests",
+    "digests": [
+      {
+        "file": "cancellation/shared/src/IkaModel/chat_interface/tool_execution_sync.py.txt",
+        "sha256": "45d82a0c574e31a2ee7f1e8d972efaee79f1e4422918636a43b3ffba7fe413a1"
+      },
+      {
+        "file": "cancellation/shared/src/IkaModel/codex/chat_helpers_codex.py.txt",
+        "sha256": "ceb9c04e8cbb8cfc09a0a6584f8bbb818f374a51ae2bb0c9aacdff22ac76a8b0"
+      },
+      {
+        "file": "cancellation/shared/src/IkaModel/request_interface.py.txt",
+        "sha256": "921f85e303d93f38e0d05520e6c63500a0096d4fc56485b1eab7a34e1045c0f3"
+      }
+    ],
+    "implementation_guide": "docs/v2/README.md"
+  },
+  {
+    "feature": "cancellation/bounded",
+    "files": [
+      "cancellation/bounded/src/IkaModel/chat_interface/tool_execution_sync.py.txt",
+      "cancellation/bounded/src/IkaModel/codex/chat_helpers_codex.py.txt",
+      "cancellation/bounded/src/IkaModel/codex/response_parsing.py.txt",
+      "cancellation/bounded/src/IkaModel/request_interface.py.txt",
+      "cancellation/bounded/src/IkaTest/test_codex_retry.py.txt",
+      "cancellation/bounded/src/IkaTest/test_quality_gates.py.txt"
+    ],
+    "status": "adapted into opt-in core runtime with regression tests",
+    "digests": [
+      {
+        "file": "cancellation/bounded/src/IkaModel/chat_interface/tool_execution_sync.py.txt",
+        "sha256": "196d8d2a859e10899b12b66d7fa3f62a7aa390a1f8238900368cf779453fe845"
+      },
+      {
+        "file": "cancellation/bounded/src/IkaModel/codex/chat_helpers_codex.py.txt",
+        "sha256": "57f10d87e83c6f259ab74020dc43911e327d902fbd015190e13e904e222f14a5"
+      },
+      {
+        "file": "cancellation/bounded/src/IkaModel/codex/response_parsing.py.txt",
+        "sha256": "2c122f3453b88a928d543b8903169e5088b65ab543e25b8968b700410ff18d95"
+      },
+      {
+        "file": "cancellation/bounded/src/IkaModel/request_interface.py.txt",
+        "sha256": "3d8d365c003e9eaa1cc6bb244198f34a15e001a611c383ca1ccf1bcfd2561772"
+      },
+      {
+        "file": "cancellation/bounded/src/IkaTest/test_codex_retry.py.txt",
+        "sha256": "d7d272fea578bd7d133d7cedbc984609b4ae0bb732b26ac4a734683cac5ca842"
+      },
+      {
+        "file": "cancellation/bounded/src/IkaTest/test_quality_gates.py.txt",
+        "sha256": "c66aed0fecd0f7e0c14db1967783f77c1b6ed17c8654384dffc88807f953b429"
+      }
+    ],
+    "implementation_guide": "docs/v2/README.md"
+  },
+  {
+    "feature": "cancellation/deadlines",
+    "files": [
+      "cancellation/deadlines/src/IkaCore/agent_runtime_simple_execution.py.txt",
+      "cancellation/deadlines/src/IkaModel/codex/chat_helpers_codex.py.txt",
+      "cancellation/deadlines/src/IkaModel/data/model_metadata.json.txt",
+      "cancellation/deadlines/src/IkaModel/request_interface.py.txt",
+      "cancellation/deadlines/src/IkaTest/test_agent_helpers.py.txt",
+      "cancellation/deadlines/src/IkaTest/test_codex_provider.py.txt",
+      "cancellation/deadlines/src/IkaTest/test_codex_retry.py.txt",
+      "cancellation/deadlines/src/IkaTest/test_request_interface.py.txt"
+    ],
+    "status": "adapted into opt-in core runtime with regression tests",
+    "digests": [
+      {
+        "file": "cancellation/deadlines/src/IkaCore/agent_runtime_simple_execution.py.txt",
+        "sha256": "c0d266074f65416209033f3034d835f68cc4b0c15f697ea01e655c9bb19bd7ef"
+      },
+      {
+        "file": "cancellation/deadlines/src/IkaModel/codex/chat_helpers_codex.py.txt",
+        "sha256": "30f5315ac00556dec1e1ab73c7ad2faeda4783206e43207bb552fd7dabdd8bb9"
+      },
+      {
+        "file": "cancellation/deadlines/src/IkaModel/data/model_metadata.json.txt",
+        "sha256": "502232f215533b8434bfd164d7c24484199a9ccc517b41ed7e5e659aa6460e74"
+      },
+      {
+        "file": "cancellation/deadlines/src/IkaModel/request_interface.py.txt",
+        "sha256": "6503c21a89f89336131d6d3030232e3ebd87a49990ff19e41a8ca69414bd0ba0"
+      },
+      {
+        "file": "cancellation/deadlines/src/IkaTest/test_agent_helpers.py.txt",
+        "sha256": "bc74475c5adcbc37c6ff5cb4d03229120676e2eff972b3828b5cfcbc3a42e0aa"
+      },
+      {
+        "file": "cancellation/deadlines/src/IkaTest/test_codex_provider.py.txt",
+        "sha256": "a5c32321e77cfa3b10189fe862b3dee8cb01ae2c2e810fbc90168eb58c4b5afb"
+      },
+      {
+        "file": "cancellation/deadlines/src/IkaTest/test_codex_retry.py.txt",
+        "sha256": "38e788c739cba32d7dbc7e3b1a91e4d1fdb94c5b0dae7f432e2cc654a7b183de"
+      },
+      {
+        "file": "cancellation/deadlines/src/IkaTest/test_request_interface.py.txt",
+        "sha256": "14dcb2681c164da13170fe920cd8ee12766b8338ff1e7a7a6a5ca3652b19146c"
+      }
+    ],
+    "implementation_guide": "docs/v2/README.md"
+  },
+  {
+    "feature": "tools/output_limits",
+    "files": [
+      "tools/output_limits/src/IkaModel/chat_interface/tool_execution_async.py.txt",
+      "tools/output_limits/src/IkaModel/chat_interface/tool_execution_sync.py.txt",
+      "tools/output_limits/src/IkaModel/codex/codex_responses.py.txt",
+      "tools/output_limits/src/IkaModel/data/model_metadata.json.txt"
+    ],
+    "status": "adapted into opt-in core runtime with regression tests",
+    "digests": [
+      {
+        "file": "tools/output_limits/src/IkaModel/chat_interface/tool_execution_async.py.txt",
+        "sha256": "8c4c4a6e47e174b017a256034b78238fbacdd1abeb93e8ba92aad737e8c76f61"
+      },
+      {
+        "file": "tools/output_limits/src/IkaModel/chat_interface/tool_execution_sync.py.txt",
+        "sha256": "b9868db90d056de040f1536adc8d7c57736c1bd43c235a98c51b55cd19b7f41c"
+      },
+      {
+        "file": "tools/output_limits/src/IkaModel/codex/codex_responses.py.txt",
+        "sha256": "e18653a4ba12aaec37fc8770e5b0de2cf5cbe929279e29052efc560b30d87ef4"
+      },
+      {
+        "file": "tools/output_limits/src/IkaModel/data/model_metadata.json.txt",
+        "sha256": "6dc728db321a6489772a9251c885ca41740fca61cd2a50598fb0b4707c73d9ad"
+      }
+    ],
+    "implementation_guide": "docs/v2/README.md"
+  },
+  {
+    "feature": "snapshots_compaction",
+    "files": [
+      "snapshots_compaction/src/IkaCore/agent_helpers.py.txt",
+      "snapshots_compaction/src/IkaCore/agent_tools.py.txt",
+      "snapshots_compaction/src/IkaCore/agents.py.txt",
+      "snapshots_compaction/src/IkaCore/checkpoint.py.txt",
+      "snapshots_compaction/src/IkaCore/logging_utils.py.txt",
+      "snapshots_compaction/src/IkaCore/runtime_control.py.txt",
+      "snapshots_compaction/src/IkaCore/tools.py.txt",
+      "snapshots_compaction/src/IkaCore/workflow.py.txt",
+      "snapshots_compaction/src/IkaModel/__init__.py.txt",
+      "snapshots_compaction/src/IkaModel/base.py.txt",
+      "snapshots_compaction/src/IkaModel/chat_interface/chat_interface.py.txt",
+      "snapshots_compaction/src/IkaModel/chat_interface/response_interface.py.txt",
+      "snapshots_compaction/src/IkaModel/summarization.py.txt",
+      "snapshots_compaction/src/IkaTest/test_snapshot_runtime.py.txt"
+    ],
+    "status": "adapted into opt-in core runtime with regression tests",
+    "digests": [
+      {
+        "file": "snapshots_compaction/src/IkaCore/agent_helpers.py.txt",
+        "sha256": "d4cbd2536be5bd32889663446ecad3c2e020ac9154efc226507b8b189b4f3d87"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaCore/agent_tools.py.txt",
+        "sha256": "3f8a333edc098aba454348297372c0023619199b9e43ad0e7277de86a7113b33"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaCore/agents.py.txt",
+        "sha256": "3c59e8de15697bf5fe7bde30934d934032b67f1414af1679605ebb23cbf889a3"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaCore/checkpoint.py.txt",
+        "sha256": "6fa5b891cf537df0041f991834c28b606aa0f8bd1c5591845d693ffe2bb9a27f"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaCore/logging_utils.py.txt",
+        "sha256": "6ad383d7031b4456be015e19121ddcc5411ec3e81c0a0a4a22b123638e5ebadc"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaCore/runtime_control.py.txt",
+        "sha256": "726ddf49158bd00a82f90d376d91fa152edbb7f3df8d36ce002c6bb9ab15c977"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaCore/tools.py.txt",
+        "sha256": "471d2f5159a1651279e5f18a91fbc3d1a1488652ad66573664a1c3e1d8639484"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaCore/workflow.py.txt",
+        "sha256": "329b7ec57ed62501bc8045e0ac8aaf22e1d703e7dd93b1c4b278881113f5b245"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaModel/__init__.py.txt",
+        "sha256": "e0a5cc756c141cfbfec7d46a108d9f8210e39baf1a87a8e087b2e36378ea6bb8"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaModel/base.py.txt",
+        "sha256": "daee8b176650f3b2db22cf2e7d5918ec281de42a78b676e7750f60efe58d3117"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaModel/chat_interface/chat_interface.py.txt",
+        "sha256": "f303d291bdbf4e6284e8a66e1fa750e7e262a20572bdafbcb04a2b44be80cd68"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaModel/chat_interface/response_interface.py.txt",
+        "sha256": "55ebef10cb16595cef64e37fc731b9937766f789bc0fc03f2c21b0aec66a4577"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaModel/summarization.py.txt",
+        "sha256": "e0d6f478a3794981b115ff0cebb4e89ad298ecbd4b6c74830479a79852877f62"
+      },
+      {
+        "file": "snapshots_compaction/src/IkaTest/test_snapshot_runtime.py.txt",
+        "sha256": "8636cc7b442db96139ec2764c8284fb61ca34c1003a8acf521aa797fc99d84cb"
+      }
+    ],
+    "decision": "Additive SnapshotStore and agent/workflow hooks; retain full prior summary context; no destructive legacy migration.",
+    "implementation_guide": "docs/v2/README.md"
+  },
+  {
+    "feature": "checkpoint_tool_handling",
+    "files": [
+      "checkpoint_tool_handling/src/IkaCore/agent_helpers.py.txt",
+      "checkpoint_tool_handling/src/IkaCore/agent_tools.py.txt",
+      "checkpoint_tool_handling/src/IkaCore/agents.py.txt",
+      "checkpoint_tool_handling/src/IkaCore/cli_output.py.txt",
+      "checkpoint_tool_handling/src/IkaCore/logging_utils.py.txt",
+      "checkpoint_tool_handling/src/IkaCore/prompts.py.txt",
+      "checkpoint_tool_handling/src/IkaModel/chat_interface/chat_interface.py.txt",
+      "checkpoint_tool_handling/src/IkaModel/chat_interface/response_interface.py.txt",
+      "checkpoint_tool_handling/src/IkaTest/test_agent_tools_api.py.txt",
+      "checkpoint_tool_handling/src/IkaTest/test_barebone_api_layer.py.txt"
+    ],
+    "status": "adapted into opt-in core runtime with regression tests",
+    "digests": [
+      {
+        "file": "checkpoint_tool_handling/src/IkaCore/agent_helpers.py.txt",
+        "sha256": "2b92e5ce65c5ed03503bdbbfbee5ae26a0d1f972b8ee2073413b6e2414573c6f"
+      },
+      {
+        "file": "checkpoint_tool_handling/src/IkaCore/agent_tools.py.txt",
+        "sha256": "a108fffcb1d630b7d51b1ecd2965e0d384fc69cf191abbb548e1283af33333bf"
+      },
+      {
+        "file": "checkpoint_tool_handling/src/IkaCore/agents.py.txt",
+        "sha256": "868589e83bbb0ee5657e07445472c4f3e7c84629fb40acbc8d279c5d43945155"
+      },
+      {
+        "file": "checkpoint_tool_handling/src/IkaCore/cli_output.py.txt",
+        "sha256": "a2ab0fa59ea9b6752b6fe7154ae1cdd4b30534675d3ca4dfc5cbffb2168514a2"
+      },
+      {
+        "file": "checkpoint_tool_handling/src/IkaCore/logging_utils.py.txt",
+        "sha256": "9d92fb1f2cf561d40316714c926c1d6ff8a731a469d0ee225d5e29e27b2e2c13"
+      },
+      {
+        "file": "checkpoint_tool_handling/src/IkaCore/prompts.py.txt",
+        "sha256": "d721212c614010a6051b4b1dfe0d6d9ca7b963159cbb353f8d7d977e5343eecb"
+      },
+      {
+        "file": "checkpoint_tool_handling/src/IkaModel/chat_interface/chat_interface.py.txt",
+        "sha256": "635f380eae17d5704675450f1399f1d0515fb9c02acc3117d6a6c04e582df6a1"
+      },
+      {
+        "file": "checkpoint_tool_handling/src/IkaModel/chat_interface/response_interface.py.txt",
+        "sha256": "d4b9b768218aeb9c814a9a4e68d27ce1ba8d05b93bba0347941a4502e8b31794"
+      },
+      {
+        "file": "checkpoint_tool_handling/src/IkaTest/test_agent_tools_api.py.txt",
+        "sha256": "224dae770f0d4dea4a7d1e8fa6e887c28b950a690b82d302be4399be70948f95"
+      },
+      {
+        "file": "checkpoint_tool_handling/src/IkaTest/test_barebone_api_layer.py.txt",
+        "sha256": "5ee0eb95e92aab1358506bbdb11e273718cca52d00eabe0b1199563023afe419"
+      }
+    ],
+    "implementation_guide": "docs/v2/README.md"
+  },
+  {
+    "feature": "provider_workflow_optimizations",
+    "files": [
+      "provider_workflow_optimizations/src/IkaCore/agent_chat_support.py.txt",
+      "provider_workflow_optimizations/src/IkaCore/agent_helper_support.py.txt",
+      "provider_workflow_optimizations/src/IkaCore/agent_lifecycle.py.txt",
+      "provider_workflow_optimizations/src/IkaCore/agent_parse.py.txt",
+      "provider_workflow_optimizations/src/IkaCore/agent_runtime_dispatch.py.txt",
+      "provider_workflow_optimizations/src/IkaCore/agent_runtime_foundation.py.txt",
+      "provider_workflow_optimizations/src/IkaCore/workflow.py.txt",
+      "provider_workflow_optimizations/src/IkaCore/workflow_async.py.txt",
+      "provider_workflow_optimizations/src/IkaCore/workflow_core.py.txt",
+      "provider_workflow_optimizations/src/IkaCore/workflow_dataflow.py.txt",
+      "provider_workflow_optimizations/src/IkaCore/workflow_types.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/anthropic/chat_helpers_anthropic.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/anthropic/claude.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/async_runner.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/chat_interface/chat_runtime.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/codex/chat_helpers_codex.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/codex/codex_responses.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/deepseek/deepseek.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/gemini/google.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/history_replay.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/http_config.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/http_pool.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/request_interface.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/retry_policy.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/summarization.py.txt",
+      "provider_workflow_optimizations/src/IkaModel/tool_schema.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_agent_helpers.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_agent_tools_api.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_barebone_api_layer.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_codex_helpers_extra.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_codex_retry.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_history_replay.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_http_config.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_provider_edge_helpers.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_provider_payload_builders.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_request_interface.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_retry_policy.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_tool_schema.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_workflow_dataflow.py.txt",
+      "provider_workflow_optimizations/src/IkaTest/test_workflow_semantics.py.txt"
+    ],
+    "status": "adapted into opt-in core runtime with regression tests",
+    "digests": [
+      {
+        "file": "provider_workflow_optimizations/src/IkaCore/agent_chat_support.py.txt",
+        "sha256": "a961b98438220472eeabb84ed78b8afed76deff51d87c110aa785a56cde22c95"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaCore/agent_helper_support.py.txt",
+        "sha256": "e8f8e2df4a4ee89259ffa3f434eba98a7831c4fa0f74bc9d153106b6a1e76c78"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaCore/agent_lifecycle.py.txt",
+        "sha256": "b76db7cae78a9cc4ae04caebad551d770396ccbde65d510463dd2b5bc38c858c"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaCore/agent_parse.py.txt",
+        "sha256": "24453bb92a2e6c9c9e22d5a7030c4770b6896a0b013d488a314be9c4d53b40ea"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaCore/agent_runtime_dispatch.py.txt",
+        "sha256": "0218696e8f467071058c193e32de48dc63906f68ade16c12136d37cbcf6a299d"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaCore/agent_runtime_foundation.py.txt",
+        "sha256": "bc41d1382fa7dbb3d42f4ab65923e7c357b5f3d5d270d4d4000b9abffe927973"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaCore/workflow.py.txt",
+        "sha256": "50fcabf2609168079d66f6866cbc45fd68090b3e51ad388a9d1cce50c26d5c17"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaCore/workflow_async.py.txt",
+        "sha256": "93225867be9bbb55b9ddd41f3a1db21d4ab1d79d87fce757161720b9c8a0d701"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaCore/workflow_core.py.txt",
+        "sha256": "9cd85845d87064adea6f3743f7905c8c9bb7786cf42172f93ab3991d51f0ec4f"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaCore/workflow_dataflow.py.txt",
+        "sha256": "2b9b6e46946b2809a9392d961707702ae11577246f903c1cd036958c7182d8db"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaCore/workflow_types.py.txt",
+        "sha256": "f3f3d9f5e9bc5fbda7e897a8a6a35e471113159e53078bd2e2c346389ae695e3"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/anthropic/chat_helpers_anthropic.py.txt",
+        "sha256": "74fcfadba406bbd035515d5dffdeaaf5fd5cee83c64affe1d6465cd362c046a7"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/anthropic/claude.py.txt",
+        "sha256": "b44b1c485dd58171fe12fc035eb08e03b6ffdfb8d40cb603d9bc34de062c05c9"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/async_runner.py.txt",
+        "sha256": "7160836b1d371c2b839c2290480918a1271602653afe923618a6e16ec1d101bb"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/chat_interface/chat_runtime.py.txt",
+        "sha256": "5f7cee4886678bd75d3cc7675ea2bab85ae52ee3c9d0642ee98476ceedbc6cd3"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/codex/chat_helpers_codex.py.txt",
+        "sha256": "7b391ac7eae254a8346eceb459014511bd30d86f173617cd913f94f0065f46e8"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/codex/codex_responses.py.txt",
+        "sha256": "3be4ed014c934b70178e959601b743dd6024e1fe823c6d1e1248e3d7b6ffc9f5"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/deepseek/deepseek.py.txt",
+        "sha256": "c234699e0a2ce2655ad37d320ee0eaee69cb0cf3c8dda94341f30d2c25b5dd60"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/gemini/google.py.txt",
+        "sha256": "be4d2c27058ee632b5240d77e5c3b76e4b2ad5244206ec18b31a607839aa6654"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/history_replay.py.txt",
+        "sha256": "a09a52b43e057ea4ce51687f81319835abdcbda2db1a38b38635163753e5320e"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/http_config.py.txt",
+        "sha256": "b026bd576be274b6515eaab77ba5e78b6e82fbadee199c476488973fe8c6b6bb"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/http_pool.py.txt",
+        "sha256": "d83e0810ec04a5254783994c1913a498e0d077b2d52ce80c5307d315b12fe71f"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/request_interface.py.txt",
+        "sha256": "69eb96e8e7795566743461f9d29f22364f2097b6e9182359313c25547e401b69"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/retry_policy.py.txt",
+        "sha256": "8141c95c3836c2aa66023820ad414f189101f2835973b237075b929aac992342"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/summarization.py.txt",
+        "sha256": "24496ad368d22e228a61d74ce1d9bc95e2552a3a7a32d7bfa51ca49ed5f5185a"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaModel/tool_schema.py.txt",
+        "sha256": "09d91de14f819f81dcee9ce086aed11e0aee19b657561d769df3b4ee033acc71"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_agent_helpers.py.txt",
+        "sha256": "61e62dd0e6bdc905c4b8628a6a921c7579d73279ba3f62cda41029ba1fa688c2"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_agent_tools_api.py.txt",
+        "sha256": "fa86ff5ddce5b8cdb00a519d6d3e71e5181a352093d9cb8b439cd1b389726643"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_barebone_api_layer.py.txt",
+        "sha256": "8a3374faa238573552322b6060721c6b032eccac0f0f64602cdd2836c0e7affa"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_codex_helpers_extra.py.txt",
+        "sha256": "da0a9d4e70e92d93305dcd00c65ddb6cb70078ad002686946ddae89e0e5e4190"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_codex_retry.py.txt",
+        "sha256": "587724aa45325f2c289863c1400bf5341228afbd4cbf1e80d264463bbd1f03d9"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_history_replay.py.txt",
+        "sha256": "02321ae1445a4888932f0d5384bf945cb5365e835375449cb5e91e79eb35ccf8"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_http_config.py.txt",
+        "sha256": "cbb6b157d7564c2baae007dd3c65764fa1d172275452f17c63b2df31cf21cbe0"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_provider_edge_helpers.py.txt",
+        "sha256": "284ba8e7e89131e5afb201925052743c06080eee43cfa640c4620633d5dc1a38"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_provider_payload_builders.py.txt",
+        "sha256": "8681fade97634093dd0834b40013ef2f975a5fc3ac6ee718dc76769d6907a78c"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_request_interface.py.txt",
+        "sha256": "29476890e736178208cc6fcc53abd4405a4d12e61c58fd13f5971652cada0d5c"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_retry_policy.py.txt",
+        "sha256": "1e332bf91620c183f342e5580c4042b9bc8dd4839957da18be282ae259d6c383"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_tool_schema.py.txt",
+        "sha256": "9c8b412e0d7ef60a68d7c7c1fce293ead23ef5c6ea594406c924bce6586d98d3"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_workflow_dataflow.py.txt",
+        "sha256": "78f26b9a371c4eacdb6110ce53606360faf0fffa3afb8f709128d3af744e0a33"
+      },
+      {
+        "file": "provider_workflow_optimizations/src/IkaTest/test_workflow_semantics.py.txt",
+        "sha256": "16ca4e17b4aadcde5172f73dde98cd32c4d6ecf67b461cd6762c2932cbbfc3c1"
+      }
+    ],
+    "decision": "Explicit runtime policies; execution-owned sync clients and thread-owned async runners replace global async transport caches.",
+    "implementation_guide": "docs/v2/README.md"
+  },
+  {
+    "feature": "experimental_general_execution",
+    "files": [
+      "experimental_general_execution/src/IkaGeneral/__init__.py.txt",
+      "experimental_general_execution/src/IkaGeneral/ccp_context_store.py.txt",
+      "experimental_general_execution/src/IkaGeneral/context_pack_ops.py.txt",
+      "experimental_general_execution/src/IkaGeneral/dynamic_tool_ops.py.txt",
+      "experimental_general_execution/src/IkaGeneral/execution_control_ops.py.txt",
+      "experimental_general_execution/src/IkaGeneral/execution_env.py.txt",
+      "experimental_general_execution/src/IkaGeneral/execution_trace.py.txt",
+      "experimental_general_execution/src/IkaGeneral/helpers.py.txt",
+      "experimental_general_execution/src/IkaGeneral/meta_tool_registry.py.txt",
+      "experimental_general_execution/src/IkaGeneral/models.py.txt",
+      "experimental_general_execution/src/IkaGeneral/subagent_ops.py.txt",
+      "experimental_general_execution/src/IkaTest/test_ika_general_ccp_context.py.txt",
+      "experimental_general_execution/src/IkaTest/test_ika_general_execution_trace.py.txt",
+      "experimental_general_execution/src/IkaGeneral/planning.md.txt"
+    ],
+    "status": "retained reference only; outside accepted core runtime scope",
+    "digests": [
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/__init__.py.txt",
+        "sha256": "41c61e1b66b1038cdd51ff51527b61a75664dab2177f51a715d895730d3f194a"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/ccp_context_store.py.txt",
+        "sha256": "3eba17d8bf557da734b632a740323ff3db1dc9a9ca00367e61ec860334f6f244"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/context_pack_ops.py.txt",
+        "sha256": "78dcbebc815c3689e7393aba5967fbfa064234e620b25db2b55a275be6aa5805"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/dynamic_tool_ops.py.txt",
+        "sha256": "2bdafc68dfd04ed6ae898dab894643d6faac667435487398a089f10f5f866380"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/execution_control_ops.py.txt",
+        "sha256": "b2c3110e6814b54cb5d4fba81c64a44dd495e675c25065d740b79fe93c8313b9"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/execution_env.py.txt",
+        "sha256": "e2d300d1c408ac5b12438ba036b89dc1bbfe37b6c6915cb17c20ce6dc18cc7ef"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/execution_trace.py.txt",
+        "sha256": "d73ba81027d44fc69c4ae26b88804ce13dd7ca0c5047c4c2196604cd0d025876"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/helpers.py.txt",
+        "sha256": "4ce21c00720f4361c10a2c20674d269012ca5fc129b7ee216b7113b4d2e99b5d"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/meta_tool_registry.py.txt",
+        "sha256": "df4bee2555651bd4c3a4b4582b4dd9eb9551177d48cb845496f2480ca95aad65"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/models.py.txt",
+        "sha256": "f133c22bb3915ad6c9f15cae5d14fec369768d5dc86116473638031e7f25a467"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/subagent_ops.py.txt",
+        "sha256": "ea82ec121fef4719545cf40facdd9d214543dc8a0db58f9c959ce1f7a8bb1114"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaTest/test_ika_general_ccp_context.py.txt",
+        "sha256": "760172f400fbfdf8e85855fccef3963f7cd619ac8862f03358da14e8b8f333f8"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaTest/test_ika_general_execution_trace.py.txt",
+        "sha256": "25dfeabd4bcf6d03dba55d965a375ce9ffe15906a325b2db7448c088a9b9cc29"
+      },
+      {
+        "file": "experimental_general_execution/src/IkaGeneral/planning.md.txt",
+        "sha256": "b189fa19a6076451bbed79eb1c21f204e263035167f13b3e4987f5f63ee8aeca"
+      }
+    ],
+    "implementation_guide": "docs/v2/README.md"
+  },
+  {
+    "feature": "context_recovery",
+    "files": [
+      "context_recovery/src/IkaModel/chat_interface/chat_interface.py.txt",
+      "context_recovery/src/IkaModel/prompts/force_answer_system.txt.txt",
+      "context_recovery/src/IkaModel/prompts/what_remains_system.txt.txt",
+      "context_recovery/src/IkaModel/summarization.py.txt",
+      "context_recovery/src/IkaTest/test_context_fallback_async.py.txt"
+    ],
+    "status": "reviewed; existing context fallback retained; destructive input rewriting and application-specific prompts excluded",
+    "digests": [
+      {
+        "file": "context_recovery/src/IkaModel/chat_interface/chat_interface.py.txt",
+        "sha256": "a47d66e66732c2b61543ea8066cc00e5053001d8be859f9b42ebe19d6ac0a904"
+      },
+      {
+        "file": "context_recovery/src/IkaModel/prompts/force_answer_system.txt.txt",
+        "sha256": "b29c1b39f1f5502f3bf01db537ac63f71623fe53123ba914bd3e3420e2b7d87f"
+      },
+      {
+        "file": "context_recovery/src/IkaModel/prompts/what_remains_system.txt.txt",
+        "sha256": "1af8ffcc1609de15140d523ccd871590b8d3c495c6bc8b4f7abdabd37ff00bce"
+      },
+      {
+        "file": "context_recovery/src/IkaModel/summarization.py.txt",
+        "sha256": "cd24811fd9e620e4ec4254807b58d6fbd319c8dcdf1a905e2e49d8919cefb8c0"
+      },
+      {
+        "file": "context_recovery/src/IkaTest/test_context_fallback_async.py.txt",
+        "sha256": "998e737e85c30cbc48dae06bcd0fc088114e249fc0aa2fe3f9561b23550293f3"
+      }
+    ],
+    "implementation_guide": "docs/v2/README.md"
+  }
+]
