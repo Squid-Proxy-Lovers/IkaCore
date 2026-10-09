@@ -91,9 +91,11 @@ def append_anthropic_tool_messages(
     repeated_warning_msg: str = ""
 ) -> None:
     content_blocks: list[JsonDict] = []
-    if content:
+    from ..runtime_policy import current_runtime_options
+    optimized = current_runtime_options().optimize_provider_payloads
+    if content and (content.strip() or not optimized):
         content_blocks.append({"type": "text", "text": content})
-    else:
+    elif not optimized:
         content_blocks.append({"type": "text", "text": " "})
     for tool_call in executed_tool_call_list:
         function_payload = json_dict(tool_call.get("function"))

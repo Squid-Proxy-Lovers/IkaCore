@@ -105,8 +105,14 @@ class _CheckpointState(Protocol):
 
 
 class AgentWorkflowContextMixin:
-    def inject_workflow_context(self: _WorkflowContextState, context: str) -> None:
+    def inject_workflow_context(self: _WorkflowContextState, context: str,
+                                 label: str = "Context from upstream workflow steps:") -> None:
         if not context:
+            return
+        from IkaModel.runtime_policy import current_runtime_options
+        if current_runtime_options().preserve_workflow_prompts:
+            from .workflow_prompt_context import inject_context
+            inject_context(self, context, label)
             return
         current_first_input = self.message_history.get("first_input", {}).get("message", "")
         combined = f"{context}\n\n{current_first_input}" if current_first_input else context
@@ -205,6 +211,9 @@ class AgentCloneStateMixin(AgentCloneConfigMixin):
         for override_name in ("execution", "async_execution"):
             if override_name in getattr(self, "__dict__", {}):
                 setattr(clone, override_name, getattr(self, override_name))
+        session = getattr(self, "_snapshot_runtime", None)
+        if session is not None:
+            clone.enable_snapshots(session.store.db_path, deepcopy(session.control))
 
 
 class AgentCloneMixin(AgentCloneStateMixin):

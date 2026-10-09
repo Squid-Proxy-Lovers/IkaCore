@@ -39,12 +39,16 @@ class JsonToolArgumentParseMixin:
         
         return None
 
-    def _parse_tool_arguments(self, args_raw: Any) -> dict[str, Any]:
+    def _parse_tool_arguments(self, args_raw: Any, tool_name: Optional[str] = None) -> dict[str, Any]:
         if not isinstance(args_raw, str):
             return args_raw if isinstance(args_raw, dict) else {}
         try:
             args = json.loads(args_raw)
         except (TypeError, json.JSONDecodeError):
+            from IkaModel.runtime_policy import current_runtime_options
+            if current_runtime_options().recover_truncated_control_calls and tool_name in {"agent_end", "stage_end", "change_stage"}:
+                from .truncated_json import _close_truncated_json_object
+                return _close_truncated_json_object(args_raw) or {}
             return {}
         return args if isinstance(args, dict) else {}
 
@@ -157,7 +161,7 @@ class StageControlParseMixin(AgentEndParseMixin):
             fn = call.get("function", {})
             name = fn.get("name") or call.get("name")
             args_raw = fn.get("arguments") or "{}"
-            args = self._parse_tool_arguments(args_raw)
+            args = self._parse_tool_arguments(args_raw, name)
 
             # Log memory tool usage (tools are executed by chat function via tool_executors)
             if name in ["short_term_save", "short_term_search", "long_term_save", "long_term_search"]:

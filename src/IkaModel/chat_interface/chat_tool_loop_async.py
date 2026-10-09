@@ -13,6 +13,7 @@ import httpx
 from IkaCore.agent_runtime_payloads import JsonDict
 
 from ..base import BareBoneModel
+from ..runtime_errors import IkaRequestControlError
 from ..summarization import async_summarise_message_history
 from .chat_request import _request_provider_round_async
 from .chat_response import (
@@ -71,6 +72,8 @@ async def _async_repeated_tool_guard(
                     write_to_history=False,
                 )
             except _SUMMARY_FALLBACK_EXCEPTIONS as e:
+                if isinstance(e, IkaRequestControlError):
+                    raise
                 LOG.error(f"Failed to generate force_answer summary: {e}")
                 force_answer = ""
             return (

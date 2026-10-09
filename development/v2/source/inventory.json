@@ -6,7 +6,7 @@
       "cancellation/shared/src/IkaModel/codex/chat_helpers_codex.py.txt",
       "cancellation/shared/src/IkaModel/request_interface.py.txt"
     ],
-    "status": "reference source, pending port and review",
+    "status": "adapted into opt-in core runtime with regression tests",
     "digests": [
       {
         "file": "cancellation/shared/src/IkaModel/chat_interface/tool_execution_sync.py.txt",
@@ -20,7 +20,8 @@
         "file": "cancellation/shared/src/IkaModel/request_interface.py.txt",
         "sha256": "921f85e303d93f38e0d05520e6c63500a0096d4fc56485b1eab7a34e1045c0f3"
       }
-    ]
+    ],
+    "implementation_guide": "docs/v2/README.md"
   },
   {
     "feature": "cancellation/bounded",
@@ -32,7 +33,7 @@
       "cancellation/bounded/src/IkaTest/test_codex_retry.py.txt",
       "cancellation/bounded/src/IkaTest/test_quality_gates.py.txt"
     ],
-    "status": "reference source, pending port and review",
+    "status": "adapted into opt-in core runtime with regression tests",
     "digests": [
       {
         "file": "cancellation/bounded/src/IkaModel/chat_interface/tool_execution_sync.py.txt",
@@ -58,7 +59,8 @@
         "file": "cancellation/bounded/src/IkaTest/test_quality_gates.py.txt",
         "sha256": "c66aed0fecd0f7e0c14db1967783f77c1b6ed17c8654384dffc88807f953b429"
       }
-    ]
+    ],
+    "implementation_guide": "docs/v2/README.md"
   },
   {
     "feature": "cancellation/deadlines",
@@ -72,7 +74,7 @@
       "cancellation/deadlines/src/IkaTest/test_codex_retry.py.txt",
       "cancellation/deadlines/src/IkaTest/test_request_interface.py.txt"
     ],
-    "status": "reference source, pending port and review",
+    "status": "adapted into opt-in core runtime with regression tests",
     "digests": [
       {
         "file": "cancellation/deadlines/src/IkaCore/agent_runtime_simple_execution.py.txt",
@@ -106,7 +108,8 @@
         "file": "cancellation/deadlines/src/IkaTest/test_request_interface.py.txt",
         "sha256": "14dcb2681c164da13170fe920cd8ee12766b8338ff1e7a7a6a5ca3652b19146c"
       }
-    ]
+    ],
+    "implementation_guide": "docs/v2/README.md"
   },
   {
     "feature": "tools/output_limits",
@@ -116,7 +119,7 @@
       "tools/output_limits/src/IkaModel/codex/codex_responses.py.txt",
       "tools/output_limits/src/IkaModel/data/model_metadata.json.txt"
     ],
-    "status": "reference source, pending port and review",
+    "status": "adapted into opt-in core runtime with regression tests",
     "digests": [
       {
         "file": "tools/output_limits/src/IkaModel/chat_interface/tool_execution_async.py.txt",
@@ -134,7 +137,8 @@
         "file": "tools/output_limits/src/IkaModel/data/model_metadata.json.txt",
         "sha256": "6dc728db321a6489772a9251c885ca41740fca61cd2a50598fb0b4707c73d9ad"
       }
-    ]
+    ],
+    "implementation_guide": "docs/v2/README.md"
   },
   {
     "feature": "snapshots_compaction",
@@ -154,7 +158,7 @@
       "snapshots_compaction/src/IkaModel/summarization.py.txt",
       "snapshots_compaction/src/IkaTest/test_snapshot_runtime.py.txt"
     ],
-    "status": "reference source, pending port and review",
+    "status": "adapted into opt-in core runtime with regression tests",
     "digests": [
       {
         "file": "snapshots_compaction/src/IkaCore/agent_helpers.py.txt",
@@ -212,7 +216,9 @@
         "file": "snapshots_compaction/src/IkaTest/test_snapshot_runtime.py.txt",
         "sha256": "8636cc7b442db96139ec2764c8284fb61ca34c1003a8acf521aa797fc99d84cb"
       }
-    ]
+    ],
+    "decision": "Additive SnapshotStore and agent/workflow hooks; retain full prior summary context; no destructive legacy migration.",
+    "implementation_guide": "docs/v2/README.md"
   },
   {
     "feature": "checkpoint_tool_handling",
@@ -228,7 +234,7 @@
       "checkpoint_tool_handling/src/IkaTest/test_agent_tools_api.py.txt",
       "checkpoint_tool_handling/src/IkaTest/test_barebone_api_layer.py.txt"
     ],
-    "status": "reference source, pending port and review",
+    "status": "adapted into opt-in core runtime with regression tests",
     "digests": [
       {
         "file": "checkpoint_tool_handling/src/IkaCore/agent_helpers.py.txt",
@@ -270,7 +276,8 @@
         "file": "checkpoint_tool_handling/src/IkaTest/test_barebone_api_layer.py.txt",
         "sha256": "5ee0eb95e92aab1358506bbdb11e273718cca52d00eabe0b1199563023afe419"
       }
-    ]
+    ],
+    "implementation_guide": "docs/v2/README.md"
   },
   {
     "feature": "provider_workflow_optimizations",
@@ -316,7 +323,7 @@
       "provider_workflow_optimizations/src/IkaTest/test_workflow_dataflow.py.txt",
       "provider_workflow_optimizations/src/IkaTest/test_workflow_semantics.py.txt"
     ],
-    "status": "reference source, pending port and review",
+    "status": "adapted into opt-in core runtime with regression tests",
     "digests": [
       {
         "file": "provider_workflow_optimizations/src/IkaCore/agent_chat_support.py.txt",
@@ -478,7 +485,9 @@
         "file": "provider_workflow_optimizations/src/IkaTest/test_workflow_semantics.py.txt",
         "sha256": "16ca4e17b4aadcde5172f73dde98cd32c4d6ecf67b461cd6762c2932cbbfc3c1"
       }
-    ]
+    ],
+    "decision": "Explicit runtime policies; execution-owned sync clients and thread-owned async runners replace global async transport caches.",
+    "implementation_guide": "docs/v2/README.md"
   },
   {
     "feature": "experimental_general_execution",
@@ -498,7 +507,7 @@
       "experimental_general_execution/src/IkaTest/test_ika_general_execution_trace.py.txt",
       "experimental_general_execution/src/IkaGeneral/planning.md.txt"
     ],
-    "status": "out of core integration scope; generic library reference only",
+    "status": "retained reference only; outside accepted core runtime scope",
     "digests": [
       {
         "file": "experimental_general_execution/src/IkaGeneral/__init__.py.txt",
@@ -556,7 +565,8 @@
         "file": "experimental_general_execution/src/IkaGeneral/planning.md.txt",
         "sha256": "b189fa19a6076451bbed79eb1c21f204e263035167f13b3e4987f5f63ee8aeca"
       }
-    ]
+    ],
+    "implementation_guide": "docs/v2/README.md"
   },
   {
     "feature": "context_recovery",
@@ -567,7 +577,7 @@
       "context_recovery/src/IkaModel/summarization.py.txt",
       "context_recovery/src/IkaTest/test_context_fallback_async.py.txt"
     ],
-    "status": "reference source, pending port and review",
+    "status": "reviewed; existing context fallback retained; destructive input rewriting and application-specific prompts excluded",
     "digests": [
       {
         "file": "context_recovery/src/IkaModel/chat_interface/chat_interface.py.txt",
@@ -589,6 +599,7 @@
         "file": "context_recovery/src/IkaTest/test_context_fallback_async.py.txt",
         "sha256": "998e737e85c30cbc48dae06bcd0fc088114e249fc0aa2fe3f9561b23550293f3"
       }
-    ]
+    ],
+    "implementation_guide": "docs/v2/README.md"
   }
 ]

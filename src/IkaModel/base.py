@@ -61,7 +61,7 @@ Do not continue making tool calls after the task is complete. The agent_end tool
 CRITICAL: MAKE SURE YOUR FINAL ANSWER IS ANSWER THE ORGINAL TASK, MAKE SURE YOUR RESPONSE IS VERY DETAILED AND COMPLETE!
 """
 
-@dataclass
+@dataclass(init=False)
 class ToolArgs:
     type: str
     description: str
@@ -69,6 +69,15 @@ class ToolArgs:
     data: Optional[Any] = None
     metadata: Optional[dict[str, Any]] = None
     properties: Optional[dict[str, Any]] = None
+
+    def __init__(
+        self, type: str, description: str, agent: Optional[str] = None,
+        data: Optional[Any] = None, metadata: Optional[dict[str, Any]] = None,
+        properties: Optional[dict[str, Any]] = None, *, required: Optional[list[str]] = None,
+    ):
+        self.type, self.description, self.agent = type, description, agent
+        self.data, self.metadata = data, metadata
+        self.properties = properties if required is None else {**(properties or {}), "__required__": list(required)}
     
     # we are going to assume that all args are required
 
@@ -197,7 +206,7 @@ class BareBoneModel:
 
 _SUMMARY_PROMPT_PATH = Path(__file__).parent / "summary_prompt"
 try:
-    from src.resources import read_text as _read_ika_resource
+    from .resource_loader import read_embedded_resource as _read_ika_resource
 
     SUMMARY_PROMPT = _read_ika_resource("IkaCore/src/IkaModel/summary_prompt")
 except (ImportError, ModuleNotFoundError, OSError):

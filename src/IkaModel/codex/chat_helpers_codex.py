@@ -33,12 +33,17 @@ from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict,
 from ..base import BareBoneModel
 from ..codex_constants import CODEX_API_URL
 from ..model_metadata import CODEX_KNOWN_MODELS
+from ..request_control import check_request_controls, effective_max_retries, effective_timeout
 from ..request_interface import agent_tools_for_payload
+from ..request_lifecycle import request_scope, sleep_with_controls
+from ..runtime_errors import IkaRequestControlError
+from ..runtime_policy import current_runtime_options
 from .codex_responses import codex_responses_fill_payload
 from .codex_stream import CodexRetryableStreamError as _CodexRetryableStreamError
 from .codex_stream import classify_stream_error as _classify_stream_error
 from .codex_stream import collect_stream as _collect_stream
 from .codex_stream import iter_sse as _iter_sse
+from .stream_transport import open_stream
 
 LOG = logging.getLogger(__name__)
 
@@ -102,7 +107,7 @@ def _sleep_before_retry(
         attempt + 1,
         max_retries,
     )
-    time.sleep(delay)
+    sleep_with_controls(delay, time.sleep)
 
 
 def is_codex_url(api_url: Optional[str]) -> bool:
@@ -217,11 +222,15 @@ def _handle_codex_429(response: httpx.Response, body: str, attempt: int, max_ret
     if attempt >= max_retries - 1:
         raise RuntimeError(f"codex backend returned 429 after {max_retries} attempts: {body[:500]}")
     retry_after = _parse_retry_after(response.headers.get("retry-after"), wait_seconds)
+    if current_runtime_options().modern_retries:
+        from ..retry_policy import response_body, retry_delay, retry_hint_seconds
+        retry_after = retry_delay(attempt, retry_hint_seconds(response.headers, response_body(response)),
+                                  current_runtime_options().retry_initial_seconds)
     LOG.warning(
         "codex backend 429 (rate-limited); sleeping %.1fs (attempt %d/%d)",
         retry_after, attempt + 1, max_retries,
     )
-    time.sleep(retry_after)
+    sleep_with_controls(retry_after, time.sleep)
 
 
 def _handle_codex_5xx(status: int, body: str, backoff: float, attempt: int, max_retries: int) -> None:
@@ -253,6 +262,9 @@ def _handle_codex_non_200(
     if 500 <= status < 600:
         _handle_codex_5xx(status, body, backoff, attempt, max_retries)
         return
+    if current_runtime_options().modern_retries and status in {408, 409}:
+        _handle_codex_5xx(status, body, backoff, attempt, max_retries)
+        return
     raise RuntimeError(f"codex backend returned {status}: {body[:2000]}")
 
 
@@ -266,14 +278,18 @@ def _request_codex_once(
     max_retries: int,
     wait_seconds: int,
 ) -> Optional[_CodexResponseShim]:
-    with httpx.stream("POST", api_url, headers=headers, json=payload, timeout=timeout) as response:
-        rate_headers = _codex_rate_headers(response)
-        if response.status_code == 200:
-            data = _collect_stream(response)
-            return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
+    check_request_controls()
+    with open_stream(api_url, headers, payload, effective_timeout(timeout)) as response:
+        # Older test/client shims need not expose close when controls are unused.
+        close = getattr(response, "close", lambda: None)
+        with request_scope(close):
+            rate_headers = _codex_rate_headers(response)
+            if response.status_code == 200:
+                data = _collect_stream(response)
+                return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
 
-        body = response.read().decode("utf-8", "replace")
-        _handle_codex_non_200(response, body, backoff, attempt, max_retries, wait_seconds)
+            body = response.read().decode("utf-8", "replace")
+            _handle_codex_non_200(response, body, backoff, attempt, max_retries, wait_seconds)
     return None
 
 
@@ -299,9 +315,14 @@ def _request_codex_with_retries(
     max_retries: int,
     wait_seconds: int,
 ) -> _CodexResponseShim:
+    max_retries = effective_max_retries(max_retries)
     last_exc: Optional[Exception] = None
     for attempt in range(max_retries):
+        check_request_controls()
         backoff = wait_seconds * (2 ** attempt)
+        if current_runtime_options().modern_retries:
+            from ..retry_policy import backoff_seconds
+            backoff = backoff_seconds(attempt, current_runtime_options().retry_initial_seconds)
         try:
             response = _request_codex_once(
                 api_url,
@@ -317,19 +338,24 @@ def _request_codex_with_retries(
                 return response
             continue
 
+        except IkaRequestControlError:
+            raise
         except _CodexRetryableStreamError as error:
+            check_request_controls()
             last_exc = error
             _retry_codex_exception(
                 "codex stream transient failure: %s",
                 backoff, attempt, max_retries, error,
             )
         except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as error:
+            check_request_controls()
             last_exc = error
             _retry_codex_exception(
                 "codex request timeout: %s",
                 backoff, attempt, max_retries, error,
             )
         except httpx.HTTPError as error:
+            check_request_controls()
             last_exc = error
             _retry_codex_exception(
                 "codex http error: %s",

@@ -85,6 +85,10 @@ def gemini_fill_payload(
     message_history: Optional[Dict[str, Any]] = None,
     agent_tools: Optional[list[Any]] = None,
 ) -> Dict[str, Any]:
+    from ..runtime_policy import current_runtime_options
+    if current_runtime_options().optimize_provider_payloads:
+        from .google_optimized import gemini_fill_payload as optimized
+        return optimized(model, messages, message_history, agent_tools)
     message_history = message_history or _default_message_history()
     contents: List[Dict[str, Any]] = []
 

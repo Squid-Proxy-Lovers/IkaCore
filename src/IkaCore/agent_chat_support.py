@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Callable, Dict, List, Optional, Protocol
 
 from IkaCore.cli_output import get_cli_output
+from IkaModel.async_runner import run_async
 from IkaModel.base import AgentEndException, AgentTool, BareBoneModel
 from IkaModel.chat_interface.chat_interface import async_chat, chat, summarise_message_history
+from IkaModel.execution_hooks import emit_boundary
+from IkaModel.request_control import check_request_controls
+
+from .snapshot_agent_state import resume_pending_response
 
 
 class _ModelFactoryState(Protocol):
@@ -134,7 +138,7 @@ class AgentChatRoundMixin(AgentChatTotalsMixin):
             "total_stages": total_stages,
         }
         if self.use_async:
-            return asyncio.run(async_chat(barebone_model, messages, message_history, **kwargs))
+            return run_async(lambda: async_chat(barebone_model, messages, message_history, **kwargs))
         return chat(barebone_model, messages, message_history, **kwargs)
 
     def chat_wrapper(
@@ -150,7 +154,11 @@ class AgentChatRoundMixin(AgentChatTotalsMixin):
         total_stages: int = 0,
         client: Optional[Any] = None,
     ) -> Dict[str, Any]:
+        saved = resume_pending_response(self)
+        if saved is not None:
+            return saved
         try:
+            emit_boundary("pre_model", {"messages": messages, "stage_index": current_stage_index})
             result = self._run_chat_round(
                 barebone_model,
                 messages,
@@ -166,9 +174,12 @@ class AgentChatRoundMixin(AgentChatTotalsMixin):
             )
         except AgentEndException as exc:
             self._accumulate_response_totals(exc.response or {})
+            emit_boundary("post_model", {"response": exc.response, "agent_end_exception": True,
+                                         "messages": messages, "stage_index": current_stage_index})
             raise
 
         self._accumulate_response_totals(result)
+        emit_boundary("post_model", {"response": result, "messages": messages, "stage_index": current_stage_index})
         return result
 
 
@@ -199,6 +210,7 @@ class AgentFinalOutputMixin:
         )
 
     def _build_final_output(self: _FinalOutputState, final_message: str, barebone_model: BareBoneModel) -> Dict[str, Any]:
+        check_request_controls()
         summary = ""
         if self.summarize_final:
             summary_entry = self.message_history.get("summary", {})
@@ -220,6 +232,7 @@ class AgentFinalOutputMixin:
         if not final_message or final_message.strip() == "":
             final_message = summary
 
+        check_request_controls()
         return {
             "final_message": final_message,
             "summary": summary,

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import concurrent.futures
 import threading
 from typing import Any, Callable, Coroutine, Dict, List, Optional, cast
 
 from IkaCore.agents import IkaBaseAgent
 from IkaCore.cli_output import get_cli_output
+from IkaModel.async_runner import run_async
+from IkaModel.worker_context import submit_with_controls
 
 
 def _run_async_workflow_agent(
@@ -25,8 +26,9 @@ def _run_async_workflow_agent(
             agent.inject_workflow_context(context)
 
         async_execution = getattr(agent, "async_execution", None)
-        if getattr(agent, "use_async", False) and callable(async_execution):
-            result = asyncio.run(cast(Callable[[], Coroutine[Any, Any, Any]], async_execution)())
+        if (getattr(agent, "use_async", False) and callable(async_execution)
+                and not getattr(agent, "_workflow_snapshot_instance", False)):
+            result = run_async(cast(Callable[[], Coroutine[Any, Any, Any]], async_execution))
         else:
             result = agent.execution()
         return {
@@ -60,7 +62,7 @@ class AsyncWorkflowExecutor:
         instance_id: int = 0,
     ) -> concurrent.futures.Future:
         task_id = f"{node_name}_{instance_id}"
-        future = self.executor.submit(_run_async_workflow_agent, node_name, agent, context, instance_id)
+        future = submit_with_controls(self.executor, _run_async_workflow_agent, node_name, agent, context, instance_id)
 
         with self.lock:
             self.pending_tasks[task_id] = future

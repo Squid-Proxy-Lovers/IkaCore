@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Callable
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Optional, cast
@@ -464,25 +463,10 @@ class StageRuntimeModelBuildMixin(SimpleRuntimeSupportMixin):
 
 
 class StageRuntimeBuildMixin(StageRuntimeModelBuildMixin):
-    def _stage_initial_messages(
-        self,
-        stage: Any,
-        resume_input: Optional[str],
-        message_history: JsonDict,
-        content_prompt: str,
-    ) -> list[JsonDict]:
-        if resume_input is None:
-            return [{"role": "user", "content": content_prompt}]
-        if self.logger:
-            self.logger.log_hitl_input(stage.name, resume_input)
-        if resume_input.strip():
-            messages_bucket = history_section(message_history, "messages")
-            messages_bucket[str(uuid.uuid4())] = {
-                "message": resume_input,
-                "tokens": 0,
-                "type": "hitl_input",
-            }
-        return [{"role": "user", "content": resume_input}]
+    def _stage_initial_messages(self, stage: Any, resume_input: Optional[str], message_history: JsonDict,
+                                content_prompt: str) -> list[JsonDict]:
+        from .snapshot_agent_state import stage_initial_messages
+        return stage_initial_messages(self, stage, resume_input, message_history, content_prompt)
 
     def _stage_tool_executors(
         self,
@@ -520,6 +504,8 @@ class StageRuntimePreparationMixin(StageRuntimeBuildMixin):
         agent_tools = self.build_stage(stage)
         current_hierarchy = self._stage_current_hierarchy(stage, stage_index)
         content_prompt = build_stage_content_prompt(self.prompt, self.Stages, stage, stage_index)
+        from .workflow_prompt_context import stage_context
+        content_prompt = stage_context(self, content_prompt)
 
         first_input = history_section(message_history, "first_input")
         first_input["message"] = content_prompt
@@ -533,6 +519,8 @@ class StageRuntimePreparationMixin(StageRuntimeBuildMixin):
             content_prompt,
         )
         messages = self._stage_initial_messages(stage, resume_input, message_history, content_prompt)
+        from .snapshot_agent_state import stage_boundary
+        stage_boundary(stage_index, remaining_steps, stage.name, messages)
         tool_executors = self._stage_tool_executors(stage, stage_index, remaining_steps, current_hierarchy)
         step_limit = stage_step_limit(stage, remaining_steps)
         if self.logger:
@@ -571,6 +559,8 @@ class SimpleRuntimePreparationMixin(StageRuntimePreparationMixin):
         if getattr(self, 'context_budget', None):
             barebone_model.context_budget = self.context_budget
         messages: list[JsonDict] = [{"role": "user", "content": start_prompt}]
+        from .snapshot_agent_state import restore_messages
+        messages = restore_messages(self, messages)
         tool_executors = self.build_tool_executors(
             self.tools,
             memory_access=self.memory_access,

@@ -14,6 +14,7 @@ from IkaCore.agent_runtime_payloads import JsonDict
 from ..base import BareBoneModel
 from ..request_interface import api_request_retry, async_api_request_retry
 from ..request_interface import get_provider as _get_provider
+from ..request_transport import new_async_client
 from ..summarization import (
     async_summarise_message_history,
     run_summarization,
@@ -280,7 +281,7 @@ async def async_chat(
 
     should_close_client = client is None
     if client is None:
-        client = httpx.AsyncClient(timeout=timeout)
+        client = new_async_client(timeout)
 
     try:
         return await _async_chat_with_client(

@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from typing import Any, Optional, cast
@@ -17,6 +17,12 @@ from IkaCore.cli_output import get_cli_output
 from IkaCore.tools import ToolExecutor, ToolParameters
 
 from ..base import AgentEndException, HumanInputRequired
+from ..execution_hooks import hooks_enabled, invoke_tool
+from ..request_control import check_request_controls
+from ..request_lifecycle import wait_for_tool
+from ..runtime_errors import IkaRequestControlError
+from ..tool_output import truncate_tool_result
+from ..worker_context import submit_with_controls
 from .tool_result_formatters import format_provider_tool_results
 
 LOG = logging.getLogger(__name__)
@@ -99,6 +105,18 @@ def validate_tool_args(
     return coerced_args
 
 
+def _submit_executor(function: ToolExecutor, args: ToolParameters, name: str) -> Future[object]:
+    def submit(pool: ThreadPoolExecutor) -> Future[object]:
+        if hooks_enabled():
+            return submit_with_controls(pool, invoke_tool, function, args, name,
+                                        getattr(function, "__ika_runtime_metadata__", {}))
+        return submit_with_controls(pool, function, args)
+    try:
+        return submit(_ensure_tool_executor_pool())
+    except RuntimeError:
+        return submit(_reset_tool_executor_pool())
+
+
 def execute_tool(
     tool_name: str,
     tool_args: object,
@@ -107,6 +125,7 @@ def execute_tool(
     agent_hierarchy: Optional[list[str]] = None,
     step: int = 0,
 ) -> str:
+    check_request_controls()
     LOG.debug(f"[TOOL START] Executing tool '{tool_name}'")
     cli = get_cli_output()
     hierarchy = list(agent_hierarchy or []) + [tool_name]
@@ -129,31 +148,28 @@ def execute_tool(
     cli.tool_call(tool_name, validated_args, hierarchy, step)
 
     future = None
+    tool_timeout = getattr(executor_fn, "__tool_timeout__", timeout)
     try:
-        executor_pool = _ensure_tool_executor_pool()
-        try:
-            future = executor_pool.submit(executor_fn, validated_args)
-        except RuntimeError:
-            # Pool can be shut down by lifecycle races; recreate once and retry.
-            executor_pool = _reset_tool_executor_pool()
-            future = executor_pool.submit(executor_fn, validated_args)
-        result: object = future.result(timeout=timeout)
+        future = _submit_executor(executor_fn, validated_args, tool_name)
+        result: object = wait_for_tool(future, tool_timeout)
 
-        result_str = result if isinstance(result, str) else json.dumps(result)
+        result_str = truncate_tool_result(result if isinstance(result, str) else json.dumps(result), tool_name)
         cli.tool_result(tool_name, result_str, hierarchy, step)
 
         LOG.debug(f"[TOOL END] Finished tool '{tool_name}'")
-        if isinstance(result, str):
-            return result
-        return json.dumps(result)
+        return result_str
     except AgentEndException:
         raise
     except HumanInputRequired:
         raise
+    except IkaRequestControlError:
+        if future is not None:
+            future.cancel()
+        raise
     except FutureTimeoutError:
         if future is not None:
             future.cancel()
-        timeout_msg = f"Tool '{tool_name}' execution timed out after {timeout}s"
+        timeout_msg = f"Tool '{tool_name}' execution timed out after {tool_timeout}s"
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
         LOG.warning(timeout_msg)
         return json.dumps({"error": timeout_msg})
@@ -329,7 +345,7 @@ def _execute_parallel_tool_plan(
     try:
         futures: dict[Any, tuple[str, str]] = {}
         for tool_name, args, tool_call_id in plan.parallel_calls:
-            future = executor_pool.submit(execute_tool, tool_name, args, tool_executors, timeout, agent_hierarchy, step)
+            future = submit_with_controls(executor_pool, execute_tool, tool_name, args, tool_executors, timeout, agent_hierarchy, step)
             futures[future] = (tool_name, tool_call_id)
 
         for future in futures:
@@ -339,10 +355,14 @@ def _execute_parallel_tool_plan(
                 # concurrent futures. Preserve that contract instead of
                 # attempting timeout arithmetic after the tool has completed.
                 wrapper_timeout = None if timeout is None else timeout + 5.0
-                result = future.result(timeout=wrapper_timeout)
+                result = wait_for_tool(future, wrapper_timeout)
                 plan.tool_call_id_to_result[tool_call_id] = result
                 tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
             except AgentEndException:
+                raise
+            except IkaRequestControlError:
+                for pending in futures:
+                    pending.cancel()
                 raise
             except HumanInputRequired as exc:
                 interrupt_data = exc.payload
