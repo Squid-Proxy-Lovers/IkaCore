@@ -1,6 +1,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
+from ..history_replay import is_user_entry, plan_history_replay
 from ..tool_schema import build_provider_tool_payload
 
 
@@ -28,12 +29,13 @@ def _append_deepseek_context(api_messages: List[Dict[str, Any]], message_history
         api_messages.append({"role": "assistant", "content": message_history["summary"]["message"]})
 
 
-def _append_deepseek_history(api_messages: List[Dict[str, Any]], message_history: Dict[str, Any]) -> None:
-    for msg_id in message_history["messages"]:
-        msg = message_history["messages"][msg_id]
+def _append_deepseek_history(api_messages: List[Dict[str, Any]], entries: List[Dict[str, Any]]) -> None:
+    for msg in entries:
         msg_type = msg.get("type", "assistant")
         raw = msg.get("message", "")
-        if msg_type in {"assistant_with_tools", "tool"}:
+        if is_user_entry(msg):
+            api_messages.append({"role": "user", "content": raw if isinstance(raw, str) else str(raw)})
+        elif msg_type in {"assistant_with_tools", "tool"}:
             try:
                 api_messages.append(json.loads(raw))
             except (json.JSONDecodeError, TypeError):
@@ -73,14 +75,18 @@ def deepseek_fill_payload(
     message_history: Optional[Dict[str, Any]] = None,
     agent_tools: Optional[list[Any]] = None,
 ) -> Dict[str, Any]:
-    from ..runtime_policy import current_runtime_options
-    if current_runtime_options().optimize_provider_payloads:
-        from .deepseek_optimized import deepseek_fill_payload as optimized
-        return optimized(model, messages, message_history, agent_tools)
     message_history = message_history or _default_message_history()
     api_messages: List[Dict[str, Any]] = []
-    _append_deepseek_context(api_messages, message_history)
-    _append_deepseek_history(api_messages, message_history)
+    plan = plan_history_replay(message_history, messages)
+    if plan.first_input_first:
+        _append_deepseek_context(api_messages, message_history)
+        _append_deepseek_history(api_messages, plan.entries)
+    else:
+        if message_history["system"]["message"]:
+            api_messages.append({"role": "system", "content": message_history["system"]["message"]})
+        _append_deepseek_history(api_messages, plan.entries)
+        if plan.emit_first_input:
+            api_messages.append({"role": "user", "content": message_history["first_input"]["message"]})
     _append_live_messages(api_messages, messages, message_history["first_input"]["message"])
 
     payload = {

@@ -12,25 +12,7 @@ import httpx
 from IkaCore.agent_runtime_payloads import JsonDict
 
 from ..base import BareBoneModel
-from ..request_interface import api_request_retry, async_api_request_retry
-from ..request_interface import get_provider as _get_provider
 from ..request_transport import new_async_client
-from ..summarization import (
-    async_summarise_message_history,
-    run_summarization,
-    summarise_message_history,
-)
-from ..summarization import (
-    create_summary_payload as _create_summary_payload,
-)
-from ..summarization import (
-    get_summary_model as _get_summary_model,
-)
-from . import chat_request as _request
-from . import chat_response as _response
-from . import chat_tool_loop as _tool_loop
-from . import chat_tool_loop_async as _tool_loop_async
-from . import chat_tool_loop_sync as _tool_loop_sync
 from .chat_request import (
     _ensure_first_input,
     _prepare_chat_inputs,
@@ -44,38 +26,10 @@ from .chat_response import (
     _finalize_chat_response,
     _new_chat_state,
 )
-from .chat_tool_loop import (
-    _async_tool_loop,
-    _flush_async_remaining_tools,
-    _flush_sync_remaining_tools,
-    _sync_tool_loop,
-)
+from .chat_tool_loop_async import _async_tool_loop, _flush_async_remaining_tools
+from .chat_tool_loop_sync import _flush_sync_remaining_tools, _sync_tool_loop
 from .tool_execution_sync import ToolExecutorMap
 from .types import ChatLoopState, ToolRuntimeState
-
-create_summary_payload = _create_summary_payload
-get_provider = _get_provider
-get_summary_model = _get_summary_model
-get_total_tokens = _request.get_total_tokens
-init_message_history = _request.init_message_history
-
-
-def _sync_dependency_modules() -> None:
-    _request.api_request_retry = api_request_retry
-    _request.async_api_request_retry = async_api_request_retry
-    _request.summarise_message_history = summarise_message_history
-    _request.async_summarise_message_history = async_summarise_message_history
-    _response.run_summarization = run_summarization
-    _response.async_summarise_message_history = async_summarise_message_history
-    _tool_loop_sync.run_summarization = run_summarization
-    _tool_loop_async.async_summarise_message_history = async_summarise_message_history
-
-
-def __getattr__(name: str) -> Any:
-    for module in (_request, _response, _tool_loop):
-        if hasattr(module, name):
-            return getattr(module, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _initial_sync_chat_state(
@@ -134,7 +88,6 @@ def chat(
     current_stage_index: Optional[int] = None,
     total_stages: int = 0,
 ) -> JsonDict:
-    _sync_dependency_modules()
     message_history, tool_executors = _prepare_chat_inputs(
         barebone_model, messages, message_history, tool_executors, logger
     )
@@ -270,7 +223,6 @@ async def async_chat(
     current_stage_index: Optional[int] = None,
     total_stages: int = 0,
 ) -> JsonDict:
-    _sync_dependency_modules()
     message_history, tool_executors = _prepare_chat_inputs(
         barebone_model, messages, message_history, tool_executors, logger
     )
@@ -301,17 +253,4 @@ async def async_chat(
             await client.aclose()
 
 
-__all__ = [
-    "api_request_retry",
-    "async_api_request_retry",
-    "async_chat",
-    "async_summarise_message_history",
-    "chat",
-    "create_summary_payload",
-    "get_provider",
-    "get_summary_model",
-    "get_total_tokens",
-    "init_message_history",
-    "run_summarization",
-    "summarise_message_history",
-]
+__all__ = ["chat", "async_chat"]

@@ -7,13 +7,13 @@ from IkaModel.codex.chat_helpers_codex import (
     _CodexRetryableStreamError,
     _collect_stream,
     _iter_sse,
-    _parse_retry_after,
     _retry_codex_exception,
     append_codex_tool_messages,
     is_codex_url,
     parse_codex_response,
     request_codex,
 )
+from IkaModel.retry_policy import parse_retry_after as _parse_retry_after
 
 
 class _FakeStreamResponse:
@@ -34,7 +34,7 @@ def test_codex_url_accepts_a_scoped_gateway_endpoint():
 
 
 def test_retry_after_falls_back_when_http_date_parser_raises():
-    with patch("IkaModel.codex.chat_helpers_codex.email.utils.parsedate_to_datetime", side_effect=ValueError("bad")):
+    with patch("IkaModel.retry_policy.email.utils.parsedate_to_datetime", side_effect=ValueError("bad")):
         assert _parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT", default=9) == 9.0
 
 

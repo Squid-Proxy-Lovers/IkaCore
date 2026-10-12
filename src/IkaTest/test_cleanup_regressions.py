@@ -21,13 +21,11 @@ from IkaMem.long_term_memory import LTMemory
 from IkaMem.short_term_memory import STMemory
 from IkaModel import model_metadata
 from IkaModel.base import AgentEndException, AgentTool, BareBoneModel, ToolArgs
-from IkaModel.chat_interface import chat_runtime
+from IkaModel.chat_interface import chat_request as _test_chat_request
 from IkaModel.chat_interface.chat_interface import async_chat, chat, init_message_history
-from IkaModel.chat_interface.response_interface import (
-    async_execute_tool_calls,
-    execute_tool_calls,
-    format_gemini_results,
-)
+from IkaModel.chat_interface.tool_execution_async import async_execute_tool_calls
+from IkaModel.chat_interface.tool_execution_sync import execute_tool_calls
+from IkaModel.chat_interface.tool_result_formatters import format_gemini_results
 from IkaModel.chat_interface.types import ChatLoopState, ChatResponsePayload, ToolRuntimeState, UsageInfo
 from IkaModel.codex import auth as codex_auth
 from IkaModel.gemini.chat_helpers_gemini import build_gemini_request
@@ -195,7 +193,7 @@ def test_chat_context_fallback_classifies_initial_payload_build_failure():
         raise KeyError("missing required field")
 
     with pytest.raises(IkaProviderPayloadError, match="provider request payload"):
-        chat_runtime._api_request_with_context_fallback(build_payload, model, init_message_history())
+        _test_chat_request._api_request_with_context_fallback(build_payload, model, init_message_history())
 
 
 def test_chat_context_fallback_classifies_rebuild_failure_after_summarization():
@@ -215,12 +213,12 @@ def test_chat_context_fallback_classifies_rebuild_failure_after_summarization():
         raise ValueError("bad rebuilt payload")
 
     with patch(
-        "IkaModel.chat_interface.chat_request.api_request_retry",
+        "IkaModel.request_interface.api_request_retry",
         side_effect=IkaAPIError("maximum context length exceeded"),
     ):
-        with patch("IkaModel.chat_interface.chat_request.summarise_message_history", return_value="summary"):
+        with patch("IkaModel.summarization.summarise_message_history", return_value="summary"):
             with pytest.raises(IkaContextWindowError, match="rebuild provider request"):
-                chat_runtime._api_request_with_context_fallback(build_payload, model, init_message_history())
+                _test_chat_request._api_request_with_context_fallback(build_payload, model, init_message_history())
 
 
 def test_sync_tool_calls_reject_malformed_json_without_execution():
@@ -295,9 +293,9 @@ def test_async_repeated_tool_guard_returns_forced_completion_without_execution()
         return "should not execute"
 
     async def run_case():
-        with patch("IkaModel.chat_interface.chat_interface.async_api_request_retry", return_value=response):
+        with patch("IkaModel.request_interface.async_api_request_retry", return_value=response):
             with patch(
-                "IkaModel.chat_interface.chat_interface.async_summarise_message_history",
+                "IkaModel.summarization.async_summarise_message_history",
                 return_value="forced final",
             ):
                 return await async_chat(
@@ -339,8 +337,8 @@ def test_sync_max_tool_calls_force_completes_with_synthetic_agent_end():
         "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
     }
 
-    with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=response):
-        with patch("IkaModel.chat_interface.chat_interface.run_summarization", return_value="forced done"):
+    with patch("IkaModel.request_interface.api_request_retry", return_value=response):
+        with patch("IkaModel.summarization.run_summarization", return_value="forced done"):
             with pytest.raises(AgentEndException) as exc_info:
                 chat(
                     model,

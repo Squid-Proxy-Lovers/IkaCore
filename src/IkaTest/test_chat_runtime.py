@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from IkaModel.base import AgentEndException, AgentTool, BareBoneModel, ToolArgs
+from IkaModel.chat_interface import chat_request as _test_chat_request
+from IkaModel.chat_interface import chat_response as _test_chat_response
 from IkaModel.chat_interface import chat_runtime as cr
+from IkaModel.chat_interface import chat_tool_common as _test_chat_tool_common
+from IkaModel.chat_interface import chat_tool_loop_async as _test_chat_tool_loop_async
+from IkaModel.chat_interface import chat_tool_loop_sync as _test_chat_tool_loop_sync
 from IkaModel.chat_interface.types import ToolRuntimeState, UsageInfo
 from IkaModel.request_interface import IkaAPIError
 from IkaModel.runtime_errors import IkaContextWindowError, IkaProviderResponseError
@@ -25,7 +30,7 @@ def _model(**overrides):
 
 
 def _history():
-    return cr.init_message_history()
+    return _test_chat_request.init_message_history()
 
 
 def _tool_call(name="search", arguments='{"q":"x"}', call_id="call_1"):
@@ -37,7 +42,7 @@ def test_dump_api_round_writes_debug_file_when_enabled(tmp_path, monkeypatch):
     payload = {"messages": [{"role": "user", "content": "hello"}]}
 
     monkeypatch.setenv("IKA_DUMP_REQUESTS", str(tmp_path))
-    cr._dump_api_round(model, payload, {"ok": True})
+    _test_chat_response._dump_api_round(model, payload, {"ok": True})
 
     files = list(tmp_path.glob("*.json"))
     assert len(files) == 1
@@ -70,9 +75,9 @@ def test_tool_metadata_extracts_parallel_limits_and_required_properties():
         )
     ]
 
-    metadata = cr._build_tool_metadata(model)
+    metadata = _test_chat_response._build_tool_metadata(model)
 
-    assert cr._build_tool_metadata(SimpleNamespace()) == {}
+    assert _test_chat_response._build_tool_metadata(SimpleNamespace()) == {}
     assert metadata["search"]["parallel"] is False
     assert metadata["search"]["limit_calls"] == 2
     assert metadata["search"]["parameters"] == {
@@ -85,7 +90,7 @@ def test_prepare_chat_inputs_validates_contract_and_logs_input():
     model = _model()
     logger = MagicMock()
 
-    message_history, tools = cr._prepare_chat_inputs(
+    message_history, tools = _test_chat_request._prepare_chat_inputs(
         model,
         [{"role": "user", "content": "hi"}],
         None,
@@ -98,19 +103,19 @@ def test_prepare_chat_inputs_validates_contract_and_logs_input():
     logger.log_input.assert_called_once()
 
     with pytest.raises(ValueError, match="barebone_model"):
-        cr._prepare_chat_inputs(None, [{"role": "user", "content": "hi"}], None, None, None)
+        _test_chat_request._prepare_chat_inputs(None, [{"role": "user", "content": "hi"}], None, None, None)
     with pytest.raises(ValueError, match="cannot be empty"):
-        cr._prepare_chat_inputs(model, [], None, None, None)
+        _test_chat_request._prepare_chat_inputs(model, [], None, None, None)
     with pytest.raises(ValueError, match="must be a list"):
-        cr._prepare_chat_inputs(model, "hi", None, None, None)
+        _test_chat_request._prepare_chat_inputs(model, "hi", None, None, None)
     with pytest.raises(ValueError, match="model_id"):
-        cr._prepare_chat_inputs(SimpleNamespace(model_id="", api_key="k", api_url="u"), [{"role": "user"}], None, None, None)
+        _test_chat_request._prepare_chat_inputs(SimpleNamespace(model_id="", api_key="k", api_url="u"), [{"role": "user"}], None, None, None)
     with pytest.raises(ValueError, match="api_key"):
-        cr._prepare_chat_inputs(SimpleNamespace(model_id="m", api_key="", api_url="u"), [{"role": "user"}], None, None, None)
+        _test_chat_request._prepare_chat_inputs(SimpleNamespace(model_id="m", api_key="", api_url="u"), [{"role": "user"}], None, None, None)
     with pytest.raises(ValueError, match="api_url"):
-        cr._prepare_chat_inputs(SimpleNamespace(model_id="m", api_key="k", api_url=""), [{"role": "user"}], None, None, None)
+        _test_chat_request._prepare_chat_inputs(SimpleNamespace(model_id="m", api_key="k", api_url=""), [{"role": "user"}], None, None, None)
     with pytest.raises(ValueError, match="tool_executors"):
-        cr._prepare_chat_inputs(model, [{"role": "user"}], None, [], None)
+        _test_chat_request._prepare_chat_inputs(model, [{"role": "user"}], None, [], None)
 
 
 def test_force_complete_with_summary_falls_back_and_clears_forced_tool_choice():
@@ -120,9 +125,9 @@ def test_force_complete_with_summary_falls_back_and_clears_forced_tool_choice():
     logger = MagicMock()
     logger.compute_cost.return_value = {"total_cost": 0.1}
 
-    with patch("IkaModel.chat_interface.chat_response.run_summarization", side_effect=RuntimeError("summary failed")):
+    with patch("IkaModel.summarization.run_summarization", side_effect=RuntimeError("summary failed")):
         with pytest.raises(AgentEndException) as exc_info:
-            cr._force_complete_with_summary(
+            _test_chat_response._force_complete_with_summary(
                 model,
                 history,
                 {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
@@ -148,11 +153,11 @@ def test_async_force_complete_with_summary_uses_reason_when_summary_and_content_
         model.forced_tool_name = "agent_end"
         history = _history()
         with patch(
-            "IkaModel.chat_interface.chat_response.async_summarise_message_history",
+            "IkaModel.summarization.async_summarise_message_history",
             side_effect=RuntimeError("summary failed"),
         ):
             with pytest.raises(AgentEndException) as exc_info:
-                await cr._async_force_complete_with_summary(
+                await _test_chat_response._async_force_complete_with_summary(
                     model,
                     history,
                     UsageInfo(),
@@ -184,7 +189,7 @@ def test_interrupt_and_control_completion_helpers_build_expected_responses():
     tool_messages = [{"role": "tool", "content": "paused", "tool_call_id": "call_1"}]
     interrupt_data = {"question": "Proceed?", "stage_name": "Review"}
 
-    assert cr._interrupt_response_if_needed(
+    assert _test_chat_response._interrupt_response_if_needed(
         model,
         logger,
         None,
@@ -203,7 +208,7 @@ def test_interrupt_and_control_completion_helpers_build_expected_responses():
         hijacked=False,
     ) is None
 
-    response = cr._interrupt_response_if_needed(
+    response = _test_chat_response._interrupt_response_if_needed(
         model,
         logger,
         interrupt_data,
@@ -228,7 +233,7 @@ def test_interrupt_and_control_completion_helpers_build_expected_responses():
     assert response["interrupt_data"] == interrupt_data
     logger.log_hitl_prompt.assert_called_once_with("Review")
 
-    assert cr._handle_control_tool_completion(
+    assert _test_chat_response._handle_control_tool_completion(
         model,
         logger,
         "done",
@@ -244,7 +249,7 @@ def test_interrupt_and_control_completion_helpers_build_expected_responses():
     assert model.forced_tool_name is None
 
     with pytest.raises(AgentEndException) as exc_info:
-        cr._handle_control_tool_completion(
+        _test_chat_response._handle_control_tool_completion(
             model,
             logger,
             "final",
@@ -264,9 +269,9 @@ def test_repeated_tool_guards_warn_then_hijack_after_five_identical_calls():
     model = _model()
     history = _history()
     calls = [_tool_call("search")]
-    runtime = SimpleNamespace(recent_tool_calls=[cr._tool_signature_from_call(calls[0])] * 3)
+    runtime = SimpleNamespace(recent_tool_calls=[_test_chat_response._tool_signature_from_call(calls[0])] * 3)
 
-    response, names = cr._sync_repeated_tool_guard(
+    response, names = _test_chat_tool_loop_sync._sync_repeated_tool_guard(
         model,
         None,
         calls,
@@ -280,11 +285,11 @@ def test_repeated_tool_guards_warn_then_hijack_after_five_identical_calls():
 
     assert response is None
     assert names == ["search"]
-    assert "search" in cr._repeated_tool_warning(names)
+    assert "search" in _test_chat_response._repeated_tool_warning(names)
 
-    runtime.recent_tool_calls = [cr._tool_signature_from_call(calls[0])] * 5
-    with patch("IkaModel.chat_interface.chat_response.run_summarization", return_value=""):
-        response, names = cr._sync_repeated_tool_guard(
+    runtime.recent_tool_calls = [_test_chat_response._tool_signature_from_call(calls[0])] * 5
+    with patch("IkaModel.summarization.run_summarization", return_value=""):
+        response, names = _test_chat_tool_loop_sync._sync_repeated_tool_guard(
             model,
             None,
             calls,
@@ -306,12 +311,12 @@ def test_async_repeated_tool_guard_falls_back_when_force_summary_fails():
         model = _model()
         history = _history()
         calls = [_tool_call("search")]
-        runtime = SimpleNamespace(recent_tool_calls=[cr._tool_signature_from_call(calls[0])] * 5)
+        runtime = SimpleNamespace(recent_tool_calls=[_test_chat_response._tool_signature_from_call(calls[0])] * 5)
         with patch(
-            "IkaModel.chat_interface.chat_response.async_summarise_message_history",
+            "IkaModel.summarization.async_summarise_message_history",
             side_effect=RuntimeError("summary failed"),
         ):
-            return await cr._async_repeated_tool_guard(
+            return await _test_chat_tool_loop_async._async_repeated_tool_guard(
                 model,
                 None,
                 calls,
@@ -336,7 +341,7 @@ def test_tool_execution_result_updates_runtime_state_and_appends_messages():
     messages = []
     logger = MagicMock()
     runtime = ToolRuntimeState.from_model(model)
-    state = cr._new_chat_state("openai", "content", "reasoning", [_tool_call("search")], 4, {"total_tokens": 4})
+    state = _test_chat_response._new_chat_state("openai", "content", "reasoning", [_tool_call("search")], 4, {"total_tokens": 4})
     batch = (
         [{"role": "tool", "content": '{"ok":true}', "tool_call_id": "call_1"}],
         ['{"ok":true}'],
@@ -345,7 +350,7 @@ def test_tool_execution_result_updates_runtime_state_and_appends_messages():
         None,
     )
 
-    cr._apply_tool_execution_result(
+    _test_chat_tool_common._apply_tool_execution_result(
         model,
         logger,
         runtime,
@@ -355,12 +360,12 @@ def test_tool_execution_result_updates_runtime_state_and_appends_messages():
         batch[1],
         remember_signatures=True,
     )
-    cr._append_tool_loop_messages(messages, history, state, batch, repeated_tool_names={"search"})
+    _test_chat_tool_common._append_tool_loop_messages(messages, history, state, batch, repeated_tool_names={"search"})
 
     assert model._tool_call_counts == {"search": 1}
     assert model._current_step == 1
     assert state.executed_tool_calls == [_tool_call("search")]
-    assert runtime.recent_tool_calls == [cr._tool_signature_from_call(_tool_call("search"))]
+    assert runtime.recent_tool_calls == [_test_chat_response._tool_signature_from_call(_tool_call("search"))]
     assert messages
     assert history["messages"]
     assert "System note" in messages[-1].get("content", "")
@@ -370,23 +375,23 @@ def test_tool_execution_result_updates_runtime_state_and_appends_messages():
 def test_sync_and_async_advance_tool_round_update_usage_or_stop_at_limit():
     model = _model()
     history = _history()
-    state = cr._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
+    state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
 
-    assert cr._sync_advance_tool_round(model, [], history, 1, None, max_tool_rounds=1, state=state) is False
+    assert _test_chat_tool_loop_sync._sync_advance_tool_round(model, [], history, 1, None, max_tool_rounds=1, state=state) is False
     assert state.tool_calls == []
 
-    state = cr._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
+    state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
     with patch(
         "IkaModel.chat_interface.chat_tool_loop_sync._request_provider_round",
         return_value=("next", None, [], 3, {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3}),
     ):
-        assert cr._sync_advance_tool_round(model, [], history, 1, None, max_tool_rounds=2, state=state) is True
+        assert _test_chat_tool_loop_sync._sync_advance_tool_round(model, [], history, 1, None, max_tool_rounds=2, state=state) is True
     assert state.content == "next"
     assert state.usage.total_tokens == 4
 
     async def run_case():
-        async_state = cr._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
-        assert await cr._async_advance_tool_round(
+        async_state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
+        assert await _test_chat_tool_loop_async._async_advance_tool_round(
             model,
             [],
             history,
@@ -397,12 +402,12 @@ def test_sync_and_async_advance_tool_round_update_usage_or_stop_at_limit():
         ) is False
         assert async_state.tool_calls == []
 
-        async_state = cr._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
+        async_state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
         with patch(
             "IkaModel.chat_interface.chat_tool_loop_async._request_provider_round_async",
             return_value=("next async", None, [], 2, {"total_tokens": 2}),
         ):
-            assert await cr._async_advance_tool_round(
+            assert await _test_chat_tool_loop_async._async_advance_tool_round(
                 model,
                 [],
                 history,
@@ -425,20 +430,20 @@ def test_flush_remaining_tools_handles_empty_interrupt_stage_end_and_append_path
     logger = MagicMock()
     runtime = ToolRuntimeState.from_model(model)
 
-    empty_state = cr._new_chat_state("openai", "content", None, [], 1, {"total_tokens": 1})
-    assert cr._flush_sync_remaining_tools(model, messages, history, {}, logger, 1, empty_state, runtime) is None
+    empty_state = _test_chat_response._new_chat_state("openai", "content", None, [], 1, {"total_tokens": 1})
+    assert _test_chat_tool_loop_sync._flush_sync_remaining_tools(model, messages, history, {}, logger, 1, empty_state, runtime) is None
 
-    state = cr._new_chat_state("openai", "content", None, [_tool_call("ask")], 1, {"total_tokens": 1})
+    state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("ask")], 1, {"total_tokens": 1})
     interrupt_batch = ([], ["paused"], {"ask": 1}, [_tool_call("ask")], {"question": "Proceed?"})
     with patch("IkaModel.chat_interface.chat_tool_loop_sync._sync_execute_tool_batch", return_value=interrupt_batch):
-        response = cr._flush_sync_remaining_tools(model, messages, history, {"ask": lambda _args: "unused"}, logger, 1, state, runtime)
+        response = _test_chat_tool_loop_sync._flush_sync_remaining_tools(model, messages, history, {"ask": lambda _args: "unused"}, logger, 1, state, runtime)
     assert response["interrupted"] is True
     assert state.tool_calls == [_tool_call("ask")]
 
-    state = cr._new_chat_state("openai", "content", None, [_tool_call("stage_end")], 1, {"total_tokens": 1})
+    state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("stage_end")], 1, {"total_tokens": 1})
     stage_batch = ([], ["ok"], {"stage_end": 1}, [_tool_call("stage_end")], None)
     with patch("IkaModel.chat_interface.chat_tool_loop_sync._sync_execute_tool_batch", return_value=stage_batch):
-        assert cr._flush_sync_remaining_tools(
+        assert _test_chat_tool_loop_sync._flush_sync_remaining_tools(
             model,
             messages,
             history,
@@ -450,7 +455,7 @@ def test_flush_remaining_tools_handles_empty_interrupt_stage_end_and_append_path
         ) is None
     assert state.tool_calls == []
 
-    state = cr._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
+    state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
     append_batch = (
         [{"role": "tool", "content": "ok", "tool_call_id": "call_1"}],
         ["ok"],
@@ -459,7 +464,7 @@ def test_flush_remaining_tools_handles_empty_interrupt_stage_end_and_append_path
         None,
     )
     with patch("IkaModel.chat_interface.chat_tool_loop_sync._sync_execute_tool_batch", return_value=append_batch):
-        assert cr._flush_sync_remaining_tools(model, messages, history, {"search": lambda _args: "unused"}, logger, 1, state, runtime) is None
+        assert _test_chat_tool_loop_sync._flush_sync_remaining_tools(model, messages, history, {"search": lambda _args: "unused"}, logger, 1, state, runtime) is None
     assert state.tool_calls == []
     assert messages
 
@@ -473,8 +478,8 @@ def test_async_flush_remaining_tools_handles_empty_interrupt_and_append_paths():
         runtime = ToolRuntimeState.from_model(model)
         client = MagicMock()
 
-        empty_state = cr._new_chat_state("openai", "content", None, [], 1, {"total_tokens": 1})
-        assert await cr._flush_async_remaining_tools(
+        empty_state = _test_chat_response._new_chat_state("openai", "content", None, [], 1, {"total_tokens": 1})
+        assert await _test_chat_tool_loop_async._flush_async_remaining_tools(
             model,
             messages,
             history,
@@ -486,13 +491,13 @@ def test_async_flush_remaining_tools_handles_empty_interrupt_and_append_paths():
             runtime,
         ) is None
 
-        state = cr._new_chat_state("openai", "content", None, [_tool_call("ask")], 1, {"total_tokens": 1})
+        state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("ask")], 1, {"total_tokens": 1})
         interrupt_batch = ([], ["paused"], {"ask": 1}, [_tool_call("ask")], {"question": "Proceed?"})
         with patch(
             "IkaModel.chat_interface.chat_tool_loop_async._async_execute_tool_batch",
             AsyncMock(return_value=interrupt_batch),
         ):
-            response = await cr._flush_async_remaining_tools(
+            response = await _test_chat_tool_loop_async._flush_async_remaining_tools(
                 model,
                 messages,
                 history,
@@ -506,7 +511,7 @@ def test_async_flush_remaining_tools_handles_empty_interrupt_and_append_paths():
         assert response["interrupted"] is True
         assert state.tool_calls == [_tool_call("ask")]
 
-        state = cr._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
+        state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
         append_batch = (
             [{"role": "tool", "content": "ok", "tool_call_id": "call_1"}],
             ["ok"],
@@ -518,7 +523,7 @@ def test_async_flush_remaining_tools_handles_empty_interrupt_and_append_paths():
             "IkaModel.chat_interface.chat_tool_loop_async._async_execute_tool_batch",
             AsyncMock(return_value=append_batch),
         ):
-            assert await cr._flush_async_remaining_tools(
+            assert await _test_chat_tool_loop_async._flush_async_remaining_tools(
                 model,
                 messages,
                 history,
@@ -543,14 +548,14 @@ def test_async_tool_loop_iteration_handles_repeated_response_and_continue_path()
         logger = MagicMock()
         client = MagicMock()
         runtime = ToolRuntimeState.from_model(model)
-        state = cr._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
+        state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
         repeated_response = {"content": "stopped", "hijacked": True}
 
         with patch(
             "IkaModel.chat_interface.chat_tool_loop_async._async_repeated_tool_response_for_state",
             AsyncMock(return_value=(repeated_response, ["search"])),
         ):
-            assert await cr._async_tool_loop_iteration(
+            assert await _test_chat_tool_loop_async._async_tool_loop_iteration(
                 model,
                 messages,
                 history,
@@ -564,7 +569,7 @@ def test_async_tool_loop_iteration_handles_repeated_response_and_continue_path()
                 runtime,
             ) == (repeated_response, False)
 
-        state = cr._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
+        state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
         batch = (
             [{"role": "tool", "content": "ok", "tool_call_id": "call_1"}],
             ["ok"],
@@ -585,7 +590,7 @@ def test_async_tool_loop_iteration_handles_repeated_response_and_continue_path()
                         "IkaModel.chat_interface.chat_tool_loop_async._async_continue_tool_loop_after_batch",
                         AsyncMock(return_value=True),
                     ):
-                        assert await cr._async_tool_loop_iteration(
+                        assert await _test_chat_tool_loop_async._async_tool_loop_iteration(
                             model,
                             messages,
                             history,
@@ -606,23 +611,23 @@ def test_max_tool_limit_force_completion_delegates_to_sync_and_async_helpers():
     model = _model()
     history = _history()
     logger = MagicMock()
-    state = cr._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
+    state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
     runtime = ToolRuntimeState.from_model(model)
     runtime.current_step = 2
 
     with patch("IkaModel.chat_interface.chat_tool_loop_sync._force_complete_with_summary") as force_complete:
-        cr._sync_force_complete_if_max_tools(model, logger, history, state, runtime, max_tool_calls=2)
+        _test_chat_tool_loop_sync._sync_force_complete_if_max_tools(model, logger, history, state, runtime, max_tool_calls=2)
     force_complete.assert_called_once()
 
     async def run_async_case():
         async_runtime = ToolRuntimeState.from_model(model)
         async_runtime.current_step = 3
-        async_state = cr._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
+        async_state = _test_chat_response._new_chat_state("openai", "content", None, [_tool_call("search")], 1, {"total_tokens": 1})
         with patch(
             "IkaModel.chat_interface.chat_tool_loop_async._async_force_complete_with_summary",
             AsyncMock(),
         ) as async_force_complete:
-            await cr._async_force_complete_if_max_tools(
+            await _test_chat_tool_loop_async._async_force_complete_if_max_tools(
                 model,
                 logger,
                 history,
@@ -642,8 +647,8 @@ def test_api_request_with_context_fallback_success_non_context_and_async_context
 
     non_json_response = MagicMock()
     non_json_response.json.side_effect = ValueError("not json")
-    with patch("IkaModel.chat_interface.chat_request.api_request_retry", return_value=non_json_response):
-        response = cr._api_request_with_context_fallback(
+    with patch("IkaModel.request_interface.api_request_retry", return_value=non_json_response):
+        response = _test_chat_request._api_request_with_context_fallback(
             lambda: ("https://example.test", {}, {"messages": []}),
             model,
             history,
@@ -651,9 +656,9 @@ def test_api_request_with_context_fallback_success_non_context_and_async_context
         )
     assert response is non_json_response
 
-    with patch("IkaModel.chat_interface.chat_request.api_request_retry", side_effect=IkaAPIError("temporary")):
+    with patch("IkaModel.request_interface.api_request_retry", side_effect=IkaAPIError("temporary")):
         with pytest.raises(IkaAPIError):
-            cr._api_request_with_context_fallback(
+            _test_chat_request._api_request_with_context_fallback(
                 lambda: ("https://example.test", {}, {"messages": []}),
                 model,
                 history,
@@ -670,12 +675,12 @@ def test_api_request_with_context_fallback_success_non_context_and_async_context
         response = MagicMock()
         response.json.side_effect = ValueError("not json")
         with patch(
-            "IkaModel.chat_interface.chat_request.async_api_request_retry",
+            "IkaModel.request_interface.async_api_request_retry",
             side_effect=[IkaAPIError("maximum context length exceeded"), response],
         ):
-            with patch("IkaModel.chat_interface.chat_request.async_summarise_message_history", return_value="summary"):
+            with patch("IkaModel.summarization.async_summarise_message_history", return_value="summary"):
                 with patch("IkaModel.chat_interface.chat_request.get_cli_output", return_value=MagicMock()):
-                    out = await cr._api_request_with_context_fallback_async(
+                    out = await _test_chat_request._api_request_with_context_fallback_async(
                         build_payload,
                         model,
                         history,
@@ -705,12 +710,12 @@ def test_sync_context_fallback_summarizes_rebuilds_and_dumps_retry_response(tmp_
     response = MagicMock()
     response.json.side_effect = ValueError("not json")
     with patch(
-        "IkaModel.chat_interface.chat_request.api_request_retry",
+        "IkaModel.request_interface.api_request_retry",
         side_effect=[IkaAPIError("maximum context length exceeded"), response],
     ) as request:
-        with patch("IkaModel.chat_interface.chat_request.summarise_message_history", side_effect=summarize):
+        with patch("IkaModel.summarization.summarise_message_history", side_effect=summarize):
             with patch("IkaModel.chat_interface.chat_request.get_cli_output", return_value=MagicMock()):
-                out = cr._api_request_with_context_fallback(build_payload, model, history, timeout=1)
+                out = _test_chat_request._api_request_with_context_fallback(build_payload, model, history, timeout=1)
 
     assert out is response
     assert [call.args[2] for call in request.call_args_list] == [
@@ -727,13 +732,13 @@ def test_context_fallback_wraps_sync_and_async_summary_failures():
     history = _history()
 
     with patch(
-        "IkaModel.chat_interface.chat_request.api_request_retry",
+        "IkaModel.request_interface.api_request_retry",
         side_effect=IkaAPIError("maximum context length exceeded"),
     ):
-        with patch("IkaModel.chat_interface.chat_request.summarise_message_history", side_effect=RuntimeError("down")):
+        with patch("IkaModel.summarization.summarise_message_history", side_effect=RuntimeError("down")):
             with patch("IkaModel.chat_interface.chat_request.get_cli_output", return_value=MagicMock()):
                 with pytest.raises(IkaContextWindowError, match="Failed to summarize context"):
-                    cr._api_request_with_context_fallback(
+                    _test_chat_request._api_request_with_context_fallback(
                         lambda: ("https://example.test", {}, {"messages": []}),
                         model,
                         history,
@@ -741,16 +746,16 @@ def test_context_fallback_wraps_sync_and_async_summary_failures():
 
     async def run_async_case():
         with patch(
-            "IkaModel.chat_interface.chat_request.async_api_request_retry",
+            "IkaModel.request_interface.async_api_request_retry",
             side_effect=IkaAPIError("maximum context length exceeded"),
         ):
             with patch(
-                "IkaModel.chat_interface.chat_request.async_summarise_message_history",
+                "IkaModel.summarization.async_summarise_message_history",
                 side_effect=RuntimeError("down"),
             ):
                 with patch("IkaModel.chat_interface.chat_request.get_cli_output", return_value=MagicMock()):
                     with pytest.raises(IkaContextWindowError, match="Failed to summarize context"):
-                        await cr._api_request_with_context_fallback_async(
+                        await _test_chat_request._api_request_with_context_fallback_async(
                             lambda: ("https://example.test", {}, {"messages": []}),
                             model,
                             history,
@@ -771,7 +776,7 @@ def test_request_provider_rounds_parse_response_and_initial_async_state_syncs_mo
     response.raise_for_status = MagicMock()
 
     with patch("IkaModel.chat_interface.chat_request._api_request_with_context_fallback", return_value=response):
-        content, reasoning, tool_calls, tokens, usage = cr._request_provider_round(
+        content, reasoning, tool_calls, tokens, usage = _test_chat_request._request_provider_round(
             "openai",
             model,
             [{"role": "user", "content": "hi"}],
@@ -818,21 +823,21 @@ def test_provider_round_wraps_non_json_and_malformed_responses_as_domain_errors(
     non_json.json.side_effect = ValueError("not json")
     with patch("IkaModel.chat_interface.chat_request._api_request_with_context_fallback", return_value=non_json):
         with pytest.raises(IkaProviderResponseError, match="response was not valid JSON"):
-            cr._request_provider_round("openai", model, [], history, timeout=1, client=None)
+            _test_chat_request._request_provider_round("openai", model, [], history, timeout=1, client=None)
 
     wrong_shape = MagicMock()
     wrong_shape.raise_for_status = MagicMock()
     wrong_shape.json.return_value = []
     with patch("IkaModel.chat_interface.chat_request._api_request_with_context_fallback", return_value=wrong_shape):
         with pytest.raises(IkaProviderResponseError, match="response JSON must be an object"):
-            cr._request_provider_round("openai", model, [], history, timeout=1, client=None)
+            _test_chat_request._request_provider_round("openai", model, [], history, timeout=1, client=None)
 
     malformed = MagicMock()
     malformed.raise_for_status = MagicMock()
     malformed.json.return_value = {"choices": []}
     with patch("IkaModel.chat_interface.chat_request._api_request_with_context_fallback", return_value=malformed):
         with pytest.raises(IkaProviderResponseError, match="Failed to parse openai response"):
-            cr._request_provider_round("openai", model, [], history, timeout=1, client=None)
+            _test_chat_request._request_provider_round("openai", model, [], history, timeout=1, client=None)
 
 
 def test_async_provider_round_wraps_malformed_response_as_domain_error():
@@ -847,7 +852,7 @@ def test_async_provider_round_wraps_malformed_response_as_domain_error():
             return_value=response,
         ):
             with pytest.raises(IkaProviderResponseError, match="Failed to parse openai response"):
-                await cr._request_provider_round_async(
+                await _test_chat_request._request_provider_round_async(
                     "openai",
                     model,
                     [],
@@ -862,7 +867,7 @@ def test_async_provider_round_wraps_malformed_response_as_domain_error():
 def test_chat_and_async_chat_dispatch_loop_flush_and_finalize_paths():
     model = _model()
     history = _history()
-    state = cr._new_chat_state("openai", "content", None, [], 1, {"total_tokens": 1})
+    state = _test_chat_response._new_chat_state("openai", "content", None, [], 1, {"total_tokens": 1})
     runtime = ToolRuntimeState.from_model(model)
 
     with patch("IkaModel.chat_interface.chat_runtime._prepare_chat_inputs", return_value=(history, {})):
@@ -882,7 +887,7 @@ def test_chat_and_async_chat_dispatch_loop_flush_and_finalize_paths():
     async def run_async_case():
         async_model = _model()
         async_history = _history()
-        async_state = cr._new_chat_state("openai", "async content", None, [], 1, {"total_tokens": 1})
+        async_state = _test_chat_response._new_chat_state("openai", "async content", None, [], 1, {"total_tokens": 1})
         async_runtime = ToolRuntimeState.from_model(async_model)
         with patch("IkaModel.chat_interface.chat_runtime._prepare_chat_inputs", return_value=(async_history, {})):
             with patch("IkaModel.chat_interface.chat_runtime._summarize_async_if_near_budget") as async_summarize:
@@ -905,3 +910,22 @@ def test_chat_and_async_chat_dispatch_loop_flush_and_finalize_paths():
     assert async_out["content"] == "async content"
     assert async_history["first_input"]["message"] == "hi"
     async_summarize.assert_called_once()
+
+
+def test_public_chat_dependency_override_does_not_leak_into_next_call():
+    import httpx
+
+    from IkaModel.chat_interface.chat_interface import chat
+
+    def response(text):
+        return httpx.Response(200, request=httpx.Request('POST', 'https://example.invalid'),
+                              json={'choices': [{'message': {'role': 'assistant', 'content': text}}],
+                                    'usage': {'total_tokens': 1}})
+
+    model = _model()
+    with httpx.Client(transport=httpx.MockTransport(lambda request: response('second'))) as client:
+        with patch('IkaModel.request_interface.api_request_retry', return_value=response('first')):
+            first = chat(model, [{'role': 'user', 'content': 'task'}], message_history=_history(), client=client)
+        second = chat(model, [{'role': 'user', 'content': 'task'}], message_history=_history(), client=client)
+    assert first['content'] == 'first'
+    assert second['content'] == 'second'

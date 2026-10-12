@@ -1,17 +1,9 @@
 import threading
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from IkaCore.agents import IkaBaseAgent
 from IkaCore.workflow import AsyncWorkflowExecutor, IkaWorkflow, WorkflowEdge, WorkflowNode
 from IkaModel import runtime_options
-
-
-@pytest.fixture(autouse=True)
-def enable_dataflow():
-    with runtime_options(dataflow_workflows=True, preserve_workflow_prompts=True):
-        yield
 
 
 def _agent(name):

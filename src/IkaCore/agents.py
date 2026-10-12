@@ -12,7 +12,6 @@ from IkaCore.agent_snapshots import AgentSnapshotReplayMixin
 from IkaCore.agent_tools import AgentToolsMixin
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
-from IkaModel.chat_interface.chat_interface import summarise_message_history as summarise_message_history
 
 
 @dataclass

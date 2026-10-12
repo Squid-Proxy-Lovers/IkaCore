@@ -20,7 +20,8 @@ from IkaModel.chat_interface.chat_interface import (
     get_total_tokens,
     init_message_history,
 )
-from IkaModel.chat_interface.response_interface import extract_usage, format_gemini_results
+from IkaModel.chat_interface.response_usage import extract_usage
+from IkaModel.chat_interface.tool_result_formatters import format_gemini_results
 from IkaModel.request_interface import get_max_tokens, get_provider
 
 PROVIDERS = ("openai", "deepseek", "anthropic", "gemini", "openrouter")
@@ -104,7 +105,7 @@ class TestBareBoneToRequestPayload:
         assert tools[0]["function"]["name"] == "agent_end"
         assert "parameters" in tools[0]["function"]
         assert "tool_choice" in payload
-        assert payload["tool_choice"]["function"]["name"] == "agent_end"
+        assert payload["tool_choice"] == "auto"
 
     def test_build_request_summary_in_messages(self):
         model = _barebone_with_tools()
@@ -409,7 +410,7 @@ class TestChatReturnShape:
             "choices": [{"message": {"content": "Hi", "tool_calls": []}}],
             "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
         }
-        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=resp):
+        with patch("IkaModel.request_interface.api_request_retry", return_value=resp):
             out = chat(model, messages, message_history=history)
         assert "content" in out
         assert out["content"] == "Hi"
@@ -435,7 +436,7 @@ class TestChatReturnShape:
             "choices": [{"message": {"content": "Answer here", "tool_calls": []}}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
         }
-        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=resp):
+        with patch("IkaModel.request_interface.api_request_retry", return_value=resp):
             out = chat(model, messages, message_history=history)
         assert out["message_history"] is history
         assert history["first_input"]["message"] == "Reply"
@@ -459,7 +460,7 @@ class TestChatReturnShape:
             "choices": [{"message": {"content": "Hi", "tool_calls": []}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
-        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=resp):
+        with patch("IkaModel.request_interface.api_request_retry", return_value=resp):
             out = chat(model, messages, message_history=history, logger=logger)
         assert out["usage"]["total_tokens"] == 15
         assert out["cost"] == {"input_cost": 0.01, "output_cost": 0.02, "total_cost": 0.03}
@@ -486,7 +487,7 @@ class TestChatWithToolCallsFlow:
             }],
             "usage": {"total_tokens": 25},
         }
-        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=first_resp):
+        with patch("IkaModel.request_interface.api_request_retry", return_value=first_resp):
             with pytest.raises(AgentEndException) as excinfo:
                 chat(model, messages, message_history=history, tool_executors=tool_executors)
         out = excinfo.value.response

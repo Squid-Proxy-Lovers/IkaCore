@@ -4,7 +4,6 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from IkaModel import runtime_options
 from IkaModel.request_interface import IkaAPIError, api_request_retry
 from IkaModel.retry_policy import (
     MAX_BACKOFF_S,
@@ -14,12 +13,6 @@ from IkaModel.retry_policy import (
     retry_delay,
     retry_hint_seconds,
 )
-
-
-@pytest.fixture(autouse=True)
-def modern_retries():
-    with runtime_options(modern_retries=True):
-        yield
 
 
 @pytest.mark.parametrize("status", [408, 409, 429, 500, 502, 503, 529])
@@ -69,8 +62,7 @@ def test_rate_limit_honours_millisecond_hint():
     responses = [httpx.Response(429, headers={"retry-after-ms": "250"}, json={"error": "rate limit"}),
                  httpx.Response(200, json={"ok": True})]
     with patch("IkaModel.request_interface.httpx.post", side_effect=responses):
-        with patch("IkaModel.request_interface.time.sleep") as sleep, \
-             patch("IkaModel.request_interface.get_cli_output"):
+        with patch("IkaModel.request_interface.time.sleep") as sleep:
             assert api_request_retry("https://example.test", {}, {}, max_retries=3).json() == {"ok": True}
     sleep.assert_called_once_with(0.25)
 
@@ -82,3 +74,34 @@ def test_programmer_errors_are_not_retried():
                 api_request_retry("https://example.test", {}, {}, max_retries=3)
     assert post.call_count == 1
     sleep.assert_not_called()
+
+
+@pytest.mark.parametrize('asynchronous', [False, True])
+def test_default_context_overflow_still_reaches_summary_recovery(monkeypatch, asynchronous):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from IkaModel.base import BareBoneModel
+    from IkaModel.chat_interface import chat_request
+
+    model = BareBoneModel(model_id='gpt-4o', api_key='test-key', api_url='https://example.invalid')
+    responses = [httpx.Response(400, json={'error': {'code': 'context_length_exceeded'}}),
+                 httpx.Response(200, json={'ok': True})]
+    history = {'system': {'message': ''}, 'first_input': {'message': 'task'},
+               'summary': {'message': ''}, 'messages': {}}
+    def build():
+        return 'https://example.invalid', {}, {'messages': []}
+    if asynchronous:
+        summarize = AsyncMock(return_value='summary')
+        monkeypatch.setattr(chat_request._summaries, 'async_summarise_message_history', summarize)
+        async def run():
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req: responses.pop(0))) as client:
+                return await chat_request._api_request_with_context_fallback_async(build, model, history, client=client)
+        assert asyncio.run(run()).status_code == 200
+        summarize.assert_awaited_once()
+    else:
+        summarize = patch.object(chat_request._summaries, 'summarise_message_history', return_value='summary')
+        with summarize as called, httpx.Client(transport=httpx.MockTransport(lambda req: responses.pop(0))) as client:
+            assert chat_request._api_request_with_context_fallback(build, model, history, client=client).status_code == 200
+        called.assert_called_once()
+    assert responses == []

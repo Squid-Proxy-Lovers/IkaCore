@@ -264,7 +264,7 @@ class TestApiPayloadToolSchema:
         assert params["type"] == "object"
         assert "input" in params["properties"]
         assert "input" in params["required"]
-        assert payload["tool_choice"]["function"]["name"] == "agent_end"
+        assert payload["tool_choice"] == "auto"
 
     def test_subagent_tool_type_input_in_payload(self):
         at = AgentTool("Sub", "Sub", "Subagent", ToolArgs(type="input", description="Task"), required=True)

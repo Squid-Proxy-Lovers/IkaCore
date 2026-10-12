@@ -15,8 +15,8 @@ def reset_context_cache(workflow: Any, initial: str | None) -> None:
 def compress_once(workflow: Any, node: Any, contexts: list[str]) -> str:
     if not hasattr(workflow, "_summary_lock"):
         reset_context_cache(workflow, None)
-    from .workflow_core import WorkflowContextMixin
-    if getattr(workflow.compress_hook, "__func__", None) is not getattr(WorkflowContextMixin, "_default_compress_hook"):
+    from .workflow_core import WorkflowCore
+    if getattr(workflow.compress_hook, "__func__", None) is not getattr(WorkflowCore, "_default_compress_hook"):
         return workflow.compress_hook(contexts, node.agent)
     fields = ("model_id", "api_url", "api_key", "use_responses_api", "max_tokens", "temperature",
               "reasoning_effort", "system_prompt", "prompt", "description")

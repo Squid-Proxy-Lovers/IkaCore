@@ -109,14 +109,8 @@ class AgentWorkflowContextMixin:
                                  label: str = "Context from upstream workflow steps:") -> None:
         if not context:
             return
-        from IkaModel.runtime_policy import current_runtime_options
-        if current_runtime_options().preserve_workflow_prompts:
-            from .workflow_prompt_context import inject_context
-            inject_context(self, context, label)
-            return
-        current_first_input = self.message_history.get("first_input", {}).get("message", "")
-        combined = f"{context}\n\n{current_first_input}" if current_first_input else context
-        self.message_history["first_input"]["message"] = combined
+        from .workflow_prompt_context import inject_context
+        inject_context(self, context, label)
 
     def apply_workflow_stage_wiring(self: _WorkflowContextState, stage_wiring: Dict[int, Dict[str, List["IkaBaseAgent"]]]) -> None:
         if not stage_wiring or not self.Stages:

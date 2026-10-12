@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set, cast
+from typing import Any, List, Optional, Set, cast
 
 from IkaCore.agents import IkaBaseAgent
 from IkaModel.chat_interface.chat_interface import summarise_message_history
 from IkaModel.runtime_errors import IkaRequestControlError
 from IkaModel.runtime_policy import current_runtime_options
 
-from .workflow_types import WorkflowNode, WorkflowResult, WorkflowStateProtocol
+from .workflow_types import WorkflowNode, WorkflowStateProtocol
 
 
-class WorkflowDisplayMixin:
+class WorkflowCore:
     def __repr__(self: WorkflowStateProtocol) -> str:
         lines = [
             f"IkaWorkflow: {self.name}",
@@ -60,8 +60,6 @@ class WorkflowDisplayMixin:
         lines.extend(print_node(self.start_node))
         return "\n".join(lines)
 
-
-class WorkflowGraphMixin(WorkflowDisplayMixin):
     def _validate_nodes(self: WorkflowStateProtocol) -> None:
         if self.start_node not in self._node_index:
             raise ValueError(f"start_node '{self.start_node}' is not defined in nodes.")
@@ -122,8 +120,6 @@ class WorkflowGraphMixin(WorkflowDisplayMixin):
                 stack.append(edge.target)
         return reachable
 
-
-class WorkflowContextMixin(WorkflowGraphMixin):
     def _default_compress_hook(self, contexts: List[str], agent: IkaBaseAgent) -> str:
         merged = "\n\n".join([c for c in contexts if c]) if contexts else ""
         if not merged:
@@ -146,101 +142,11 @@ class WorkflowContextMixin(WorkflowGraphMixin):
                 raise
             return merged
 
-    def _apply_stage_wiring(self, node: WorkflowNode) -> None:
-        if node.stage_wiring:
-            node.agent.apply_workflow_stage_wiring(node.stage_wiring)
-
     def _prepare_context(self: WorkflowStateProtocol, node: WorkflowNode, upstream: List[str]) -> str:
-        options = current_runtime_options()
-        if options.dataflow_workflows or options.preserve_workflow_prompts or options.summary_context_threshold is not None:
-            from .workflow_context_cache import compress_once
-            if upstream and node.name == self.start_node and upstream == [getattr(self, "_initial_context", None)]:
-                return upstream[0]
-            return compress_once(self, node, upstream) if upstream else ""
-        return self.compress_hook(upstream, node.agent) if upstream else ""
-
-
-class WorkflowSyncNodeExecutionMixin(WorkflowContextMixin):
-    def _run_node(self: WorkflowStateProtocol, node_name: str, upstream_contexts: Dict[str, List[str]]) -> WorkflowResult:
-        if node_name in self._results:
-            return self._results[node_name]
-        if node_name in self._visiting:
-            raise ValueError(f"Cycle detected in workflow at node '{node_name}'.")
-
-        self._visiting.add(node_name)
-        node = self._node_index[node_name]
-        context_text = self._prepare_context(node, upstream_contexts.get(node_name, []))
-
-        self._apply_stage_wiring(node)
-        if context_text:
-            node.agent.inject_workflow_context(context_text)
-
-        execution_output = node.agent.execution()
-        final_message = execution_output.get("final_message") or ""
-        summary = execution_output.get("summary") or final_message
-        downstream_context = self.compress_hook([summary], node.agent)
-
-        result = WorkflowResult(
-            name=node_name,
-            final=final_message,
-            summary=summary,
-            history=execution_output,
-            child_summaries={},
-        )
-        self._results[node_name] = result
-        self._visiting.remove(node_name)
-
-        for edge in self._next_edges_by_source.get(node_name, []):
-            upstream_contexts.setdefault(edge.target, []).append(downstream_context)
-            self._run_node(edge.target, upstream_contexts)
-
-        return result
-
-
-class WorkflowNodeExecutionMixin(WorkflowSyncNodeExecutionMixin):
-    def _run_node_async(
-        self: WorkflowStateProtocol,
-        node_name: str,
-        upstream_contexts: Dict[str, List[str]],
-        instance_id: int = 0,
-        instance_input: Optional[str] = None,
-    ) -> WorkflowResult:
-        if node_name in self._results and instance_id == 0:
-            return self._results[node_name]
-
-        node = self._node_index[node_name]
-        agent_copy = node.agent.clone_for_run()
-        if instance_id > 0:
-            agent_copy.name = f"{node.agent.name}_instance_{instance_id}"
-
-        context_payload = upstream_contexts.get(node_name, [])
-        context_text = self._prepare_context(node, context_payload)
-
-        if instance_input:
-            agent_copy.prompt = instance_input
-            context_text = instance_input
-
-        if node.stage_wiring:
-            agent_copy.apply_workflow_stage_wiring(node.stage_wiring)
-        if context_text:
-            agent_copy.inject_workflow_context(context_text)
-
-        execution_output = agent_copy.execution()
-        final_message = execution_output.get("final_message") or ""
-        summary = execution_output.get("summary") or final_message
-
-        result = WorkflowResult(
-            name=node_name,
-            final=final_message,
-            summary=summary,
-            history=execution_output,
-            child_summaries={},
-        )
-
-        if instance_id == 0:
-            self._results[node_name] = result
-
-        return result
+        from .workflow_context_cache import compress_once
+        if upstream and node.name == self.start_node and upstream == [getattr(self, "_initial_context", None)]:
+            return upstream[0]
+        return compress_once(self, node, upstream) if upstream else ""
 
     def _create_agent_instance(
         self,
@@ -257,3 +163,13 @@ class WorkflowNodeExecutionMixin(WorkflowSyncNodeExecutionMixin):
 
         return agent_copy
 
+
+    def _validate_execution_graph(self: WorkflowStateProtocol) -> None:
+        pending = set(self._next_reachable_nodes)
+        completed: set[str] = set()
+        while pending:
+            ready = {name for name in pending if self._node_dependencies[name] <= completed}
+            if not ready:
+                raise ValueError("workflow dependencies are cyclic or require an unreachable node")
+            pending.difference_update(ready)
+            completed.update(ready)

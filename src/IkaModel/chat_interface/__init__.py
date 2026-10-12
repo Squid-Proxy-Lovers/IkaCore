@@ -13,11 +13,8 @@ from .chat_interface import (
     init_message_history,
     summarise_message_history,
 )
-from .response_interface import (
-    extract_usage,
-    format_gemini_results,
-    format_openai_responses_results,
-)
+from .response_usage import extract_usage
+from .tool_result_formatters import format_gemini_results, format_openai_responses_results
 
 __all__ = [
     "chat",

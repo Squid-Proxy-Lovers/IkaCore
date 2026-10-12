@@ -22,6 +22,10 @@ from collections.abc import Mapping
 from datetime import timezone
 from typing import Any, Optional, cast
 
+import httpx
+
+from .api_errors import IkaAPIError, IkaRateLimitError
+
 INITIAL_BACKOFF_S = 1.0
 MAX_BACKOFF_S = 30.0
 MAX_HINT_S = 300.0
@@ -135,3 +139,16 @@ __all__ = [
     "retry_delay",
     "retry_hint_seconds",
 ]
+
+
+def response_delay(response: httpx.Response, attempt: int, max_retries: int, initial: float) -> tuple[float, IkaAPIError]:
+    error_type = IkaRateLimitError if response.status_code == 429 else IkaAPIError
+    message = f"API request failed with status {response.status_code}"
+    text = response.text.lower()
+    if ("context length" in text or "context_length" in text or "reduce the length of the messages" in text
+            or "requested" in text and "tokens" in text and "maximum" in text):
+        message += ": context length exceeded"
+    error = error_type(message, status_code=response.status_code)
+    if not is_retryable_status(response.status_code) or attempt >= max_retries - 1:
+        raise error
+    return retry_delay(attempt, retry_hint_seconds(response.headers, response_body(response)), initial), error

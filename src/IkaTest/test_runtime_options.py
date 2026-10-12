@@ -15,18 +15,18 @@ from IkaModel.worker_context import submit_with_controls
 
 def test_options_are_opt_in_and_nested_scopes_restore():
     assert current_runtime_options() == RuntimeOptions()
-    with runtime_options(optimize_provider_payloads=True):
-        with runtime_options(modern_retries=True):
-            assert current_runtime_options().optimize_provider_payloads
-            assert current_runtime_options().modern_retries
-        assert not current_runtime_options().modern_retries
+    with runtime_options(parallel_context_preparation=True):
+        with runtime_options(recover_truncated_control_calls=True):
+            assert current_runtime_options().parallel_context_preparation
+            assert current_runtime_options().recover_truncated_control_calls
+        assert not current_runtime_options().recover_truncated_control_calls
     assert current_runtime_options() == RuntimeOptions()
 
 
 @pytest.mark.parametrize("changes", [
     {"compact_at_fraction": 0}, {"compact_at_fraction": 1.1},
     {"summary_context_threshold": -1}, {"summary_context_threshold": 1.5},
-    {"retry_initial_seconds": float("inf")}, {"reuse_connections": "yes"},
+    {"reuse_connections": "yes"},
 ])
 def test_invalid_options_do_not_replace_previous_scope(changes):
     with pytest.raises(ValueError), runtime_options(**changes):
@@ -36,18 +36,14 @@ def test_invalid_options_do_not_replace_previous_scope(changes):
 
 def test_worker_options_propagate_only_inside_explicit_scope():
     with ThreadPoolExecutor(max_workers=1) as pool:
-        with runtime_options(optimize_provider_payloads=True):
-            assert submit_with_controls(pool, current_runtime_options).result().optimize_provider_payloads
-        assert not submit_with_controls(pool, current_runtime_options).result().optimize_provider_payloads
+        with runtime_options(parallel_context_preparation=True):
+            assert submit_with_controls(pool, current_runtime_options).result().parallel_context_preparation
+        assert not submit_with_controls(pool, current_runtime_options).result().parallel_context_preparation
 
 
-def test_control_tool_cache_is_separate_for_opt_in_choice_policy():
+def test_completion_tools_are_not_forced_by_required_marker():
     tool = AgentTool(id="finish", name="agent_end", description="finish", args=ToolArgs("object", "args"), required=True)
-    tools = [tool]
-    assert build_provider_tool_payload("anthropic", tools).required_names == ("agent_end",)
-    with runtime_options(optimize_provider_payloads=True):
-        assert build_provider_tool_payload("anthropic", tools).required_names == ()
-    assert build_provider_tool_payload("anthropic", tools).required_names == ("agent_end",)
+    assert build_provider_tool_payload("anthropic", [tool]).required_names == ()
 
 
 def test_legacy_tool_args_required_option_preserves_default_serialization():
@@ -87,9 +83,9 @@ def test_ssl_context_cache_can_be_explicitly_invalidated():
 
 def test_async_tasks_get_independent_options():
     async def job(enabled):
-        with runtime_options(optimize_provider_payloads=enabled):
+        with runtime_options(parallel_context_preparation=enabled):
             await asyncio.sleep(0)
-            return current_runtime_options().optimize_provider_payloads
+            return current_runtime_options().parallel_context_preparation
 
     async def run():
         return await asyncio.gather(job(True), job(False))

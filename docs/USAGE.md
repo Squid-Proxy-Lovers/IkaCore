@@ -1,5 +1,8 @@
 ## IkaCore Usage Guide
 
+For this v2 draft, review [breaking changes and migration](v2/README.md#breaking-changes-and-migration).
+Provider replay, retry behavior, and workflow scheduling now use the v2 defaults.
+
 IkaCore is a Python agent framework built around three primitives:
 
 - `IkaBaseAgent`: an agent with provider config, tools, checkpoints, and optional stages.

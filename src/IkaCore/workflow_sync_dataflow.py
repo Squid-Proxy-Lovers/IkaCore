@@ -1,4 +1,4 @@
-"""Opt-in dependency-aware synchronous graph execution."""
+"""Dependency-aware synchronous graph execution."""
 
 # pyright: strict
 

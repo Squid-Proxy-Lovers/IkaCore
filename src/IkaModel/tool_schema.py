@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple, cast
 
-from .runtime_policy import current_runtime_options
-
 JsonSchema = dict[str, Any]
 
 
@@ -112,13 +110,12 @@ def build_provider_tool_payload(provider: str, tools: list[Any]) -> ProviderTool
     if not tools:
         return ProviderToolPayload([], frozenset(), ())
 
-    optimize = current_runtime_options().optimize_provider_payloads
-    fast_key = (provider, id(tools), len(tools), optimize)
+    fast_key = (provider, id(tools), len(tools))
     fast_cached = _PROVIDER_TOOL_FAST_CACHE.get(fast_key)
     if fast_cached is not None and fast_cached[0] is tools:
         return fast_cached[1]
 
-    cache_key = (provider, tuple(_tool_fingerprint(tool) for tool in tools), optimize)
+    cache_key = (provider, tuple(_tool_fingerprint(tool) for tool in tools))
     cached = _PROVIDER_TOOL_CACHE.get(cache_key)
     if cached is not None:
         _PROVIDER_TOOL_FAST_CACHE[fast_key] = (tools, cached)
@@ -127,7 +124,7 @@ def build_provider_tool_payload(provider: str, tools: list[Any]) -> ProviderTool
     names = frozenset(getattr(tool, "name", "") for tool in tools)
     required_names = tuple(
         getattr(tool, "name", "") for tool in tools if getattr(tool, "required", False)
-        and not (optimize and getattr(tool, "name", "") in {"agent_end", "stage_end", "change_stage"})
+        and getattr(tool, "name", "") not in {"agent_end", "stage_end", "change_stage"}
     )
     rendered = [_build_provider_tool(provider, tool) for tool in tools]
     payload = ProviderToolPayload(rendered, names, required_names)

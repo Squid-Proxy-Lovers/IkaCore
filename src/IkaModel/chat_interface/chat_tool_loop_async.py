@@ -12,9 +12,9 @@ import httpx
 
 from IkaCore.agent_runtime_payloads import JsonDict
 
+from .. import summarization as _summaries
 from ..base import BareBoneModel
 from ..runtime_errors import IkaRequestControlError
-from ..summarization import async_summarise_message_history
 from .chat_request import _request_provider_round_async
 from .chat_response import (
     _SUMMARY_FALLBACK_EXCEPTIONS,
@@ -32,7 +32,7 @@ from .chat_tool_common import (
     _tool_loop_interrupt_response,
     _tool_loop_post_batch_result,
 )
-from .response_interface import async_execute_tool_calls
+from .tool_execution_async import async_execute_tool_calls
 from .tool_execution_sync import ToolExecutorMap
 from .types import ChatLoopState, ToolRuntimeState
 
@@ -63,7 +63,7 @@ async def _async_repeated_tool_guard(
                 "Forcing agent termination with summarization."
             )
             try:
-                force_answer = await async_summarise_message_history(
+                force_answer = await _summaries.async_summarise_message_history(
                     barebone_model,
                     message_history,
                     client=client,

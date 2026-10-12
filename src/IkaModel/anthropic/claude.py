@@ -1,6 +1,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
+from ..history_replay import is_user_entry, plan_history_replay
 from ..model_metadata import is_anthropic_haiku_model, supports_anthropic_parallel_tool_use
 from ..tool_schema import build_provider_tool_payload
 
@@ -8,15 +9,29 @@ _PARALLEL_TOOL_PROMPT = "\n\n<use_parallel_tool_calls>\nFor maximum efficiency, 
 
 
 def _ensure_anthropic_assistant_content(msg: Dict[str, Any]) -> Dict[str, Any]:
-    if msg.get("role") != "assistant":
-        return msg
+    # Kept for call-site compatibility. Assistant turns made only of tool_use blocks are valid;
+    # the old single-space padding produced whitespace-only text blocks, which the API rejects.
+    return msg
+
+
+def _without_blank_text(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Drop whitespace-only text (the API rejects it); drop the message if nothing is left.
+
+    Covers every source of blank text, including histories and checkpoints written by older
+    versions that padded tool-only turns with ``" "``. Non-text blocks (tool_use, tool_result,
+    images) are never touched.
+    """
     content = msg.get("content")
-    if isinstance(content, list) and content:
-        has_text = any(block.get("type") == "text" for block in content)
-        if not has_text:
-            msg = {**msg, "content": [{"type": "text", "text": " "}] + content}
-    elif isinstance(content, list) and not content:
-        msg = {**msg, "content": [{"type": "text", "text": " "}]}
+    if isinstance(content, str):
+        return msg if content.strip() else None
+    if isinstance(content, list):
+        kept = [
+            block for block in content
+            if not (isinstance(block, dict) and block.get("type") == "text" and not str(block.get("text", "")).strip())
+        ]
+        if not kept:
+            return None
+        return msg if len(kept) == len(content) else {**msg, "content": kept}
     return msg
 
 
@@ -42,12 +57,13 @@ def _append_anthropic_context(api_messages: List[Dict[str, Any]], message_histor
         api_messages.append({"role": "assistant", "content": message_history["summary"]["message"]})
 
 
-def _append_anthropic_history(api_messages: List[Dict[str, Any]], message_history: Dict[str, Any]) -> None:
-    for msg_id in message_history["messages"]:
-        msg = message_history["messages"][msg_id]
+def _append_anthropic_history(api_messages: List[Dict[str, Any]], entries: List[Dict[str, Any]]) -> None:
+    for msg in entries:
         msg_type = msg.get("type", "assistant")
         raw = msg.get("message", "")
-        if msg_type == "assistant_with_tools":
+        if is_user_entry(msg):
+            api_messages.append({"role": "user", "content": raw if isinstance(raw, str) else str(raw)})
+        elif msg_type == "assistant_with_tools":
             try:
                 api_messages.append(_ensure_anthropic_assistant_content(json.loads(raw)))
             except (json.JSONDecodeError, TypeError):
@@ -124,15 +140,18 @@ def anthropic_fill_payload(
     message_history: Optional[Dict[str, Any]] = None,
     agent_tools: Optional[list[Any]] = None,
 ) -> Dict[str, Any]:
-    from ..runtime_policy import current_runtime_options
-    if current_runtime_options().optimize_provider_payloads:
-        from .claude_optimized import anthropic_fill_payload as optimized
-        return optimized(model, messages, message_history, agent_tools)
     message_history = message_history or _default_message_history()
     api_messages: List[Dict[str, Any]] = []
-    _append_anthropic_context(api_messages, message_history)
-    _append_anthropic_history(api_messages, message_history)
+    plan = plan_history_replay(message_history, messages)
+    if plan.first_input_first:
+        _append_anthropic_context(api_messages, message_history)
+        _append_anthropic_history(api_messages, plan.entries)
+    else:
+        _append_anthropic_history(api_messages, plan.entries)
+        if plan.emit_first_input:
+            api_messages.append({"role": "user", "content": message_history["first_input"]["message"]})
     _append_anthropic_live_messages(api_messages, messages, message_history["first_input"]["message"])
+    api_messages = [m for m in (_without_blank_text(m) for m in api_messages) if m is not None]
 
     payload = {
         "model": model.model_id,

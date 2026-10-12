@@ -11,7 +11,7 @@ def test_default_compaction_boundary_stays_at_eighty_percent(monkeypatch):
     model = BareBoneModel("gpt-4o", "test", "system", [])
     model.context_budget = 100
     summarize = Mock()
-    monkeypatch.setattr(chat_request, "summarise_message_history", summarize)
+    monkeypatch.setattr(chat_request._summaries, "summarise_message_history", summarize)
     monkeypatch.setattr(chat_request, "get_total_tokens", lambda history: 80)
     chat_request._summarize_sync_if_near_budget(model, {}, None)
     summarize.assert_not_called()
@@ -28,8 +28,8 @@ def test_opt_in_compaction_threshold_and_snapshot_boundaries_sync_and_async(monk
     events = []
     hooks = ExecutionHooks(lambda label, payload: events.append(label), lambda: {}, lambda *args: "frame", lambda *args: None)
     monkeypatch.setattr(chat_request, "get_total_tokens", lambda history: 65)
-    monkeypatch.setattr(chat_request, "summarise_message_history", sync)
-    monkeypatch.setattr(chat_request, "async_summarise_message_history", asynchronous)
+    monkeypatch.setattr(chat_request._summaries, "summarise_message_history", sync)
+    monkeypatch.setattr(chat_request._summaries, "async_summarise_message_history", asynchronous)
     with runtime_options(compact_at_fraction=0.6), execution_hooks(hooks):
         chat_request._summarize_sync_if_near_budget(model, {}, None)
         asyncio.run(chat_request._summarize_async_if_near_budget(model, {}, None))

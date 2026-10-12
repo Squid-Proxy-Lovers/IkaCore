@@ -222,7 +222,7 @@ def test_anthropic_and_gemini_appenders_tolerate_malformed_tool_arguments():
         repeated_warning_msg="fix args",
     )
 
-    assert anthropic_messages[0]["content"][1]["input"] == {}
+    assert anthropic_messages[0]["content"][0]["input"] == {}
     assert anthropic_messages[-1]["content"][0]["text"] == "fix args"
     assert {entry["type"] for entry in anthropic_history["messages"].values()} == {"assistant_with_tools", "tool"}
 

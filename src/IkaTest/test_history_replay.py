@@ -7,7 +7,6 @@ from IkaModel.anthropic.claude import anthropic_fill_payload
 from IkaModel.deepseek.deepseek import deepseek_fill_payload
 from IkaModel.gemini.google import gemini_fill_payload
 from IkaModel.history_replay import history_entries_to_replay
-from IkaModel.runtime_policy import runtime_options
 
 
 def _history(*entries):
@@ -205,9 +204,3 @@ def test_anthropic_appender_does_not_pad_tool_only_turns():
     call = {"id": "t1", "name": "lookup", "function": {"name": "lookup", "arguments": "{}"}}
     append_anthropic_tool_messages(messages, history, "", None, [call], [], 0)
     assert messages[0]["content"] == [{"type": "tool_use", "id": "t1", "name": "lookup", "input": {}}]
-
-
-@pytest.fixture(autouse=True)
-def optimized_payloads():
-    with runtime_options(optimize_provider_payloads=True):
-        yield

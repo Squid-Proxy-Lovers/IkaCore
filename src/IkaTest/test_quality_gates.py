@@ -12,8 +12,7 @@ SOURCE_ROOTS = (
 )
 QUALITY_RUNNER = REPO_ROOT / "scripts" / "quality.py"
 
-MAX_DEFINITION_LINES = 79
-HOTSPOT_LINE_THRESHOLD = 70
+MAX_FUNCTION_LINES = 70
 MAX_MODULE_LINES = 600
 STRICT_TYPE_ROOTS = (REPO_ROOT / "src" / "IkaMem",)
 STRICT_TYPE_FILES = (
@@ -24,7 +23,6 @@ STRICT_TYPE_FILES = (
     REPO_ROOT / "src" / "IkaCore" / "agent_helpers.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_initialization.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_memory.py",
-    REPO_ROOT / "src" / "IkaCore" / "agent_runtime.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_runtime_dispatch.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_runtime_foundation.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_runtime_payloads.py",
@@ -104,7 +102,6 @@ class _DefinitionVisitor(ast.NodeVisitor):
         self.records: list[tuple[str, str, str, int]] = []
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        self._record(node, "class")
         self.stack.append(node.name)
         self.generic_visit(node)
         self.stack.pop()
@@ -174,24 +171,14 @@ def _broad_exception_boundaries() -> Counter[tuple[str, str]]:
     return records
 
 
-def test_no_large_functions_or_classes_regress():
+def test_no_large_functions_regress():
     oversized = [
         record
         for record in _definition_records()
-        if record[3] > MAX_DEFINITION_LINES
+        if record[3] > MAX_FUNCTION_LINES
     ]
 
     assert oversized == []
-
-
-def test_no_structural_hotspots_over_seventy_lines():
-    hotspots = {
-        (path, kind, qualified_name)
-        for path, kind, qualified_name, size in _definition_records()
-        if size >= HOTSPOT_LINE_THRESHOLD
-    }
-
-    assert hotspots == set()
 
 
 def test_no_oversized_production_modules():

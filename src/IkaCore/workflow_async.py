@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import concurrent.futures
 from typing import Any, Dict, List, Optional, Set
 
 from IkaCore.cli_output import get_cli_output
-from IkaModel.runtime_policy import current_runtime_options
 
-from .workflow_core import WorkflowNodeExecutionMixin
+from .workflow_core import WorkflowCore
 from .workflow_types import WorkflowNode, WorkflowResult, WorkflowStateProtocol
 
 
-class WorkflowAsyncStateMixin(WorkflowNodeExecutionMixin):
+class WorkflowExecution(WorkflowCore):
     def _initial_async_state(
         self: WorkflowStateProtocol,
         initial_context: Optional[str],
@@ -21,20 +19,17 @@ class WorkflowAsyncStateMixin(WorkflowNodeExecutionMixin):
         Set[str],
         Set[str],
         Set[str],
-        Dict[str, List[concurrent.futures.Future]],
     ]:
         upstream_contexts: Dict[str, List[str]] = {}
         if initial_context:
             upstream_contexts[self.start_node] = [initial_context]
 
         self._results = {}
-        self._visiting = set()
         ready_nodes: Set[str] = {self.start_node}
         completed_nodes: Set[str] = set()
         pending_nodes: Set[str] = set(self._next_reachable_nodes)
         pending_nodes.discard(self.start_node)
-        node_futures: Dict[str, List[concurrent.futures.Future]] = {}
-        return upstream_contexts, ready_nodes, completed_nodes, pending_nodes, node_futures
+        return upstream_contexts, ready_nodes, completed_nodes, pending_nodes
 
     def _start_async_cli(self: WorkflowStateProtocol, cli: Any) -> None:
         cli.workflow_status(
@@ -52,8 +47,6 @@ class WorkflowAsyncStateMixin(WorkflowNodeExecutionMixin):
             step=len(self._results),
         )
 
-
-class WorkflowAsyncNodeSchedulingMixin(WorkflowAsyncStateMixin):
     @staticmethod
     def _instance_inputs_for_node(node: WorkflowNode) -> List[Optional[str]]:
         inputs = list(getattr(node, "instance_inputs", None) or [])
@@ -72,64 +65,6 @@ class WorkflowAsyncNodeSchedulingMixin(WorkflowAsyncStateMixin):
             return initial_context
         return ""
 
-    def _schedule_async_node(
-        self: WorkflowStateProtocol,
-        node_name: str,
-        upstream_contexts: Dict[str, List[str]],
-        initial_context: Optional[str],
-        cli: Any,
-        step: int,
-    ) -> List[concurrent.futures.Future]:
-        node = self._node_index[node_name]
-        instance_inputs = self._instance_inputs_for_node(node)
-        cli.workflow_status(
-            self.name,
-            f"Executing node '{node_name}' with {node.instances} instance(s)",
-            step=step,
-        )
-
-        futures: List[concurrent.futures.Future] = []
-        for instance_id in range(node.instances):
-            instance_input = instance_inputs[instance_id] if instance_id < len(instance_inputs) else None
-            agent_instance = self._create_agent_instance(node.agent, instance_id, instance_input)
-            if node.stage_wiring:
-                agent_instance.apply_workflow_stage_wiring(node.stage_wiring)
-            future = self.async_executor.schedule_node(
-                node_name=node_name,
-                agent=agent_instance,
-                context=self._async_context_for_node(node, node_name, upstream_contexts, initial_context),
-                instance_id=instance_id,
-            )
-            futures.append(future)
-        return futures
-
-
-class WorkflowAsyncSchedulingMixin(WorkflowAsyncNodeSchedulingMixin):
-    def _schedule_ready_async_nodes(
-        self: WorkflowStateProtocol,
-        ready_nodes: Set[str],
-        upstream_contexts: Dict[str, List[str]],
-        initial_context: Optional[str],
-        node_futures: Dict[str, List[concurrent.futures.Future]],
-        cli: Any,
-        completed_count: int,
-    ) -> List[concurrent.futures.Future]:
-        current_futures: List[concurrent.futures.Future] = []
-        for node_name in list(ready_nodes):
-            futures = self._schedule_async_node(
-                node_name,
-                upstream_contexts,
-                initial_context,
-                cli,
-                step=completed_count + 1,
-            )
-            node_futures[node_name] = futures
-            current_futures.extend(futures)
-            ready_nodes.remove(node_name)
-        return current_futures
-
-
-class WorkflowAsyncRecordMixin(WorkflowAsyncSchedulingMixin):
     def _record_async_success(self: WorkflowStateProtocol, result: Dict[str, Any]) -> None:
         node_name = result["node_name"]
         instance_id = result["instance_id"]
@@ -150,8 +85,6 @@ class WorkflowAsyncRecordMixin(WorkflowAsyncSchedulingMixin):
         existing = self._results[node_name].summary
         self._results[node_name].summary = f"{existing}\n\n[Instance {instance_id}]: {summary}"
 
-
-class WorkflowAsyncActivationMixin(WorkflowAsyncRecordMixin):
     def _activate_async_dependents(
         self: WorkflowStateProtocol,
         result: Dict[str, Any],
@@ -189,74 +122,19 @@ class WorkflowAsyncActivationMixin(WorkflowAsyncRecordMixin):
                 ready_nodes.add(node_name)
                 pending_nodes.discard(node_name)
 
-
-class WorkflowAsyncResultMixin(WorkflowAsyncActivationMixin):
-    def _process_async_results(
-        self: WorkflowStateProtocol,
-        current_futures: List[concurrent.futures.Future],
-        upstream_contexts: Dict[str, List[str]],
-        completed_nodes: Set[str],
-        ready_nodes: Set[str],
-        pending_nodes: Set[str],
-        node_futures: Dict[str, List[concurrent.futures.Future]],
-    ) -> None:
-        if not current_futures:
-            return
-        results = self.async_executor.wait_for_completion(current_futures)
-        blocked_nodes = {
-            result["node_name"]
-            for result in results
-            if "node_name" in result and not result.get("success")
-        }
-        for result in results:
-            if result.get("success") and result.get("node_name") not in blocked_nodes:
-                self._record_async_success(result)
-        for result in results:
-            if result.get("node_name") in blocked_nodes:
-                continue
-            self._activate_async_dependents(result, upstream_contexts, completed_nodes, ready_nodes, pending_nodes)
-        for node_name in {result["node_name"] for result in results if "node_name" in result}:
-            node_futures.pop(node_name, None)
-
-
-class WorkflowAsyncExecutionMixin(WorkflowAsyncResultMixin):
     def run_async(self: WorkflowStateProtocol, initial_context: Optional[str] = None) -> Dict[str, WorkflowResult]:
+        self._validate_execution_graph()
         from .workflow_context_cache import reset_context_cache
         reset_context_cache(self, initial_context)
-        upstream_contexts, ready_nodes, completed_nodes, pending_nodes, node_futures = self._initial_async_state(
+        upstream_contexts, ready_nodes, completed_nodes, pending_nodes = self._initial_async_state(
             initial_context
         )
         cli = get_cli_output()
         self._start_async_cli(cli)
 
-        if current_runtime_options().dataflow_workflows:
-            from .workflow_dataflow import DataflowRun
-            try:
-                DataflowRun(self, upstream_contexts, ready_nodes, completed_nodes, pending_nodes, initial_context, cli).run()
-                return self._results
-            finally:
-                self._finish_async_cli(cli)
-
-        while ready_nodes or any(node_futures.values()):
-            current_futures = self._schedule_ready_async_nodes(
-                ready_nodes,
-                upstream_contexts,
-                initial_context,
-                node_futures,
-                cli,
-                completed_count=len(completed_nodes),
-            )
-            self._process_async_results(
-                current_futures,
-                upstream_contexts,
-                completed_nodes,
-                ready_nodes,
-                pending_nodes,
-                node_futures,
-            )
-            self._activate_unblocked_pending_nodes(pending_nodes, completed_nodes, ready_nodes)
-
-        self.async_executor.drain()
-        self._finish_async_cli(cli)
-        return self._results
-
+        from .workflow_dataflow import DataflowRun
+        try:
+            DataflowRun(self, upstream_contexts, ready_nodes, completed_nodes, pending_nodes, initial_context, cli).run()
+            return self._results
+        finally:
+            self._finish_async_cli(cli)

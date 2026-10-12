@@ -31,7 +31,7 @@ def test_control_errors_keep_api_error_family_and_legacy_errors_pickle():
     restored = pickle.loads(pickle.dumps(error))
     assert type(restored) is requests.IkaHTTPError
     assert restored.status_code == 503
-    assert requests.IkaAPIError.__module__ == "IkaModel.request_interface"
+    assert requests.IkaAPIError.__module__ == "IkaModel.api_errors"
 
 
 def test_default_request_controls_preserve_retry_count():

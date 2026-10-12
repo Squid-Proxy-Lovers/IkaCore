@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,12 @@ def _commands() -> list[tuple[str, list[str]]]:
 
 def _verify_wheel() -> None:
     with tempfile.TemporaryDirectory(prefix="ikacore-wheel-") as temp:
+        source_dir = Path(temp) / "source"
+        source_dir.mkdir()
+        for filename in ("pyproject.toml", "README.md", "LICENSE"):
+            shutil.copy2(ROOT / filename, source_dir / filename)
+        shutil.copytree(ROOT / "src", source_dir / "src",
+                        ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"))
         wheel_dir = Path(temp) / "dist"
         wheel_dir.mkdir()
         print(
@@ -61,7 +68,7 @@ def _verify_wheel() -> None:
                 "-w",
                 str(wheel_dir),
             ],
-            cwd=ROOT,
+            cwd=source_dir,
             check=True,
         )
         wheels = list(wheel_dir.glob("*.whl"))
@@ -73,6 +80,13 @@ def _verify_wheel() -> None:
         print("$ verify wheel contains required package data", flush=True)
         with zipfile.ZipFile(wheels[0]) as archive:
             names = set(archive.namelist())
+        packages = ("IkaCore", "IkaModel", "IkaMem")
+        expected_modules = {path.relative_to(ROOT / "src").as_posix()
+                            for package in packages for path in (ROOT / "src" / package).rglob("*.py")}
+        packaged_modules = {name for name in names if name.endswith(".py") and name.split("/")[0] in packages}
+        if packaged_modules != expected_modules:
+            raise RuntimeError(f"wheel/source module mismatch: missing={sorted(expected_modules - packaged_modules)}, "
+                               f"unexpected={sorted(packaged_modules - expected_modules)}")
         required_suffixes = (
             "IkaModel/summary_prompt",
             "IkaModel/data/model_metadata.json",

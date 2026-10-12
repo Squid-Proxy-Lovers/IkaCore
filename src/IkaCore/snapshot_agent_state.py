@@ -42,12 +42,9 @@ def stage_initial_messages(
     content_prompt: str,
 ) -> list[JsonDict]:
     if resume_input is None:
-        from IkaModel.runtime_policy import current_runtime_options
-        if current_runtime_options().optimize_provider_payloads:
-            history_section(message_history, "messages")[str(uuid.uuid4())] = {
-                "message": content_prompt, "tokens": 0, "type": "stage_input",
-            }
-        from .snapshot_agent_state import restore_messages
+        history_section(message_history, "messages")[str(uuid.uuid4())] = {
+            "message": content_prompt, "tokens": 0, "type": "stage_input",
+        }
         return restore_messages(self, [{"role": "user", "content": content_prompt}])
     if self.logger:
         self.logger.log_hitl_input(stage.name, resume_input)
@@ -59,4 +56,3 @@ def stage_initial_messages(
             "type": "hitl_input",
         }
     return [{"role": "user", "content": resume_input}]
-

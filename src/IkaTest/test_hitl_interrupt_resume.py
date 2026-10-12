@@ -88,7 +88,7 @@ class TestHitlChatInterrupt:
         resp.status_code = 200
         resp.json.return_value = _hitl_response("Need more context?")
 
-        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=resp):
+        with patch("IkaModel.request_interface.api_request_retry", return_value=resp):
             out = chat(model, messages, message_history=history, tool_executors={"ask_user": _ask_user_executor})
 
         assert out["interrupted"] is True
@@ -112,7 +112,7 @@ class TestHitlChatInterrupt:
         resp.status_code = 200
         resp.json.return_value = _hitl_response("Need more context?")
 
-        with patch("IkaModel.chat_interface.chat_interface.async_api_request_retry", return_value=resp):
+        with patch("IkaModel.request_interface.async_api_request_retry", return_value=resp):
             out = asyncio.run(
                 async_chat(model, messages, message_history=history, tool_executors={"ask_user": _ask_user_executor})
             )

@@ -10,7 +10,6 @@ from typing import Any, cast
 
 from IkaModel.async_runner import run_async
 from IkaModel.execution_hooks import ExecutionHooks, execution_hooks
-from IkaModel.runtime_policy import runtime_options
 
 from .runtime_control import RuntimePauseRequested
 from .workflow_snapshot_state import WorkflowSnapshotSession, save_workflow_boundary
@@ -69,13 +68,12 @@ def execute_workflow(session: WorkflowSnapshotSession, execute: Callable[[], Any
     status = "failed"
     session.store.update_run_status(str(session.run_id), "running")
     try:
-        with runtime_options(dataflow_workflows=True):
-            if not replaying:
-                save_workflow_boundary(session, "workflow_entry")
-            result = execute()
-            status = "paused" if session.paused else "completed" if len(result) == len(session.workflow._next_reachable_nodes) else "failed"
-            save_workflow_boundary(session, "workflow_" + status)
-            return result
+        if not replaying:
+            save_workflow_boundary(session, "workflow_entry")
+        result = execute()
+        status = "paused" if session.paused else "completed" if len(result) == len(session.workflow._next_reachable_nodes) else "failed"
+        save_workflow_boundary(session, "workflow_" + status)
+        return result
     except RuntimePauseRequested:
         status = "paused"
         return session.workflow._results

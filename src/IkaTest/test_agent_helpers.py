@@ -163,7 +163,7 @@ class TestFinalPrompt:
         assert a.message_history["first_input"]["message"] == "original"
 
         a.inject_workflow_context("workflow context")
-        assert a.message_history["first_input"]["message"] == "workflow context\n\noriginal"
+        assert a.message_history["first_input"]["message"] == "Context from upstream workflow steps:\nworkflow context\n\nP"
 
         a.apply_workflow_stage_wiring({1: {"subagents": [subagent]}, 9: {"subagents": []}})
         assert stage1.subagents == [subagent]
@@ -976,7 +976,7 @@ class TestExecutionRuntimeHelpers:
             out = a._run_next_agent_execution()
 
         assert out == {"final_message": "next done"}
-        assert next_agent.message_history["first_input"]["message"] == "Previous agent summary:\nshort summary"
+        assert next_agent.message_history["first_input"]["message"] == "Previous agent summary:\nshort summary\n\nP"
         summarizer.assert_called_once_with(barebone, a.message_history)
         next_agent.execution.assert_called_once_with()
 
@@ -986,7 +986,7 @@ class TestExecutionRuntimeHelpers:
         b.run_simple = MagicMock(return_value=("plain final", "plain final"))
 
         assert b._run_next_agent_execution() == {"final_message": "other done"}
-        assert other_next.message_history["first_input"]["message"] == "Previous agent summary:\nplain final"
+        assert other_next.message_history["first_input"]["message"] == "Previous agent summary:\nplain final\n\nP"
 
     def test_simple_final_output_builds_summary_from_run_simple_result(self):
         a = _minimal_agent(system_prompt="system")

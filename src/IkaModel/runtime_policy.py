@@ -1,4 +1,4 @@
-"""Explicit opt-ins for provider, transport, and workflow behavior changes."""
+"""Execution-scoped resource and context settings."""
 
 # pyright: strict
 
@@ -14,18 +14,12 @@ from typing import Any, Optional
 
 @dataclass(frozen=True)
 class RuntimeOptions:
-    optimize_provider_payloads: bool = False
-    modern_retries: bool = False
     shared_ssl_context: bool = False
     reuse_connections: bool = False
-    persistent_async_runner: bool = False
-    dataflow_workflows: bool = False
     parallel_context_preparation: bool = False
-    preserve_workflow_prompts: bool = False
     recover_truncated_control_calls: bool = False
     compact_at_fraction: Optional[float] = None
     summary_context_threshold: Optional[int] = None
-    retry_initial_seconds: float = 1.0
 
 
 _DEFAULT = RuntimeOptions()
@@ -46,9 +40,7 @@ def _validate_threshold(value: object) -> None:
 
 
 def _validate_options(options: RuntimeOptions) -> None:
-    flags = ("optimize_provider_payloads", "modern_retries", "shared_ssl_context", "reuse_connections",
-             "persistent_async_runner", "dataflow_workflows", "parallel_context_preparation",
-             "preserve_workflow_prompts", "recover_truncated_control_calls")
+    flags = ("shared_ssl_context", "reuse_connections", "parallel_context_preparation", "recover_truncated_control_calls")
     for name in flags:
         if not isinstance(getattr(options, name), bool):
             raise ValueError(f"{name} must be a boolean")
@@ -56,8 +48,6 @@ def _validate_options(options: RuntimeOptions) -> None:
     if fraction is not None and (not math.isfinite(fraction) or not 0 < fraction <= 1):
         raise ValueError("compact_at_fraction must be greater than zero and at most one")
     _validate_threshold(options.summary_context_threshold)
-    if not math.isfinite(options.retry_initial_seconds) or options.retry_initial_seconds < 0:
-        raise ValueError("retry_initial_seconds must be finite and non-negative")
 
 
 @contextmanager

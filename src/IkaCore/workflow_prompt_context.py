@@ -1,10 +1,8 @@
-"""Opt-in upstream context that preserves the agent's own instructions."""
+"""Upstream context that preserves the agent's own instructions."""
 
 # pyright: strict
 
 from typing import Any
-
-from IkaModel.runtime_policy import current_runtime_options
 
 
 def inject_context(agent: Any, context: str, label: str) -> None:
@@ -18,8 +16,6 @@ def inject_context(agent: Any, context: str, label: str) -> None:
 
 
 def stage_context(agent: Any, content: str) -> str:
-    if not current_runtime_options().preserve_workflow_prompts:
-        return content
     context = getattr(agent, "_workflow_context", "")
     label = getattr(agent, "_workflow_context_label", "Context from upstream workflow steps:")
     return f"{label}\n{context}\n\n{content}" if context else content

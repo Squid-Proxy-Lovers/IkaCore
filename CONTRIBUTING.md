@@ -68,12 +68,13 @@ Supported live smoke variables:
 
 ## Current Cleanup Priorities
 
-The [IkaCore v2 core-runtime consolidation draft](docs/v2/README.md) records the
-unmerged runtime proposals and the compatibility gates for porting them. Existing
-public call shapes/defaults and v1 checkpoint databases must remain compatible;
-run `pytest src/IkaTest/test_v2_compatibility.py` when integrating v2 work.
+The [v2 simplification and migration guide](docs/v2/README.md) records the intended
+runtime behavior, removed compatibility paths, and remaining cleanup candidates.
+V1 compatibility is not a requirement. Document breaking changes and retain tests
+that verify behavior and invariants.
 
 - keep `python scripts/quality.py` passing
 - keep packaging metadata and docs accurate
-- add regression tests for behavior changes before modifying provider logic
-- keep production functions and classes below the structural size gate enforced in `src/IkaTest/test_quality_gates.py`
+- cover changed provider/runtime semantics with meaningful regression tests
+- keep production functions within the 70-line limit and modules within the 600-line limit
+- group related behavior in cohesive classes; avoid mixin chains created solely to satisfy class-size limits

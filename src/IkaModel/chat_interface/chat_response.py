@@ -17,12 +17,12 @@ import httpx
 
 from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_list, string_value
 
+from .. import summarization as _summaries
 from ..base import AgentEndException, AgentTool, BareBoneModel
 from ..chat_helpers_common import append_provider_tool_messages
 from ..request_interface import IkaAPIError
 from ..runtime_errors import IkaDebugDumpError
-from ..summarization import async_summarise_message_history, run_summarization
-from .response_interface import format_gemini_results
+from .tool_result_formatters import format_gemini_results
 from .types import ChatLoopState, ChatResponsePayload, UsageInfo
 
 LOG = logging.getLogger(__name__)
@@ -179,7 +179,7 @@ def _force_complete_with_summary(
     hijacked: bool = True,
 ) -> None:
     try:
-        summary_text = run_summarization(
+        summary_text = _summaries.run_summarization(
             barebone_model,
             message_history,
             prompt_kind="force_answer",
@@ -228,7 +228,7 @@ async def _async_force_complete_with_summary(
     hijacked: bool = True,
 ) -> None:
     try:
-        summary_text = await async_summarise_message_history(
+        summary_text = await _summaries.async_summarise_message_history(
             barebone_model,
             message_history,
             client=client,

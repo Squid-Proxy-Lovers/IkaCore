@@ -19,7 +19,6 @@ Three pieces:
 
 from __future__ import annotations
 
-import email.utils
 import json
 import logging
 import time
@@ -36,8 +35,8 @@ from ..model_metadata import CODEX_KNOWN_MODELS
 from ..request_control import check_request_controls, effective_max_retries, effective_timeout
 from ..request_interface import agent_tools_for_payload
 from ..request_lifecycle import request_scope, sleep_with_controls
+from ..retry_policy import backoff_seconds, response_body, retry_delay, retry_hint_seconds
 from ..runtime_errors import IkaRequestControlError
-from ..runtime_policy import current_runtime_options
 from .codex_responses import codex_responses_fill_payload
 from .codex_stream import CodexRetryableStreamError as _CodexRetryableStreamError
 from .codex_stream import classify_stream_error as _classify_stream_error
@@ -65,32 +64,6 @@ def _token_count(value: object) -> int:
     if isinstance(value, (int, float)):
         return int(value)
     return 0
-
-
-def _parse_retry_after(header_value: Optional[str], default: float) -> float:
-    """Parse a Retry-After header, supporting both integer-seconds and HTTP-date
-    forms (RFC 7231 §7.1.3). Falls back to ``default`` on any failure.
-
-    Naive datetimes (RFC 5322 ``-0000`` zone, meaning "local time of the source
-    is unknown") are treated as UTC, otherwise ``.timestamp()`` would silently
-    use the local timezone and produce a wildly wrong wait."""
-    if not header_value:
-        return float(default)
-    # Form 1: integer seconds (common case)
-    try:
-        return max(0.0, float(header_value))
-    except (TypeError, ValueError):
-        pass
-    # Form 2: HTTP-date (rare but legal — e.g. "Wed, 21 Oct 2015 07:28:00 GMT")
-    try:
-        from datetime import timezone
-        parsed = email.utils.parsedate_to_datetime(header_value)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return max(0.0, parsed.timestamp() - time.time())
-    except (TypeError, ValueError, IndexError, OverflowError):
-        pass
-    return float(default)
 
 
 def _sleep_before_retry(
@@ -218,14 +191,10 @@ def _codex_rate_headers(response: httpx.Response) -> dict[str, str]:
     }
 
 
-def _handle_codex_429(response: httpx.Response, body: str, attempt: int, max_retries: int, wait_seconds: int) -> None:
+def _handle_codex_429(response: httpx.Response, body: str, attempt: int, max_retries: int, wait_seconds: float) -> None:
     if attempt >= max_retries - 1:
         raise RuntimeError(f"codex backend returned 429 after {max_retries} attempts: {body[:500]}")
-    retry_after = _parse_retry_after(response.headers.get("retry-after"), wait_seconds)
-    if current_runtime_options().modern_retries:
-        from ..retry_policy import response_body, retry_delay, retry_hint_seconds
-        retry_after = retry_delay(attempt, retry_hint_seconds(response.headers, response_body(response)),
-                                  current_runtime_options().retry_initial_seconds)
+    retry_after = retry_delay(attempt, retry_hint_seconds(response.headers, response_body(response)), wait_seconds)
     LOG.warning(
         "codex backend 429 (rate-limited); sleeping %.1fs (attempt %d/%d)",
         retry_after, attempt + 1, max_retries,
@@ -248,7 +217,7 @@ def _handle_codex_non_200(
     backoff: float,
     attempt: int,
     max_retries: int,
-    wait_seconds: int,
+    wait_seconds: float,
 ) -> None:
     status = response.status_code
     if status == 401:
@@ -262,7 +231,7 @@ def _handle_codex_non_200(
     if 500 <= status < 600:
         _handle_codex_5xx(status, body, backoff, attempt, max_retries)
         return
-    if current_runtime_options().modern_retries and status in {408, 409}:
+    if status in {408, 409}:
         _handle_codex_5xx(status, body, backoff, attempt, max_retries)
         return
     raise RuntimeError(f"codex backend returned {status}: {body[:2000]}")
@@ -276,7 +245,7 @@ def _request_codex_once(
     backoff: float,
     attempt: int,
     max_retries: int,
-    wait_seconds: int,
+    wait_seconds: float,
 ) -> Optional[_CodexResponseShim]:
     check_request_controls()
     with open_stream(api_url, headers, payload, effective_timeout(timeout)) as response:
@@ -313,16 +282,13 @@ def _request_codex_with_retries(
     payload: JsonDict,
     timeout: float,
     max_retries: int,
-    wait_seconds: int,
+    wait_seconds: float,
 ) -> _CodexResponseShim:
     max_retries = effective_max_retries(max_retries)
     last_exc: Optional[Exception] = None
     for attempt in range(max_retries):
         check_request_controls()
-        backoff = wait_seconds * (2 ** attempt)
-        if current_runtime_options().modern_retries:
-            from ..retry_policy import backoff_seconds
-            backoff = backoff_seconds(attempt, current_runtime_options().retry_initial_seconds)
+        backoff = backoff_seconds(attempt, wait_seconds)
         try:
             response = _request_codex_once(
                 api_url,
@@ -374,7 +340,7 @@ def request_codex(
     payload: JsonDict,
     timeout: float = 900.0,
     max_retries: int = 3,
-    wait_seconds: int = 10,
+    wait_seconds: float = 1.0,
 ) -> _CodexResponseShim:
     """POST to the Codex Responses endpoint and return a Response-shaped shim."""
     return _request_codex_with_retries(
