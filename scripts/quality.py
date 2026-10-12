@@ -46,7 +46,7 @@ def _verify_wheel() -> None:
     with tempfile.TemporaryDirectory(prefix="ikacore-wheel-") as temp:
         source_dir = Path(temp) / "source"
         source_dir.mkdir()
-        for filename in ("pyproject.toml", "README.md", "LICENSE"):
+        for filename in ("pyproject.toml", "README.md", "LICENSE", "NOTICE"):
             shutil.copy2(ROOT / filename, source_dir / filename)
         shutil.copytree(ROOT / "src", source_dir / "src",
                         ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"))
@@ -90,6 +90,8 @@ def _verify_wheel() -> None:
         required_suffixes = (
             "IkaModel/summary_prompt",
             "IkaModel/data/model_metadata.json",
+            ".dist-info/licenses/LICENSE",
+            ".dist-info/licenses/NOTICE",
         )
         missing = [
             suffix
