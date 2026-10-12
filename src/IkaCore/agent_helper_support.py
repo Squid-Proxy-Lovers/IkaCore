@@ -107,7 +107,7 @@ def build_memory_access_defaults(
         "long_term_search": True,
     }
     if not memory_enabled:
-        defaults = {key: False for key in defaults}
+        defaults = dict.fromkeys(defaults, False)
     if overrides:
         defaults.update(overrides)
     return defaults

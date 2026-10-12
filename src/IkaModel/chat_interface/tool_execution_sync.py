@@ -75,7 +75,7 @@ def validate_tool_args(
     try:
         json.dumps(tool_args)
     except TypeError as e:
-        raise ValueError(f"Tool '{tool_name}' arguments must be JSON-serializable: {e}")
+        raise ValueError(f"Tool '{tool_name}' arguments must be JSON-serializable: {e}") from e
 
     raw_args = cast(JsonDict, tool_args)
     coerced_args: ToolParameters = {}

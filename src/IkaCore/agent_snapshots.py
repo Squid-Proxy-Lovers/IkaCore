@@ -38,7 +38,8 @@ class AgentSnapshotControlMixin:
         return control
 
     def request_pause_at(self: Any, *checkpoint_kinds: str) -> None:
-        self.configure_runtime_control().request_pause(*checkpoint_kinds)
+        control = self._snapshot_runtime.control if self._snapshot_runtime is not None else self.configure_runtime_control()
+        control.request_pause(*checkpoint_kinds)
 
     def clear_pause_requests(self: Any, *checkpoint_kinds: str) -> None:
         if self._snapshot_runtime is not None:

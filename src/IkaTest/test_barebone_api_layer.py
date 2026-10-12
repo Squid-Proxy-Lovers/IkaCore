@@ -204,7 +204,7 @@ class TestApiResponseParsing:
             "content": [{"type": "text", "text": "Claude says hi"}],
             "usage": {"input_tokens": 10, "output_tokens": 4},
         }
-        content, _, tool_calls, _ = parse_provider_response("anthropic", data, "claude-3")
+        content, _, _tool_calls, _ = parse_provider_response("anthropic", data, "claude-3")
         assert content == "Claude says hi"
         usage = extract_usage("anthropic", data)
         assert usage["input_tokens"] == 10
@@ -318,7 +318,7 @@ class TestModelCostResolution:
             "choices": [{"message": {"content": "OpenRouter reply", "tool_calls": []}}],
             "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
         }
-        content, reasoning, tool_calls, tokens = parse_provider_response("openrouter", data, "meta-llama/llama-3.1-70b-instruct")
+        content, _reasoning, tool_calls, tokens = parse_provider_response("openrouter", data, "meta-llama/llama-3.1-70b-instruct")
         assert content == "OpenRouter reply"
         assert tool_calls == []
         assert tokens == 8
@@ -518,7 +518,7 @@ class TestAllProvidersCoverage:
         openrouter_data = {"choices": [{"message": {"content": "x", "tool_calls": []}}], "usage": {"total_tokens": 1}}
         data_by_provider = {"openai": openai_data, "anthropic": anthropic_data, "deepseek": deepseek_data, "gemini": gemini_data, "openrouter": openrouter_data}
         for provider in PROVIDERS:
-            content, _, tool_calls, tokens = parse_provider_response(provider, data_by_provider[provider], "model")
+            content, _, tool_calls, _tokens = parse_provider_response(provider, data_by_provider[provider], "model")
             assert content == "x"
             assert isinstance(tool_calls, list)
             usage = extract_usage(provider, data_by_provider[provider])
@@ -551,7 +551,7 @@ class TestRequestLayerContract:
         assert "model" in payload
         assert "messages" in payload
         assert isinstance(payload["messages"], list)
-        assert all("role" in m and "content" in m or "role" in m for m in payload["messages"])
+        assert all(("role" in m and "content" in m) or "role" in m for m in payload["messages"])
         if model.agent_tools:
             assert "tools" in payload
             for t in payload["tools"]:
@@ -577,7 +577,7 @@ class TestResponseParsingContract:
         data = {"choices": [{"message": {"content": "x", "tool_calls": []}}], "usage": {"total_tokens": 1}}
         out = parse_provider_response("openai", data, "gpt-4o")
         assert len(out) == 4
-        content, reasoning, tool_calls, tokens = out
+        content, _reasoning, tool_calls, tokens = out
         assert isinstance(content, str)
         assert isinstance(tool_calls, list)
         assert isinstance(tokens, (int, float))

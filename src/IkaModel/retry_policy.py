@@ -146,7 +146,7 @@ def response_delay(response: httpx.Response, attempt: int, max_retries: int, ini
     message = f"API request failed with status {response.status_code}"
     text = response.text.lower()
     if ("context length" in text or "context_length" in text or "reduce the length of the messages" in text
-            or "requested" in text and "tokens" in text and "maximum" in text):
+            or ("requested" in text and "tokens" in text and "maximum" in text)):
         message += ": context length exceeded"
     error = error_type(message, status_code=response.status_code)
     if not is_retryable_status(response.status_code) or attempt >= max_retries - 1:

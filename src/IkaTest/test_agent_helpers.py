@@ -1204,7 +1204,7 @@ class TestParseControlCalls:
     def test_agent_end_detected(self):
         a = _minimal_agent()
         calls = [{"function": {"name": "agent_end", "arguments": '{"input": "Final answer"}'}}]
-        target, ended, text = a.parse_control_calls(calls, None)
+        _target, ended, text = a.parse_control_calls(calls, None)
         assert ended is True
         assert "Final answer" in (text or "")
 
@@ -1268,7 +1268,7 @@ class TestParseControlCalls:
         stage = IkaStage("S", "P", [])
         a = _minimal_agent(Stages=[stage])
         calls = [{"function": {"name": "stage_end", "arguments": "{}"}}]
-        target, ended, text = a.parse_control_calls(calls, stage)
+        target, ended, _text = a.parse_control_calls(calls, stage)
         assert target == "next"
         assert ended is False
 
@@ -1276,7 +1276,7 @@ class TestParseControlCalls:
         stage = IkaStage("S", "P", [], allowed_back_to=[0])
         a = _minimal_agent(Stages=[stage, IkaStage("S1", "P1", [])])
         calls = [{"function": {"name": "change_stage", "arguments": '{"stage_index": 0, "reason": "Redo"}'}}]
-        target, ended, text = a.parse_control_calls(calls, stage, current_stage_idx=1)
+        target, ended, _text = a.parse_control_calls(calls, stage, current_stage_idx=1)
         assert not ended
         assert target == 0
 
@@ -1321,7 +1321,7 @@ class TestParseControlCalls:
     def test_agent_end_with_input_succeeds(self):
         a = _minimal_agent()
         calls = [{"function": {"name": "agent_end", "arguments": '{"input": "Final answer here"}'}}]
-        target, ended, text = a.parse_control_calls(calls, None, response_content="")
+        _target, ended, text = a.parse_control_calls(calls, None, response_content="")
         assert ended is True
         assert "Final answer" in (text or "")
 

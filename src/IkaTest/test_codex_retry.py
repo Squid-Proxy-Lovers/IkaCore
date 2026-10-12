@@ -220,7 +220,7 @@ class TestRequestCodexRetryLoop:
             return _FakeStreamCtx(502, body=b'{"error":"bad gateway"}')
 
         with patch("httpx.stream", side_effect=side_effect), patch("time.sleep"):
-            with pytest.raises(RuntimeError, match="502.*after 3 attempts"):
+            with pytest.raises(RuntimeError, match=r"502.*after 3 attempts"):
                 request_codex("u", {}, {}, timeout=1, max_retries=3, wait_seconds=1)
         assert calls["n"] == 3
 

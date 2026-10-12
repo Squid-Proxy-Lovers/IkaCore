@@ -44,7 +44,7 @@ def test_workflow_snapshots_store_instances_and_reuse_completed_outputs(tmp_path
 
 def test_selective_replay_invalidates_descendants_and_preserves_other_instances(tmp_path):
     control = RuntimeControl(parallel_replay={"left": [1]})
-    wf, store, calls = workflow(tmp_path, control=control)
+    wf, _store, calls = workflow(tmp_path, control=control)
     wf.run()
     calls.clear()
     wf.resume_from_snapshot(wf.snapshot_runtime_info()["last_snapshot_id"])
@@ -62,7 +62,7 @@ def test_workflow_entry_pause_has_no_execution_and_resumes_once(tmp_path):
 
 
 def test_replay_rejects_changed_graph_and_invalid_selection(tmp_path):
-    wf, store, calls = workflow(tmp_path)
+    wf, _store, _calls = workflow(tmp_path)
     wf.run()
     snapshot = wf.snapshot_runtime_info()["last_snapshot_id"]
     wf.nodes[0].agent.prompt = "changed task"
@@ -76,7 +76,7 @@ def test_replay_rejects_changed_graph_and_invalid_selection(tmp_path):
 
 
 def test_replay_checks_nested_tool_effects_before_selected_instance_is_rerun(tmp_path):
-    wf, store, calls = workflow(tmp_path, control=RuntimeControl(parallel_replay={"left": [1]}))
+    wf, store, _calls = workflow(tmp_path, control=RuntimeControl(parallel_replay={"left": [1]}))
     wf.run()
     info = wf.snapshot_runtime_info()
     left = store.list_workflow_node_instances(info["run_id"], "left")[1]
@@ -89,7 +89,7 @@ def test_replay_checks_nested_tool_effects_before_selected_instance_is_rerun(tmp
 
 
 def test_worker_failures_are_recorded_and_dependents_are_blocked(tmp_path):
-    wf, store, calls = workflow(tmp_path)
+    wf, store, _calls = workflow(tmp_path)
     def clone(**kwargs):
         agent = IkaBaseAgent(name="root", description="test", prompt="task", model_id="gpt-4o", api_key="test")
         agent.execution = MagicMock(side_effect=ValueError("expected"))
@@ -104,7 +104,7 @@ def test_worker_failures_are_recorded_and_dependents_are_blocked(tmp_path):
 
 
 def test_parallel_snapshot_results_remain_complete(tmp_path):
-    wf, store, calls = workflow(tmp_path)
+    wf, store, _calls = workflow(tmp_path)
     with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
         wf.run(use_async=True)
     info = wf.snapshot_runtime_info()

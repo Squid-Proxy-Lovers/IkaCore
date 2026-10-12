@@ -13,6 +13,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+ARTIFACTS = ROOT / "artifacts" / "quality"
 SOURCE_FILES = sorted((ROOT / "src").rglob("*.py"))
 
 
@@ -36,9 +37,13 @@ def _commands() -> list[tuple[str, list[str]]]:
                 "-m",
                 "pytest",
                 "--cov",
+                "--cov-context=test",
+                f"--cov-report=json:{ARTIFACTS / 'coverage.json'}",
+                f"--junitxml={ARTIFACTS / 'tests.xml'}",
                 "--cov-report=term-missing:skip-covered",
             ],
         ),
+        ("coverage matrix", [sys.executable, str(ROOT / "scripts" / "coverage_matrix.py")]),
     ]
 
 
@@ -77,6 +82,10 @@ def _verify_wheel() -> None:
                 f"expected one built wheel, found {len(wheels)}"
             )
 
+        if ARTIFACTS.exists():
+            for previous in ARTIFACTS.glob("*.whl"):
+                previous.unlink()
+            shutil.copy2(wheels[0], ARTIFACTS / wheels[0].name)
         print("$ verify wheel contains required package data", flush=True)
         with zipfile.ZipFile(wheels[0]) as archive:
             names = set(archive.namelist())
@@ -148,6 +157,7 @@ def main() -> int:
     if args.list:
         print("\n".join(labels))
         return 0
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
     for label, command in _commands():
         print(f"$ {label}", flush=True)
         subprocess.run(command, cwd=ROOT, check=True)

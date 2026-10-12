@@ -28,7 +28,8 @@ class _Controls:
     codex_tool_output_max_chars: Optional[int] = None
 
 
-_controls: ContextVar[_Controls] = ContextVar("ika_request_controls", default=_Controls())
+_DEFAULT_CONTROLS = _Controls()
+_controls: ContextVar[_Controls] = ContextVar("ika_request_controls", default=_DEFAULT_CONTROLS)
 
 
 def set_request_cancel_checker(checker: Optional[CancelChecker]) -> Optional[CancelChecker]:
@@ -65,7 +66,7 @@ def request_lifecycle_active() -> bool:
 
 
 def controls_enabled() -> bool:
-    return _controls.get() != _Controls()
+    return _controls.get() != _DEFAULT_CONTROLS
 
 
 def register_request_abort_callback(callback: Callable[[], None]) -> Optional[Callable[[], None]]:

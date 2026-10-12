@@ -130,3 +130,73 @@ workflow dependency/instance behavior, persistence, and replay. Live providers a
 application workflows are separate release checks. Historical credential cleanup is
 also separate: removing source copies or branches does not purge Git objects, PR refs,
 caches, forks, or other clones.
+
+## Measured quality and footprint
+
+The quality runner now produces an `artifacts/quality/coverage-matrix.md` report
+for all 122 runtime modules across 16 subsystems. It tracks 53 required scenarios plus
+missing branches and known gaps. Current local results: **95.32% line coverage, 85.32%
+branch coverage**, with 501 lines excluded by coverage's rules (including type-only and
+abstract declarations). Live-provider behavior and model/summary quality remain unverified
+by the offline suite. Request-control, transport and snapshot areas now have independent
+90% branch floors.
+
+An isolated runtime-only wheel installation on macOS arm64 / CPython 3.11.16 measured:
+
+| Measurement | Result |
+| --- | ---: |
+| Wheel download | 205.1 KiB |
+| Unpacked wheel content | 675.3 KiB |
+| Installed distributions including dependencies and bytecode | 5.40 MiB |
+| Direct runtime dependency | 1 (`httpx`); 7 dependency distributions total |
+| Public package imports, fresh interpreter | 3.47 ms |
+| Full agent runtime import, fresh interpreter | 32.98 ms |
+| Peak RSS after runtime import, including Python/worker | 32.59 MiB |
+| Python/worker baseline peak RSS | 19.23 MiB |
+| HTTPX-only import peak RSS | 27.16 MiB |
+| Agent construction and shutdown, warmed imports | 0.0043 ms |
+| Mock HTTPX request/client lifecycle | 0.0461 ms |
+| One-step synchronous agent, mocked provider | 0.231 ms |
+| One-step async agent via sync bridge, mocked provider | 0.657 ms |
+| Same agent with SQLite snapshots | 11.81 ms |
+| Single 4 KiB snapshot append | 0.586 ms |
+| Pure four-node workflow, sequential / parallel | 0.008 / 0.247 ms |
+
+Timings are medians of nine fresh-process samples, 100 warm operations each. They exclude
+real provider/model time; full agent measurements include construction/client/shutdown.
+Imports use fresh interpreters but a warmed OS filesystem cache. These results describe
+this machine and fixture, not production latency guarantees. Reports separate batch-average
+P95, interpreter wall time, and RSS. The first 1,000 repeated agent runs retained about
+1.08 MiB of traced allocations; the next 1,000 reduced retained allocations by about 46 KiB.
+That short run is consistent with cache warmup, not proof of leak freedom under every workload.
+
+The default package and basic execution path are small. Persistence adds substantial local
+I/O cost, parallel scheduling costs more for trivial work, and the 17,000+ line runtime still
+has architectural complexity worth reducing. These numbers support evaluating optional
+features separately. See [benchmark instructions](../../CONTRIBUTING.md#reproducing-the-offline-benchmarks)
+and the generated `artifacts/benchmarks/benchmark.json` report. CI publishes both reports as run artifacts.
+
+### Local coverage snapshot
+
+| Area | Modules | Lines | Branches | Floors L/B | Tests observed | Excluded lines |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Public API / package imports | 4 | 95.97% | 90.91% | 95/90% | 298 | 12 |
+| Request controls / cancellation | 6 | 95.53% | 90.91% | 95/90% | 154 | 0 |
+| HTTP ownership / TLS / connection reuse | 5 | 95.14% | 91.30% | 95/90% | 105 | 2 |
+| Retries / request errors | 2 | 87.42% | 77.91% | 85/75% | 131 | 0 |
+| Tools / schemas / output bounds | 14 | 95.54% | 88.67% | 95/85% | 204 | 161 |
+| Snapshot storage / privacy / replay rules | 8 | 94.98% | 91.82% | 90/90% | 35 | 0 |
+| Agent snapshots / human resume | 6 | 98.08% | 91.49% | 95/90% | 29 | 0 |
+| Workflow snapshots / selective replay | 3 | 96.82% | 88.89% | 95/85% | 24 | 0 |
+| Workflows / fan-in / instance isolation | 9 | 98.25% | 93.24% | 95/90% | 40 | 66 |
+| Memory integration | 9 | 93.23% | 76.14% | 90/75% | 17 | 10 |
+| Logging / CLI | 3 | 96.58% | 86.92% | 95/85% | 218 | 69 |
+| Agent runtime / stages / checkpoints | 17 | 97.63% | 82.43% | 95/80% | 370 | 181 |
+| Summarization / compaction | 1 | 97.81% | 84.62% | 95/80% | 31 | 0 |
+| Codex auth / streaming / payloads | 6 | 93.51% | 84.58% | 90/80% | 120 | 0 |
+| Provider payloads / metadata / history | 19 | 93.85% | 82.30% | 90/80% | 163 | 0 |
+| Chat loop / accounting / human interruption | 10 | 94.04% | 81.58% | 90/80% | 71 | 0 |
+
+The generated matrix lists all 53 required scenario IDs, their JUnit outcomes, exact uncovered
+locations, and per-area gaps. The manifest and generator are versioned; CI artifacts reflect
+each checked revision.

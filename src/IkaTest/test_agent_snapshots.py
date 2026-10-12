@@ -201,3 +201,24 @@ def test_staged_human_input_snapshot_resumes_with_user_answer(tmp_path, monkeypa
     assert second['final_message'] == 'done'
     assert messages_seen[-1] == 'User answer'
     agent.shutdown()
+
+
+def test_pause_configuration_is_isolated_and_preserves_replay_policy(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    agent = _agent(tmp_path)
+    agent.clear_pause_requests()  # Safe before explicitly enabling persistence.
+    agent.request_pause_at('post_model')
+    assert agent._snapshot_runtime.control.should_pause('post_model')
+    selected = {'worker': [1]}
+    control = agent.configure_runtime_control(pause_points={'pre_model'}, parallel_replay=selected,
+                                               reuse_historical_parallel_results=False)
+    selected['worker'].append(2)
+    assert control.parallel_replay == {'worker': [1]}
+    agent.request_pause_at('tool:*')
+    assert control.reuse_historical_parallel_results is False
+    assert control.should_pause('pre_model') and control.should_pause('tool:progress')
+    agent.clear_pause_requests('pre_model')
+    assert not control.should_pause('pre_model') and control.should_pause('tool:progress')
+    agent.clear_pause_requests()
+    assert not control.should_pause('tool:progress')
+    agent.shutdown()

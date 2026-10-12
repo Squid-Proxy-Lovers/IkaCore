@@ -240,3 +240,39 @@ def test_replay_assessment_includes_unfinished_nested_tools(tmp_path):
     assert not store.assess_frame_replay(root)['safe']
     with pytest.raises(ValueError, match='not found'):
         store.assess_frame_replay('missing')
+
+
+def test_missing_snapshot_queries_and_latest_entry_order(tmp_path):
+    store = CheckpointStore(str(tmp_path / 'query.db'))
+    assert store.get_run('missing') is None
+    assert store.get_frame('missing') is None
+    assert store.load_snapshot('missing') is None
+    assert store.get_latest_snapshot_for_frame('missing') is None
+    assert store.get_frame_entry_snapshot('missing') is None
+    with pytest.raises(ValueError, match='not found'):
+        store.resume_from_snapshot('missing')
+    with pytest.raises(ValueError, match='frame_entry'):
+        store.restart_frame('missing')
+    run = store.create_run('agent', 'test')
+    frame = store.create_frame(run, 'agent', 'test')
+    first = store.create_snapshot(run, frame, 'frame_entry', {'step': 0})
+    last = store.create_snapshot(run, frame, 'boundary', {'step': 1})
+    assert store.get_frame_entry_snapshot(frame)['snapshot_id'] == first
+    assert store.get_latest_snapshot_for_frame(frame)['snapshot_id'] == last
+    assert [row['snapshot_id'] for row in store.get_snapshot_chain(last)] == [first, last]
+    assert len(store.list_snapshots(run, frame)) == 2
+
+
+def test_frame_updates_preserve_unmodified_fields_and_redact_credentials(tmp_path):
+    store = CheckpointStore(str(tmp_path / 'update.db'))
+    run = store.create_run('agent', 'test')
+    frame = store.create_frame(run, 'agent', 'test', position={'step': 0})
+    store.update_frame(frame, inputs={'query': 'hello'}, resolved_config={'api_key': 'placeholder'},
+                       metadata={'label': 'note'})
+    stored = store.get_frame(frame)
+    assert stored['position_json'] == {'step': 0}
+    assert stored['inputs_json'] == {'query': 'hello'}
+    assert stored['resolved_config_json']['api_key'] == '[REDACTED]'
+    assert stored['metadata_json'] == {'label': 'note'}
+    store.update_frame(frame, position={'step': 1})
+    assert store.get_frame(frame)['inputs_json'] == {'query': 'hello'}

@@ -78,3 +78,54 @@ that verify behavior and invariants.
 - cover changed provider/runtime semantics with meaningful regression tests
 - keep production functions within the 70-line limit and modules within the 600-line limit
 - group related behavior in cohesive classes; avoid mixin chains created solely to satisfy class-size limits
+
+## Quality evidence
+
+`python scripts/quality.py` runs Ruff correctness/async rules, a per-function cyclomatic
+complexity limit of 15, Python compilation, Pyright, the behavioral suite, the coverage
+matrix, and a fresh wheel build/import check. Representative invalid snippets are tested
+against the actual Ruff configuration. Keep functions within 70 lines and modules within
+600; large cohesive classes are allowed.
+
+Coverage requires at least 91% combined coverage, **94% executable-line coverage**, and
+**85% branch coverage**, plus independent floors for each of the 16 subsystems in
+`scripts/coverage_manifest.json`. Every runtime module must belong to exactly one area.
+Required scenarios must appear and pass in JUnit; skipped/missing scenarios fail the gate.
+Generated reports include observed test contexts, exact missing line/branch locations,
+excluded-line counts, and known gaps. Line/branch coverage does not measure model quality.
+
+Reports are written to `artifacts/quality/coverage-matrix.md`, `coverage-matrix.json`,
+`coverage.json`, and `tests.xml`. They are uploaded from CI on Python 3.11, 3.12 and 3.13
+on Ubuntu, plus Python 3.11 with the minimum HTTPX 0.27.0 dependency. Live-provider tests remain opt-in; the offline CI records their skips.
+
+The policy deliberately exempts constant `getattr`/`setattr` adapters, public async
+`timeout` arguments, and typed dataclass-factory lambdas from style-oriented lint rules.
+Mutable defaults, lost tasks, missing exception causes, blocking async calls, blind
+exception assertions, and overly complex functions remain checked.
+
+## Reproducing the offline benchmarks
+
+Build/validate the wheel with the quality command first. Use a disposable runtime-only
+environment so development tools do not inflate the dependency footprint:
+
+```bash
+python -m venv --without-pip /tmp/ika-runtime-bench
+python -m pip --python /tmp/ika-runtime-bench/bin/python install artifacts/quality/*.whl
+python scripts/benchmark.py --python /tmp/ika-runtime-bench/bin/python \
+  --wheel artifacts/quality/*.whl \
+  --samples 9 --iterations 100 --soak-iterations 1000
+```
+
+Requires Linux or macOS for the RSS measurement. The worker rejects real socket
+connections and uses fixed data, HTTPX MockTransport, pure workflow fixtures, and local
+SQLite. Model/network latency, optional memory backends and real downstream applications
+are outside these measurements. Each sample uses a fresh interpreter; warm cases perform
+three untimed warmups. The filesystem cache is not flushed. P95 is across subprocess batch
+averages, not individual request latency. RSS includes the interpreter/measurement worker.
+
+`artifacts/benchmarks/benchmark.json` stores raw samples, versions, installed distribution
+sizes, RSS, wall times, and two phases of repeated-run allocation measurements. The report
+records revision/dirty state and wheel/harness hashes, and verifies that measured runtime files match the wheel. `benchmark.md` is the readable table.
+CI runs a smaller benchmark sample and uploads the evidence. Portable gates limit the
+wheel to 300 KiB, unpacked wheel content to 1 MiB, and direct runtime requirements to one.
+Timing results are reported rather than enforcing noisy cross-machine latency thresholds.

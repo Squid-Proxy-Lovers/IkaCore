@@ -148,8 +148,8 @@ class _BroadExceptionVisitor(ast.NodeVisitor):
     def _is_broad_exception(node: ast.ExceptHandler) -> bool:
         return (
             node.type is None
-            or isinstance(node.type, ast.Name)
-            and node.type.id in {"Exception", "BaseException"}
+            or (isinstance(node.type, ast.Name)
+            and node.type.id in {"Exception", "BaseException"})
         )
 
 

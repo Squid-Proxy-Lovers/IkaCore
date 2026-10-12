@@ -62,7 +62,7 @@ class AgentEndParseMixin(JsonToolArgumentParseMixin):
         for value in args.values():
             if isinstance(value, str):
                 stripped = value.strip()
-                if stripped.startswith("{") or stripped.startswith("["):
+                if stripped.startswith(("{", "[")):
                     return value
                 if len(stripped) > 10 and stripped != ".":
                     return value

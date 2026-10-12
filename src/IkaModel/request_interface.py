@@ -250,7 +250,7 @@ def _is_context_length_error(e: Exception) -> bool:
         "maximum context length" in s
         or "context length" in s
         or "reduce the length of the messages" in s
-        or "requested" in s and "tokens" in s and "maximum" in s
+        or ("requested" in s and "tokens" in s and "maximum" in s)
     )
 
 

@@ -1,10 +1,12 @@
+from typing import ClassVar
+
 import pytest
 
 from IkaMem.storage import mem0_storage
 
 
 class DummyMemoryClient:
-    instances = []
+    instances: ClassVar[list] = []
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -29,7 +31,7 @@ class DummyMemoryClient:
 
 
 class DummyMemory:
-    instances = []
+    instances: ClassVar[list] = []
 
     def __init__(self):
         self.add_calls = []
