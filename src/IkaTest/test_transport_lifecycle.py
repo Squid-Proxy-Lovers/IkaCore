@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 from concurrent.futures import Future, TimeoutError
 from unittest.mock import Mock
@@ -32,7 +33,7 @@ def test_scoped_posts_and_streams_share_owned_client_and_close_it(owned_clients)
     with runtime_options(reuse_connections=True, shared_ssl_context=True):
         assert controlled_post(URL, {}, {}, 1, None).json() == {'ok': True}
         with open_stream(URL, {}, {}, None) as response:
-            assert response.read() == b'{"ok":true}'
+            assert json.loads(response.read()) == {'ok': True}
         assert len(owned_clients) == 1 and not owned_clients[0].is_closed
         with runtime_options(reuse_connections=True):
             controlled_post(URL, {}, {}, 1, None)

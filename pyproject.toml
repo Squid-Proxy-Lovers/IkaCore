@@ -28,6 +28,8 @@ test = [
   "pytest-cov>=5",
 ]
 dev = [
+  "setuptools>=77.0.3",
+  "wheel",
   "pyright>=1.1.390",
   "ruff>=0.16.10",
 ]

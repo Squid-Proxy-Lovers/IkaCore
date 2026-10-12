@@ -83,7 +83,8 @@ that verify behavior and invariants.
 
 `python scripts/quality.py` runs Ruff correctness/async rules, a per-function cyclomatic
 complexity limit of 15, Python compilation, Pyright, the behavioral suite, the coverage
-matrix, and a fresh wheel build/import check. Representative invalid snippets are tested
+matrix, and a fresh wheel build/import check. The dev extra includes the build backend
+and wheel tooling, so the no-isolation packaging check also works in fresh Python 3.12+ environments. Representative invalid snippets are tested
 against the actual Ruff configuration. Keep functions within 70 lines and modules within
 600; large cohesive classes are allowed.
 
