@@ -1,5 +1,9 @@
 # Contributing
 
+## Contribution License
+
+Unless a separate agreement states otherwise, contributions intentionally submitted for inclusion in IkaCore are licensed under the [Apache License, Version 2.0](LICENSE), as described in Section 5 of the license. Submit only contributions you have the right to license on these terms, and preserve any applicable third-party license and attribution notices.
+
 ## Local Setup
 
 ```bash

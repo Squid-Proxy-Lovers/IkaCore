@@ -75,3 +75,9 @@ Codex support is documented in the [Provider Selection](docs/USAGE.md#provider-s
 ## Development Notes
 
 This repo is maintained with `pytest` and `ruff`. Runtime modules and examples should import through the installed package rather than mutating `sys.path`; keep docs and examples aligned with public API changes.
+
+## License
+
+Copyright 2025-2026 IkaCore contributors.
+
+IkaCore is licensed under the [Apache License, Version 2.0](LICENSE). It permits commercial use, modification, and redistribution, including use in proprietary applications, and includes an explicit contributor patent grant. Redistribution must comply with the license's notice and attribution requirements. See [NOTICE](NOTICE) for project attribution.
