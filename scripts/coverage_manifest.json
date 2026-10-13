@@ -290,7 +290,7 @@
         "src/IkaTest/test_codex_async_transport.py::test_native_codex_cancellation_closes_stream_but_keeps_shared_client",
         "src/IkaTest/test_codex_async_transport.py::test_native_codex_retries_transient_failures"
       ],
-      "known_gap": "Auth uses synthetic files/tokens; no live bearer, refresh service or backend stream exercised.",
+      "known_gap": "Offline CI uses synthetic files/tokens. Separate live checks passed for gpt-5.6-sol; other Codex models and actual OAuth token renewal remain unverified.",
       "min_lines": 90,
       "min_branches": 80
     },

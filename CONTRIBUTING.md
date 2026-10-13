@@ -56,6 +56,35 @@ Supported live smoke variables:
 - `GEMINI_API_KEY`, required `IKACORE_LIVE_GEMINI_MODEL`
 - `OPENROUTER_API_KEY`, required `IKACORE_LIVE_OPENROUTER_MODEL`
 
+### Live Codex integration checks
+
+Use a runtime-only installation of the current wheel. Specify the model you intend to
+ship, and choose either `CODEX_BEARER` or the explicit local-login option:
+
+```bash
+/tmp/ika-runtime-bench/bin/python scripts/live_codex_check.py \
+  --use-local-login --model gpt-5.6-sol
+```
+
+The local-login option uses the existing Codex credential helper and can refresh stored
+credentials. See the [official authentication documentation](https://learn.chatgpt.com/docs/auth).
+No credential values belong in command arguments or repository files.
+
+The runner checks sync/async text, sync/async tool-result replay, simple agents, two-stage
+execution, fresh-process snapshot resume, and cancellation after live response headers.
+Tools return only synthetic fixture data. Each case has a 60-second deadline and one
+request attempt; short prompts and disabled step extensions limit work. Codex does not
+accept the framework's per-request output-token cap, so this is not a strict token/spend
+limit. `--case CASE` selects individual checks. The report at `artifacts/live/codex.json`
+contains model/runtime identity and sanitized outcomes, without credentials or raw model
+output. A failed connectivity check stops the run; inspect requested/completed cases.
+
+On 2026-10-13, all eight checks passed against `gpt-5.6-sol` using the local Codex login
+and the installed v2 wheel at runtime revision `344348c`. This verifies that specific
+model/endpoint/account combination. Other providers, model variants, malformed/truncated
+streams, crashes during external tool effects and long-running workloads need separate
+validation. Offline CI continues to run without credentials.
+
 ## Project Conventions
 
 - keep runtime behavior aligned with tests

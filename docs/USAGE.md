@@ -331,6 +331,9 @@ IKACORE_LIVE_PROVIDER_TESTS=1 OPENAI_API_KEY=... pytest src/IkaTest/test_live_pr
 
 The live smoke suite supports OpenAI, Anthropic, DeepSeek, Gemini, and OpenRouter. When live smoke is enabled, at least one provider must be fully configured. For providers without stable project defaults, set the matching `IKACORE_LIVE_<PROVIDER>_MODEL` variable before running it.
 
+For live Codex text, tool, agent, resume and cancellation checks, see
+[the integration runner](../CONTRIBUTING.md#live-codex-integration-checks).
+
 ### Examples
 
 The repo includes runnable examples in `examples/`:

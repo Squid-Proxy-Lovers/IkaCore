@@ -165,9 +165,21 @@ application workflows are separate release checks. Historical credential cleanup
 also separate: removing source copies or branches does not purge Git objects, PR refs,
 caches, forks, or other clones.
 
+## Live validation status
+
+On 2026-10-13, the installed v2 runtime at `344348c` passed eight live Codex checks with
+`gpt-5.6-sol`: sync/async text, sync/async tool calls, simple and two-stage execution,
+fresh-process resume and cancellation. Resume used no network and preserved usage;
+cancellation closed the response while leaving the caller's client usable.
+
+These results cover one model and account. OpenAI API Chat/Responses, Anthropic,
+DeepSeek, Gemini, OpenRouter and Z.AI remain unverified live in this review. Existing
+offline coverage does not establish live compatibility. Reproduce the Codex run with
+[the live-check command](../../CONTRIBUTING.md#live-codex-integration-checks).
+
 ## Measured quality and footprint
 
-The full local quality run passes **760 tests**, with six live-provider checks skipped:
+The full local quality run passes **762 tests**, with six live-provider checks skipped:
 **95.40% line coverage**, **86.25% branch coverage**, Ruff, Pyright, and an
 isolated wheel build/import check. The matrix assigns all 121 runtime modules to 16
 areas and requires 67 named scenarios. Coverage excludes 458 lines, including type-only
