@@ -5,7 +5,7 @@ Provider replay, retry behavior, and workflow scheduling now use the v2 defaults
 
 IkaCore is a Python agent framework built around three primitives:
 
-- `IkaBaseAgent`: an agent with provider config, tools, checkpoints, and optional stages.
+- `IkaBaseAgent`: an agent with provider config, tools, snapshots, and optional stages.
 - `IkaStage`: a bounded execution phase with its own tool set and optional model overrides.
 - `IkaWorkflow`: a graph runner for composing multiple agents.
 
@@ -139,7 +139,6 @@ Useful `IkaStage` fields:
 - `hitl`
 - `memory_access`
 - `long_term_filter`
-- `checkpoint`
 - `model_id`, `api_key`, `api_url`, `max_tokens`, `temperature`
 
 ### Human In The Loop
@@ -147,16 +146,17 @@ Useful `IkaStage` fields:
 HITL stages raise a resumable interrupt instead of reading from stdin.
 
 ```python
+agent.enable_snapshots("state/snapshots.db")
 result = agent.execution()
 
-if result.get("status") == "interrupted":
-    resumed = agent.resume_execution(
-        result["checkpoint_id"],
+if result.get("status") == "awaiting_user_input":
+    resumed = agent.resume_from_snapshot(
+        result["snapshot_id"],
         resume_input="Use the stricter filtering option.",
     )
 ```
 
-The interrupt payload includes the stage name, question, and checkpoint identifier when checkpointing is enabled.
+The interrupt payload includes the stage name, question, and snapshot identifier when snapshots are enabled.
 
 ### Memory
 
@@ -292,23 +292,27 @@ Current workflow semantics:
 - A `"child"` edge without `stage_index` is invalid.
 - Sync and async workflow execution now use the same child-edge semantics.
 
-### Checkpoints
+### Snapshots
 
-Checkpointing stores resumable state in SQLite through `CheckpointStore`.
+Opt in to durable run, stage, and tool state through one SQLite `SnapshotStore`:
 
 ```python
-agent = IkaBaseAgent(
-    name="checkpointed",
-    description="Checkpointed agent",
-    prompt="Work through the task carefully.",
-    model_id="gpt-4o-mini",
-    api_key="...",
-    checkpoint=True,
-    checkpoint_db_path="state/checkpoints.db",
-)
+store = agent.enable_snapshots("state/snapshots.db")
+result = agent.execution()
+if result.get("status") in {"paused", "awaiting_user_input"}:
+    resumed = agent.resume_from_snapshot(result["snapshot_id"], resume_input="Continue.")
 ```
 
-Checkpoint payloads include stage/run state and HITL interrupts. Resume paths avoid replaying completed tool calls tracked in the checkpoint state.
+A newly constructed, equivalently configured agent can enable the same database and
+resume a saved ID. Snapshots are immutable. A boundary's snapshot, event, and explicit
+pause status commit together; failed writes roll back. Connections are scoped to the
+operation/transaction, and SQLite's default durability is retained.
+
+V2 removes `CheckpointStore`, `load_checkpoint()`, constructor `checkpoint` and
+`checkpoint_db_path` options, stage `checkpoint`, and `execution(checkpoint_uid=...)`.
+Use `enable_snapshots()` and `resume_from_snapshot()` instead. Returned IDs are named
+`snapshot_id`. Old checkpoint databases are not converted or deleted; resume them with
+v1 before migrating. Snapshot replay does not restore a Python stack or undo tool effects.
 
 ### Logging And Debugging
 

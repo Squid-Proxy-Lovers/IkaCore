@@ -1,4 +1,4 @@
-"""Run opt-in snapshot sessions around the unchanged agent dispatcher."""
+"""Run opt-in snapshot sessions around the agent dispatcher."""
 
 # pyright: strict
 
@@ -18,11 +18,11 @@ def runtime_info(session: SnapshotSession) -> dict[str, Any]:
     return {"run_id": session.run_id, "frame_id": session.root_frame_id, "last_snapshot_id": session.last_snapshot_id}
 
 
-def execute_with_snapshots(agent: Any, execute: Callable[..., dict[str, Any]], checkpoint_uid: Optional[str],
+def execute_with_snapshots(agent: Any, execute: Callable[..., dict[str, Any]],
                            resume_input: Optional[str]) -> dict[str, Any]:
     session = ensure_session(agent)
     if session is None:
-        return execute(checkpoint_uid=checkpoint_uid, resume_input=resume_input)
+        return execute(resume_input=resume_input)
     session.replaying = False
     session.store.update_run_status(str(session.run_id), "running")
     finished = False
@@ -31,25 +31,26 @@ def execute_with_snapshots(agent: Any, execute: Callable[..., dict[str, Any]], c
             if session.last_snapshot_id is None:
                 record_boundary(session, "frame_entry", {})
             check_request_controls()
-            result = execute(checkpoint_uid=checkpoint_uid, resume_input=resume_input)
+            result = execute(resume_input=resume_input)
             if result.get("status") == "awaiting_user_input":
                 snapshot = record_boundary(session, "human_input", result)
                 session.store.update_frame(str(session.root_frame_id), status="paused")
                 session.store.update_run_status(str(session.run_id), "paused")
                 finished = True
-                return {**result, "checkpoint_uid": snapshot, "runtime": runtime_info(session)}
+                return {**result, "snapshot_id": snapshot, "runtime": runtime_info(session)}
             record_boundary(session, "agent_completed", {"last_content": result.get("final_message", ""), "output": result})
-            if session.stage_frame_id is not None:
-                session.store.update_frame(session.stage_frame_id, status="completed")
-            session.store.update_frame(str(session.root_frame_id), status="completed", outputs=result)
-            run = session.store.get_run(str(session.run_id))
-            if run is not None and run["root_frame_id"] == session.root_frame_id:
-                session.store.update_run_status(str(session.run_id), "completed", ended=True)
+            with session.store.transaction():
+                if session.stage_frame_id is not None:
+                    session.store.update_frame(session.stage_frame_id, status="completed")
+                session.store.update_frame(str(session.root_frame_id), status="completed", outputs=result)
+                run = session.store.get_run(str(session.run_id))
+                if run is not None and run["root_frame_id"] == session.root_frame_id:
+                    session.store.update_run_status(str(session.run_id), "completed", ended=True)
             finished = True
             return {**result, "runtime": runtime_info(session)}
         except RuntimePauseRequested as paused:
             finished = True
-            return {"status": "paused", "final_message": "", "summary": "", "checkpoint_uid": paused.snapshot_id,
+            return {"status": "paused", "final_message": "", "summary": "", "snapshot_id": paused.snapshot_id,
                     "runtime": runtime_info(session), "pause_point": paused.checkpoint_kind}
         except IkaRequestControlError:
             finished = True

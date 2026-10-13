@@ -130,3 +130,19 @@ records revision/dirty state and wheel/harness hashes, and verifies that measure
 CI runs a smaller benchmark sample and uploads the evidence. Portable gates limit the
 wheel to 300 KiB, unpacked wheel content to 1 MiB, and direct runtime requirements to one.
 Timing results are reported rather than enforcing noisy cross-machine latency thresholds.
+
+
+The installed-wheel provider benchmark measures all seven registered routes, with 10,
+100 and 1,000 messages, and times payload construction separately from JSON encoding:
+
+```bash
+/tmp/ika-runtime-bench/bin/python scripts/provider_benchmark.py \
+  --output artifacts/benchmarks/providers.json
+```
+
+Use `--baseline /path/to/previous-providers.json` for before/after comparison. It rejects
+changed payload checksums before comparing timings. The test suite also checks all 21
+fixture checksums against the pre-optimization runtime. These are synthetic transcript
+checks, supplemented by existing tool, reasoning, history, image and retry regressions;
+they do not certify live provider compatibility. The offline suite blocks socket
+connections unless `IKACORE_LIVE_PROVIDER_TESTS=1` is explicitly set.

@@ -199,7 +199,7 @@ def test_async_api_retry_dispatches_codex_closes_owned_client_and_raises_last_er
             "https://chatgpt.com/backend-api/codex/responses",
             "http://172.30.0.1:18081/backend-api/codex/responses",
         ):
-            with patch("IkaModel.codex.chat_helpers_codex.request_codex", return_value=codex_response) as request_codex:
+            with patch("IkaModel.codex.async_request.async_request_codex", new_callable=AsyncMock, return_value=codex_response) as request_codex:
                 response = await async_api_request_retry(
                     endpoint,
                     {},

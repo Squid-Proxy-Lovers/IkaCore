@@ -11,7 +11,6 @@ from IkaCore.agent_helper_support import (
     initial_message_history,
     validate_final_answer_checks_for_history,
 )
-from IkaCore.checkpoint import CheckpointStore
 from IkaCore.logging_utils import IkaLogger
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
@@ -113,8 +112,6 @@ class AgentExecutionLimitInitializationMixin:
 class AgentRuntimeStateInitializationMixin:
     def _assign_runtime_state(
         self,
-        checkpoint: bool,
-        checkpoint_db_path: str,
         rate_limit_per_min: Optional[float],
         per_tool_rate_limit: Optional[dict[str, float]],
         memory: bool,
@@ -123,15 +120,13 @@ class AgentRuntimeStateInitializationMixin:
         summarize_final: bool,
         use_async: bool,
     ) -> None:
-        self.checkpoint = checkpoint
         self.memory = memory
         self.memory_access = build_memory_access_defaults(memory, memory_access)
         self.message_history = initial_message_history(getattr(self, "system_prompt", None))
         self.rate_limit_per_min = rate_limit_per_min
         self.per_tool_rate_limit = per_tool_rate_limit or {}
         self._last_api_call_ts: float = 0.0
-        self.checkpoint_store = CheckpointStore(checkpoint_db_path) if checkpoint else None
-        self._resume_checkpoint: Optional[JsonDict] = None
+        self._resume_state: Optional[JsonDict] = None
         self._last_interrupt: Optional[JsonDict] = None
         self.short_term_memory: Optional[STMemory] = None
         self.long_term_memory: Optional[LTMemory] = get_global_long_term_memory()

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import time
 from copy import copy, deepcopy
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol, cast
 
-from IkaCore.cli_output import OutputType, get_cli_output
 from IkaCore.stages import IkaStage
 
 if TYPE_CHECKING:
@@ -20,7 +18,6 @@ class _WorkflowContextState(Protocol):
 
 
 class _CloneConfigState(_WorkflowContextState, Protocol):
-    checkpoint_store: Any
     name: str
     prompt: str
     system_prompt: Optional[str]
@@ -30,7 +27,6 @@ class _CloneConfigState(_WorkflowContextState, Protocol):
     api_url: Optional[str]
     max_tokens: int
     temperature: float
-    checkpoint: bool
     subagents: List["IkaBaseAgent"]
     next_agent: Optional["IkaBaseAgent"]
     maxsteps: int
@@ -45,9 +41,6 @@ class _CloneConfigState(_WorkflowContextState, Protocol):
     max_tool_rounds: int
 
     def _clone_stage_for_run(self, stage: IkaStage) -> IkaStage:
-        ...
-
-    def _clone_checkpoint_db_path(self) -> str:
         ...
 
 
@@ -68,39 +61,6 @@ class _CloneState(_CloneConfigState, Protocol):
         ...
 
     def _copy_clone_overrides(self, clone: "IkaBaseAgent") -> None:
-        ...
-
-
-class _CheckpointState(Protocol):
-    Stages: List[IkaStage]
-    name: str
-    message_history: Dict[str, Dict[str, object]]
-    maxsteps: int
-    memory_access: Dict[str, bool]
-    logger: Any
-    checkpoint_store: Any
-    _resume_checkpoint: Optional[dict]
-
-    def _stage_checkpoint_enabled(self, stage_index: int, scope: str) -> bool:
-        ...
-
-    def _stage_checkpoint_payload(
-        self,
-        stage_index: int,
-        remaining_steps: int,
-        last_content: str,
-        scope: str,
-        extra_payload: Optional[dict],
-    ) -> dict:
-        ...
-
-    def _log_stage_checkpoint(self, scope: str, stage_index: int, stage_name: str, checkpoint_uid: str, remaining_steps: int) -> None:
-        ...
-
-    def _emit_stage_checkpoint(self, scope: str, stage_index: int, stage_name: str, checkpoint_uid: str, remaining_steps: int) -> None:
-        ...
-
-    def _agent_checkpoint_payload(self, remaining_steps: int, last_content: str) -> dict:
         ...
 
 
@@ -136,10 +96,6 @@ class AgentWorkflowContextMixin:
 
 
 class AgentCloneConfigMixin:
-    def _clone_checkpoint_db_path(self: _CloneConfigState) -> str:
-        if self.checkpoint_store is not None:
-            return getattr(self.checkpoint_store, "db_path", "checkpoints.db")
-        return "checkpoints.db"
 
     def _clone_constructor_kwargs(self: _CloneConfigState, name: Optional[str], prompt: Optional[str]) -> dict:
         return {
@@ -156,7 +112,6 @@ class AgentCloneConfigMixin:
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "use_responses_api": getattr(self, "use_responses_api", True),
-            "checkpoint": self.checkpoint,
             "Stages": [self._clone_stage_for_run(stage) for stage in self.Stages],
             "subagents": list(self.subagents),
             "next_agent": self.next_agent,
@@ -169,7 +124,6 @@ class AgentCloneConfigMixin:
             "final_answer_check": None,
             "logging_level": 0,
             "logging_file": self.logging_file,
-            "checkpoint_db_path": self._clone_checkpoint_db_path(),
             "summarize_final": self.summarize_final,
             "use_async": self.use_async,
             "max_tool_rounds": self.max_tool_rounds,
@@ -224,118 +178,5 @@ class AgentCloneMixin(AgentCloneStateMixin):
         return clone
 
 
-class StageCheckpointPayloadMixin:
-    def _stage_checkpoint_enabled(self: _CheckpointState, stage_index: int, scope: str) -> bool:
-        if stage_index < len(self.Stages):
-            stage = self.Stages[stage_index]
-            return scope != "stage" or getattr(stage, "checkpoint", False)
-        return True
-
-    def _stage_checkpoint_payload(
-        self: _CheckpointState,
-        stage_index: int,
-        remaining_steps: int,
-        last_content: str,
-        scope: str,
-        extra_payload: Optional[dict],
-    ) -> dict:
-        payload = {
-            "scope": scope,
-            "agent_name": self.name,
-            "stage_index": stage_index,
-            "remaining_steps": remaining_steps,
-            "last_content": last_content,
-            "message_history": deepcopy(self.message_history),
-            "maxsteps": self.maxsteps,
-            "memory_access": deepcopy(self.memory_access),
-            "timestamp": time.time(),
-        }
-        if extra_payload:
-            payload.update(extra_payload)
-        return payload
-
-
-class StageCheckpointOutputMixin(StageCheckpointPayloadMixin):
-    def _log_stage_checkpoint(self: _CheckpointState, scope: str, stage_index: int, stage_name: str, checkpoint_uid: str, remaining_steps: int) -> None:
-        logger = self.logger
-        if not logger:
-            return
-        if logger.level == 2:
-            logger.log_json(
-                {
-                    "event": "checkpoint_saved",
-                    "scope": scope,
-                    "stage_index": stage_index,
-                    "stage_name": stage_name,
-                    "checkpoint_uid": checkpoint_uid,
-                    "remaining_steps": remaining_steps,
-                }
-            )
-            return
-        logger.write_line(
-            f"[CHECKPOINT] scope={scope} stage_index={stage_index} stage_name={stage_name} "
-            f"uid={checkpoint_uid} remaining={remaining_steps}"
-        )
-
-    def _emit_stage_checkpoint(self: _CheckpointState, scope: str, stage_index: int, stage_name: str, checkpoint_uid: str, remaining_steps: int) -> None:
-        cli = get_cli_output()
-        current_hierarchy = getattr(self, "_parent_hierarchy", []) + [self.name, f"Stage {stage_index}: {stage_name}"]
-        checkpoint_msg = (
-            f"Checkpoint saved at {scope.upper()} Stage {stage_index}: {stage_name}\n"
-            f"Checkpoint UID: {checkpoint_uid}\n"
-            f"Remaining steps: {remaining_steps}"
-        )
-        cli.emit(OutputType.AGENT_INIT, checkpoint_msg, current_hierarchy, step=0)
-
-
-class AgentCheckpointMixin(StageCheckpointOutputMixin):
-    def _save_stage_checkpoint(
-        self: _CheckpointState,
-        stage_index: int,
-        remaining_steps: int,
-        last_content: str,
-        scope: str = "stage",
-        extra_payload: Optional[dict] = None,
-    ) -> Optional[str]:
-        checkpoint_store = self.checkpoint_store
-        if not checkpoint_store or not self._stage_checkpoint_enabled(stage_index, scope):
-            return None
-
-        payload = self._stage_checkpoint_payload(stage_index, remaining_steps, last_content, scope, extra_payload)
-        checkpoint_uid = checkpoint_store.save_checkpoint(scope=scope, payload=payload)
-        if checkpoint_uid:
-            stage_name = self.Stages[stage_index].name if stage_index < len(self.Stages) else "unknown"
-            self._log_stage_checkpoint(scope, stage_index, stage_name, checkpoint_uid, remaining_steps)
-            self._emit_stage_checkpoint(scope, stage_index, stage_name, checkpoint_uid, remaining_steps)
-        return checkpoint_uid
-
-    def _agent_checkpoint_payload(self: _CheckpointState, remaining_steps: int, last_content: str) -> dict:
-        return {
-            "scope": "agent",
-            "agent_name": self.name,
-            "remaining_steps": remaining_steps,
-            "last_content": last_content,
-            "message_history": deepcopy(self.message_history),
-            "maxsteps": self.maxsteps,
-            "memory_access": deepcopy(self.memory_access),
-            "timestamp": time.time(),
-        }
-
-    def _save_agent_checkpoint(self: _CheckpointState, remaining_steps: int, last_content: str) -> Optional[str]:
-        checkpoint_store = self.checkpoint_store
-        if not checkpoint_store:
-            return None
-        payload = self._agent_checkpoint_payload(remaining_steps, last_content)
-        return checkpoint_store.save_checkpoint(scope="agent", payload=payload)
-
-    def load_checkpoint(self: _CheckpointState, uid: str) -> Optional[dict]:
-        checkpoint_store = self.checkpoint_store
-        if not checkpoint_store:
-            return None
-        checkpoint_data = checkpoint_store.load_checkpoint(uid)
-        self._resume_checkpoint = checkpoint_data if checkpoint_data else None
-        return checkpoint_data
-
-
-class AgentLifecycleMixin(AgentWorkflowContextMixin, AgentCloneMixin, AgentCheckpointMixin):
+class AgentLifecycleMixin(AgentWorkflowContextMixin, AgentCloneMixin):
     pass

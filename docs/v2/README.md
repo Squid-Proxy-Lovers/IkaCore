@@ -34,14 +34,33 @@ The initial consolidation carried two generations of behavior at once. This pass
 - Collapses the workflow mixin/type-contract chains. Function and module size checks remain;
   whole-class line limits that encouraged tiny inheritance layers are removed.
 
-These are source/maintenance reductions. Runtime latency and allocation changes have
-not been benchmarked. Tests, static typing, package builds, and provider/workflow
-regressions remain required.
+The measurements below cover the current draft with offline fixtures. Live-provider
+and application behavior remain separate release checks.
+
+## Persistence and provider optimization
+
+- Removes the legacy checkpoint table/API and duplicate agent/stage writes. Snapshots
+  are the sole persistence backend; persistence remains opt-in.
+- Commits each boundary's snapshot, event and requested pause status atomically on one
+  scoped connection. Nested transactions use savepoints. Tool-frame metadata and run
+  setup/completion are batched without holding database locks across model/tool calls.
+  Snapshot reads join lineage once instead of querying once per row; SQLite durability
+  defaults remain unchanged. Existing database files are left intact.
+- Bounds both tool-schema caches, including repeated fresh-list cache hits. Cache eviction
+  also retires object-ID fingerprints before releasing their retained tool definitions.
+- Avoids eager message-to-string conversion and speeds up the common OpenAI dictionary
+  path. All seven routes retain identical payloads in the 21 benchmark fixtures.
+- Codex uses supplied sync/async HTTPX clients. Async SSE collection runs natively on
+  the event loop, shares the sync parser, and closes its response on cancellation while
+  preserving caller-owned clients. Retry responses close before backoff; HTTP retry hints
+  use the same policy in both transports. No new runtime dependency is added.
 
 ## Breaking changes and migration
 
 | Previous call or behavior | V2 behavior / migration |
 | --- | --- |
+| `CheckpointStore`, `load_checkpoint()`, `checkpoint=True`, `checkpoint_db_path=...`, stage `checkpoint` | Removed. Call `agent.enable_snapshots(path)` or `workflow.enable_snapshots(path)`. V1 checkpoint databases are not converted. |
+| `agent.execution(checkpoint_uid=...)` / returned `checkpoint_uid` | Call `agent.resume_from_snapshot(snapshot_id, resume_input=...)`; returned IDs are `snapshot_id`. |
 | `optimize_provider_payloads`, `modern_retries`, `dataflow_workflows`, `preserve_workflow_prompts` | Remove these options; their reviewed behavior is now standard. |
 | `persistent_async_runner`, `close_thread_runner()` | Removed. Each synchronous async call owns its event loop. |
 | `retry_initial_seconds` in `runtime_options()` | Use the request's `wait_seconds` argument, now the initial jittered-backoff delay, default 1 second. |
@@ -86,7 +105,7 @@ from IkaCore import RuntimeControl
 
 store = agent.enable_snapshots("runtime-data/snapshots.db", RuntimeControl(pause_points={"post_model"}))
 paused = agent.execution()
-result = agent.resume_from_snapshot(paused["checkpoint_uid"])
+result = agent.resume_from_snapshot(paused["snapshot_id"])
 ```
 
 Agent snapshots record run/stage/tool/subagent frames, history, usage, and events.
@@ -106,8 +125,7 @@ cannot identify all private content, so keep runtime databases private.
 
 | Area | Evidence and proposed direction |
 | --- | --- |
-| Agent configuration/inheritance | `IkaBaseAgent` accepts 37 constructor arguments; the runtime has many small mixins and duplicated simple/staged loops. Group configuration by responsibility and consolidate the execution state machine in a separate focused change. |
-| Checkpoints plus snapshots/replay | Snapshot-related modules account for about 1,575 lines, alongside the old checkpoint API. Choose one persistence model; establish which fork/selective-replay use cases belong in core before expanding it. |
+| Agent configuration/inheritance | `IkaBaseAgent` accepts 35 constructor arguments; the runtime has many small mixins and duplicated simple/staged loops. Group configuration by responsibility and consolidate the execution state machine in a separate focused change. |
 | Built-in memory | At least 842 lines plus tool/schema integration. No explicit memory opt-ins appeared in the small downstream constructor sample. Consider a separate integration implemented through ordinary tools; this sample is not proof that nobody uses it. |
 | Logging and CLI presentation | About 860 lines across the logger/CLI modules, coupled to runtime calls and global sinks. Consider a small event interface with optional presentation adapters. |
 | Public API organization | The dependency-copying/private facades have been removed. Consolidate the remaining agent mixins into coherent components before expanding the public API. |
@@ -133,70 +151,83 @@ caches, forks, or other clones.
 
 ## Measured quality and footprint
 
-The quality runner now produces an `artifacts/quality/coverage-matrix.md` report
-for all 122 runtime modules across 16 subsystems. It tracks 53 required scenarios plus
-missing branches and known gaps. Current local results: **95.32% line coverage, 85.32%
-branch coverage**, with 501 lines excluded by coverage's rules (including type-only and
-abstract declarations). Live-provider behavior and model/summary quality remain unverified
-by the offline suite. Request-control, transport and snapshot areas now have independent
-90% branch floors.
+The full local quality run passes **745 tests**, with six live-provider checks skipped:
+**95.40% line coverage**, **85.77% branch coverage**, Ruff, Pyright, and an
+isolated wheel build/import check. The matrix assigns all 122 runtime modules to 16
+areas and requires 61 named scenarios. Coverage excludes 459 lines, including type-only
+and abstract declarations. Existing global and per-area coverage floors are unchanged.
 
-An isolated runtime-only wheel installation on macOS arm64 / CPython 3.11.16 measured:
+The following results use an installed runtime-only wheel on macOS arm64 / CPython
+3.11.16, with HTTPX 0.28.1. The wheel hash and raw samples are recorded in the generated
+benchmark artifact; development dependencies are excluded.
 
 | Measurement | Result |
 | --- | ---: |
-| Wheel download | 205.1 KiB |
-| Unpacked wheel content | 675.3 KiB |
-| Installed distributions including dependencies and bytecode | 5.40 MiB |
+| Wheel download | 204.3 KiB |
+| Unpacked wheel content | 667.0 KiB |
+| Installed runtime + dependencies + bytecode | 5.38 MiB |
 | Direct runtime dependency | 1 (`httpx`); 7 dependency distributions total |
-| Public package imports, fresh interpreter | 3.47 ms |
-| Full agent runtime import, fresh interpreter | 32.98 ms |
-| Peak RSS after runtime import, including Python/worker | 32.59 MiB |
-| Python/worker baseline peak RSS | 19.23 MiB |
-| HTTPX-only import peak RSS | 27.16 MiB |
-| Agent construction and shutdown, warmed imports | 0.0043 ms |
-| Mock HTTPX request/client lifecycle | 0.0461 ms |
-| One-step synchronous agent, mocked provider | 0.231 ms |
-| One-step async agent via sync bridge, mocked provider | 0.657 ms |
-| Same agent with SQLite snapshots | 11.81 ms |
-| Single 4 KiB snapshot append | 0.586 ms |
-| Pure four-node workflow, sequential / parallel | 0.008 / 0.247 ms |
+| Public imports / full runtime import | 3.52 / 33.27 ms |
+| Runtime / Python-worker / HTTPX-only peak RSS | 32.50 / 19.23 / 27.12 MiB |
+| Agent construction and shutdown | 0.0042 ms |
+| One-step agent, sync / async bridge | 0.233 / 0.661 ms |
+| Same agent with SQLite snapshots | 7.59 ms (previously 11.81 ms) |
+| 4 KiB snapshot append | 0.469 ms (previously 0.586 ms) |
+| Pure four-node workflow, sequential / parallel | 0.008 / 0.232 ms |
 
-Timings are medians of nine fresh-process samples, 100 warm operations each. They exclude
-real provider/model time; full agent measurements include construction/client/shutdown.
-Imports use fresh interpreters but a warmed OS filesystem cache. These results describe
-this machine and fixture, not production latency guarantees. Reports separate batch-average
-P95, interpreter wall time, and RSS. The first 1,000 repeated agent runs retained about
-1.08 MiB of traced allocations; the next 1,000 reduced retained allocations by about 46 KiB.
-That short run is consistent with cache warmup, not proof of leak freedom under every workload.
+Medians use nine fresh-process samples and 100 warm operations per sample. The snapshot
+fixture is about 36% faster than the preceding draft's measurement on this machine.
+Imports have a warmed filesystem cache; RSS includes Python and the measurement worker.
+Real provider/model latency is excluded. The first 1,000 repeated runs retained about
+1.08 MiB of traced allocations; the next 1,000 changed retained allocations by
+-46 KiB. This short soak does not establish leak freedom for every workload.
 
-The default package and basic execution path are small. Persistence adds substantial local
-I/O cost, parallel scheduling costs more for trivial work, and the 17,000+ line runtime still
-has architectural complexity worth reducing. These numbers support evaluating optional
-features separately. See [benchmark instructions](../../CONTRIBUTING.md#reproducing-the-offline-benchmarks)
-and the generated `artifacts/benchmarks/benchmark.json` report. CI publishes both reports as run artifacts.
+### All-provider comparison
+
+Payload construction for the 1,000-message / ten-tool synthetic fixture, in microseconds:
+
+| Provider route | Before | After |
+| --- | ---: | ---: |
+| openai | 168.7 | 126.6 |
+| openai_responses | 136.9 | 142.8 |
+| anthropic | 124.5 | 127.2 |
+| deepseek | 33.1 | 33.3 |
+| gemini | 441.3 | 186.4 |
+| openrouter | 172.9 | 128.8 |
+| codex | 287.2 | 294.4 |
+
+Seven batches of 300 warmed builds were timed separately from JSON encoding. All 21
+payload checksums match the pre-optimization runtime. Gemini improves about 58%; OpenAI
+Chat/OpenRouter about 25%. Other routes are roughly unchanged (up to 4% slower in this
+run); these small differences are not evidence of a speedup. Codex's client reuse and
+native async streaming are covered by transport tests rather than these builder timings.
+Network/TLS latency, billing, live model behavior and summary quality remain unmeasured.
+
+CI publishes package/runtime and all-provider reports. See the
+[reproduction commands](../../CONTRIBUTING.md#reproducing-the-offline-benchmarks).
+Persistence still dominates this trivial local agent fixture, and the runtime retains
+architectural complexity. Further removal should follow observed use and product needs.
 
 ### Local coverage snapshot
 
 | Area | Modules | Lines | Branches | Floors L/B | Tests observed | Excluded lines |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Public API / package imports | 4 | 95.97% | 90.91% | 95/90% | 298 | 12 |
-| Request controls / cancellation | 6 | 95.53% | 90.91% | 95/90% | 154 | 0 |
-| HTTP ownership / TLS / connection reuse | 5 | 95.14% | 91.30% | 95/90% | 105 | 2 |
-| Retries / request errors | 2 | 87.42% | 77.91% | 85/75% | 131 | 0 |
-| Tools / schemas / output bounds | 14 | 95.54% | 88.67% | 95/85% | 204 | 161 |
-| Snapshot storage / privacy / replay rules | 8 | 94.98% | 91.82% | 90/90% | 35 | 0 |
-| Agent snapshots / human resume | 6 | 98.08% | 91.49% | 95/90% | 29 | 0 |
+| Public API / package imports | 4 | 95.97% | 90.91% | 95/90% | 296 | 12 |
+| Request controls / cancellation | 6 | 95.53% | 90.91% | 95/90% | 173 | 0 |
+| HTTP ownership / TLS / connection reuse | 5 | 95.19% | 91.67% | 95/90% | 107 | 2 |
+| Retries / request errors | 2 | 87.34% | 77.38% | 85/75% | 150 | 0 |
+| Tools / schemas / output bounds | 14 | 95.56% | 88.74% | 95/85% | 207 | 161 |
+| Snapshot storage / privacy / replay rules | 8 | 95.05% | 91.96% | 90/90% | 40 | 0 |
+| Agent snapshots / human resume | 6 | 98.12% | 91.67% | 95/90% | 30 | 0 |
 | Workflow snapshots / selective replay | 3 | 96.82% | 88.89% | 95/85% | 24 | 0 |
 | Workflows / fan-in / instance isolation | 9 | 98.25% | 93.24% | 95/90% | 40 | 66 |
 | Memory integration | 9 | 93.23% | 76.14% | 90/75% | 17 | 10 |
-| Logging / CLI | 3 | 96.58% | 86.92% | 95/85% | 218 | 69 |
-| Agent runtime / stages / checkpoints | 17 | 97.63% | 82.43% | 95/80% | 370 | 181 |
+| Logging / CLI | 3 | 96.58% | 86.92% | 95/85% | 215 | 69 |
+| Agent runtime / stages | 16 | 97.77% | 82.59% | 95/80% | 357 | 139 |
 | Summarization / compaction | 1 | 97.81% | 84.62% | 95/80% | 31 | 0 |
-| Codex auth / streaming / payloads | 6 | 93.51% | 84.58% | 90/80% | 120 | 0 |
-| Provider payloads / metadata / history | 19 | 93.85% | 82.30% | 90/80% | 163 | 0 |
+| Codex auth / streaming / payloads | 7 | 94.54% | 87.17% | 90/80% | 139 | 0 |
+| Provider payloads / metadata / history | 19 | 94.01% | 82.92% | 90/80% | 164 | 0 |
 | Chat loop / accounting / human interruption | 10 | 94.04% | 81.58% | 90/80% | 71 | 0 |
 
-The generated matrix lists all 53 required scenario IDs, their JUnit outcomes, exact uncovered
-locations, and per-area gaps. The manifest and generator are versioned; CI artifacts reflect
-each checked revision.
+The generated matrix includes required scenario outcomes, exact uncovered locations,
+and known gaps. CI artifacts describe each checked revision.

@@ -1,10 +1,11 @@
-"""Per-agent snapshot state, separate from legacy checkpoint configuration."""
+"""Per-agent snapshot state, for the snapshot persistence API."""
 
 # pyright: strict
 
 from __future__ import annotations
 
 import threading
+import time
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Optional, cast
@@ -36,11 +37,15 @@ class SnapshotSession:
 
 def capture_state(session: SnapshotSession, label: str, payload: dict[str, Any]) -> dict[str, Any]:
     remaining = session.remaining_steps if session.remaining_steps is not None else session.agent.maxsteps
-    if session.stage_index is None:
-        state = session.agent._agent_checkpoint_payload(remaining, session.last_content)
-    else:
-        state = session.agent._stage_checkpoint_payload(session.stage_index, remaining, session.last_content, "stage", None)
-    state = dict(state)
+    state = {
+        "scope": "agent" if session.stage_index is None else "stage",
+        "agent_name": session.agent.name, "remaining_steps": remaining,
+        "last_content": session.last_content, "message_history": deepcopy(session.agent.message_history),
+        "maxsteps": session.agent.maxsteps, "memory_access": deepcopy(session.agent.memory_access),
+        "timestamp": time.time(),
+    }
+    if session.stage_index is not None:
+        state["stage_index"] = session.stage_index
     if session.live_messages is not None:
         state["chat_messages"] = deepcopy(session.live_messages)
     state.update({"runtime_boundary": label, "run_id": session.run_id, "root_frame_id": session.root_frame_id,
@@ -72,14 +77,18 @@ def record_boundary(session: SnapshotSession, label: str, payload: dict[str, Any
         if session.run_id is None or frame is None:
             return None
         state = capture_state(session, label, payload)
-        snapshot = session.store.create_snapshot(session.run_id, frame, label, state,
-                    resume_strategy="manual" if current_tool_frame() else "exact", prev_snapshot_id=session.last_snapshot_id)
+        skipping = session.skip_boundary == label
+        pausing = not skipping and session.control.should_pause(label)
+        with session.store.transaction():
+            snapshot = session.store.create_snapshot(session.run_id, frame, label, state,
+                        resume_strategy="manual" if current_tool_frame() else "exact", prev_snapshot_id=session.last_snapshot_id)
+            session.store.record_event(session.run_id, frame, "snapshot_created", {"snapshot_id": snapshot, "boundary": label})
+            if pausing:
+                session.store.update_frame(frame, status="paused")
+                session.store.update_run_status(session.run_id, "paused")
         session.last_snapshot_id = snapshot
-        session.store.record_event(session.run_id, frame, "snapshot_created", {"snapshot_id": snapshot, "boundary": label})
-        if session.skip_boundary == label:
+        if skipping:
             session.skip_boundary = None
-        elif session.control.should_pause(label):
-            session.store.update_frame(frame, status="paused")
-            session.store.update_run_status(session.run_id, "paused")
+        if pausing:
             raise RuntimePauseRequested(label, snapshot, frame)
         return snapshot

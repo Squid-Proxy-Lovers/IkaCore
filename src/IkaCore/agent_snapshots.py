@@ -1,4 +1,4 @@
-"""Opt-in snapshot APIs without replacing existing checkpoint entry points."""
+"""Snapshot persistence and explicit replay APIs."""
 
 # pyright: strict
 
@@ -58,7 +58,7 @@ class AgentSnapshotReplayMixin(AgentSnapshotControlMixin):
             return {**state["completed_output"], "runtime": {"run_id": info["run_id"], "frame_id": info["frame_id"], "last_snapshot_id": snapshot_id}}
         if state.get("tool_checkpoint") and not allow_unsafe_replay:
             raise ValueError("mid-tool snapshots require an explicit unsafe-replay decision")
-        self._resume_checkpoint = deepcopy(state)
+        self._resume_state = deepcopy(state)
         self.message_history = deepcopy(state.get("message_history", self.message_history))
         self._total_usage = deepcopy(state.get("total_usage", self._total_usage))
         self._total_cost = deepcopy(state.get("total_cost", self._total_cost))

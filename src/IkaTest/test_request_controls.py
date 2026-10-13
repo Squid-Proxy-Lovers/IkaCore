@@ -10,7 +10,6 @@ import pytest
 from IkaModel import request_interface as requests
 from IkaModel.chat_interface.tool_execution_async import async_execute_tool
 from IkaModel.chat_interface.tool_execution_sync import execute_tool
-from IkaModel.codex import chat_helpers_codex as codex
 from IkaModel.request_control import (
     check_request_controls,
     effective_max_retries,
@@ -220,14 +219,14 @@ def test_async_abort_unregisters_and_does_not_leave_parent_cancelled():
     asyncio.run(run())
 
 
-def test_async_codex_worker_keeps_cancel_checker_and_registrar(monkeypatch):
+def test_async_codex_keeps_cancel_checker_and_registrar(monkeypatch):
     registered = []
 
     def register(callback):
         registered.append(callback)
         return lambda: registered.remove(callback)
 
-    def fake_request(*args, **kwargs):
+    async def fake_request(*args, **kwargs):
         assert effective_max_retries(3) == 1
         assert not request_cancelled()
         cleanup = register_request_abort_callback(lambda: None)
@@ -235,7 +234,7 @@ def test_async_codex_worker_keeps_cancel_checker_and_registrar(monkeypatch):
         cleanup()
         return httpx.Response(200, json={"ok": True})
 
-    monkeypatch.setattr(codex, "request_codex", fake_request)
+    monkeypatch.setattr("IkaModel.codex.async_request.async_request_codex", fake_request)
 
     async def run():
         with request_controls(max_retries=1, cancel_checker=lambda: False, abort_registrar=register):

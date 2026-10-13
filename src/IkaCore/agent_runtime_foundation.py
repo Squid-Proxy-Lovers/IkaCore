@@ -44,7 +44,6 @@ class _RuntimeValueState:
     extend_steps_by: int
     max_stage_extensions: int
     extend_stage_steps_by: int
-    checkpoint: bool
     memory_access: dict[str, bool]
     summarize_final: bool
     final_answer_checks: list[Callable[[JsonDict], bool]]
@@ -74,18 +73,6 @@ class _RuntimeChatServices:
     def _get_chat_client(self) -> Optional[Any]:
         ...
 
-    def _save_stage_checkpoint(
-        self,
-        stage_index: int,
-        remaining_steps: int,
-        last_content: str,
-        scope: str = "stage",
-        extra_payload: Optional[JsonDict] = None,
-    ) -> Any:
-        ...
-
-    def _save_agent_checkpoint(self, remaining_steps: int, last_content: str) -> Any:
-        ...
 
     def _reset_tool_call_counts(self) -> None:
         ...
@@ -148,9 +135,6 @@ class _RuntimeControlServices:
         ...
 
     def _build_final_output(self, final_message: str, barebone_model: Any) -> JsonDict:
-        ...
-
-    def load_checkpoint(self, uid: str) -> None:
         ...
 
 
@@ -233,26 +217,13 @@ class StageInterruptMixin(AgentChatTurnMixin):
         raw_interrupt_data = turn.response.get("interrupt_data", {})
         interrupt_data = cast(JsonDict, raw_interrupt_data) if isinstance(raw_interrupt_data, dict) else {}
         remaining_after = max(0, remaining_steps - used_steps)
-        checkpoint_uid = None
         if self.logger:
             self.logger.log_hitl_prompt(stage.name)
-        if self.checkpoint:
-            checkpoint_uid = self._save_stage_checkpoint(
-                stage_index,
-                remaining_after,
-                turn.last_content,
-                scope="hitl",
-                extra_payload={
-                    "interrupt_data": deepcopy(interrupt_data),
-                    "interrupt_status": turn.response.get("status", "awaiting_user_input"),
-                },
-            )
         self._last_interrupt = {
             "status": turn.response.get("status", "awaiting_user_input"),
             "stage_index": stage_index,
             "stage_name": stage.name,
             "remaining_steps": remaining_after,
-            "checkpoint_uid": checkpoint_uid,
             "interrupt_data": deepcopy(interrupt_data),
             "message_history": deepcopy(self.message_history),
             "last_content": turn.last_content,

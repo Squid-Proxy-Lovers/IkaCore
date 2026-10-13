@@ -1,4 +1,4 @@
-"""Small compatibility seams for snapshot transcript and pending-turn replay."""
+"""Snapshot transcript and pending-turn replay."""
 
 # pyright: strict
 

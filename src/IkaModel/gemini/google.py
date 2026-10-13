@@ -53,7 +53,7 @@ def _is_duplicate_first_gemini_message(index: int, message: Any, first_input_tex
         return False
     if isinstance(message, dict) and "parts" in message and message.get("role") == "user":
         return _gemini_parts_text(message).strip() == first_input_text.strip()
-    text = message.get("content", str(message)) if isinstance(message, dict) else str(message)
+    text = (message["content"] if "content" in message else str(message)) if isinstance(message, dict) else str(message)
     return isinstance(text, str) and text.strip() == first_input_text.strip()
 
 
@@ -64,7 +64,7 @@ def _append_gemini_live_messages(contents: List[Dict[str, Any]], messages: List[
         if isinstance(message, dict) and "parts" in message and "role" in message:
             contents.append(message)
             continue
-        text = message.get("content", str(message)) if isinstance(message, dict) else str(message)
+        text = (message["content"] if "content" in message else str(message)) if isinstance(message, dict) else str(message)
         contents.append({"role": "user", "parts": [_gemini_text_part(text)]})
 
 

@@ -7,7 +7,6 @@ import typing
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional, Protocol, cast, get_type_hints
 
-from IkaCore.checkpoint import CheckpointStore
 from IkaCore.logging_utils import IkaLogger
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
@@ -135,7 +134,6 @@ class AgentAttributeDeclarationsMixin:
     api_url: Optional[str]
     max_tokens: int
     temperature: float
-    checkpoint: bool
     Stages: list[IkaStage]
     subagents: list["IkaBaseAgent"]
     next_agent: Optional["IkaBaseAgent"]
@@ -150,8 +148,7 @@ class AgentAttributeDeclarationsMixin:
     rate_limit_per_min: Optional[float]
     per_tool_rate_limit: dict[str, float]
     _last_api_call_ts: float
-    checkpoint_store: Optional[CheckpointStore]
-    _resume_checkpoint: Optional[JsonDict]
+    _resume_state: Optional[JsonDict]
     short_term_memory: Optional[Any]
     long_term_memory: Optional[Any]
     summarize_final: bool

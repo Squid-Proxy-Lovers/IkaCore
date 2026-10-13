@@ -16,7 +16,7 @@ def _default_message_history() -> Dict[str, Any]:
 
 def _message_content(message: Any) -> str:
     if isinstance(message, dict):
-        return message.get("content", str(message))
+        return (message["content"] if "content" in message else str(message))
     return str(message)
 
 

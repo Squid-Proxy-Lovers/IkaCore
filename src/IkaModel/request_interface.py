@@ -18,14 +18,14 @@ from .api_errors import IkaHTTPError as IkaHTTPError
 from .api_errors import IkaRateLimitError as IkaRateLimitError
 from .api_errors import IkaTimeoutError as IkaTimeoutError
 from .model_metadata import get_max_tokens_for_model, get_provider_for_model
-from .request_control import check_request_controls, effective_max_retries, request_lifecycle_active
+from .request_control import check_request_controls, effective_max_retries
 from .request_control import register_request_abort_callback as register_request_abort_callback
 from .request_control import request_cancelled as request_cancelled
 from .request_control import request_controls as request_controls
 from .request_control import set_request_abort_registrar as set_request_abort_registrar
 from .request_control import set_request_cancel_checker as set_request_cancel_checker
 from .request_control import set_request_max_retries as set_request_max_retries
-from .request_lifecycle import async_sleep_with_controls, await_with_controls, sleep_with_controls
+from .request_lifecycle import async_sleep_with_controls, sleep_with_controls
 from .request_transport import controlled_async_post, controlled_post, new_async_client
 from .retry_policy import backoff_seconds, response_delay
 from .runtime_errors import IkaRequestCancelled as IkaRequestCancelled
@@ -277,6 +277,7 @@ def api_request_retry(
                 timeout=timeout,
                 max_retries=max_retries,
                 wait_seconds=wait_seconds,
+                client=client,
             ),
         )
 
@@ -335,21 +336,11 @@ async def async_api_request_retry(
 ) -> httpx.Response:
     check_request_controls()
     max_retries = effective_max_retries(max_retries)
-    # codex backend requires streaming — defer to the sync codex client via a
-    # threadpool. We don't have an async SSE collector yet; running the sync
-    # path off-loop avoids blocking the event loop in async callers.
     if _is_codex_endpoint(api_url):
-        from .codex.chat_helpers_codex import request_codex
-        if request_lifecycle_active():
-            return cast(httpx.Response, await await_with_controls(
-                lambda: asyncio.to_thread(request_codex, api_url, headers, payload, timeout, max_retries, wait_seconds)
-            ))
-        return cast(
-            httpx.Response,
-            await asyncio.to_thread(
-                request_codex, api_url, headers, payload, timeout, max_retries, wait_seconds
-            ),
-        )
+        from .codex.async_request import async_request_codex
+        return cast(httpx.Response, await async_request_codex(
+            api_url, headers, payload, timeout, max_retries, wait_seconds, client,
+        ))
 
     should_close_client = client is None
     if client is None:

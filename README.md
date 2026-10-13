@@ -8,7 +8,7 @@ The current runtime supports:
 - `IkaStage` for bounded staged execution
 - `IkaWorkflow` for multi-agent graphs
 - OpenAI, Anthropic, DeepSeek, Gemini, OpenRouter, and Codex backends
-- checkpoint/resume and interruptible HITL flows
+- snapshot/resume and interruptible HITL flows
 - optional short-term and long-term memory helpers
 
 This branch develops v2 with intentional breaking changes. See the [migration guide](docs/v2/README.md) before adopting it.
@@ -45,7 +45,7 @@ print(result["final_message"])
 
 ## Main Concepts
 
-- `IkaBaseAgent`: provider config, prompt, tools, memory, checkpoints, optional stages
+- `IkaBaseAgent`: provider config, prompt, tools, memory, snapshots, optional stages
 - `IkaTools`: Python callables exposed to the model as structured tool calls
 - `IkaStage`: phase-specific prompt, tool set, and optional model overrides
 - `IkaWorkflow`: graph runner with `next` and tool-only `child` edges

@@ -64,7 +64,7 @@ class StagedResumeMixin(InterruptOutputMixin):
     def _initial_staged_execution_state(self, last_content: str) -> StagedExecutionState:
         return StagedExecutionState(stage_idx=0, remaining_steps=self.maxsteps, last_content=last_content)
 
-    def _apply_stage_resume_checkpoint(
+    def _apply_stage_resume_state(
         self,
         state: StagedExecutionState,
         resume_cp: JsonDict,
@@ -81,7 +81,6 @@ class StagedResumeMixin(InterruptOutputMixin):
 
     def _hitl_replay_interrupt_payload(
         self,
-        checkpoint_uid: Optional[str],
         resume_cp: JsonDict,
         state: StagedExecutionState,
     ) -> JsonDict:
@@ -90,29 +89,26 @@ class StagedResumeMixin(InterruptOutputMixin):
             "stage_index": state.stage_idx,
             "stage_name": self.Stages[state.stage_idx].name if 0 <= state.stage_idx < len(self.Stages) else "unknown",
             "remaining_steps": state.remaining_steps,
-            "checkpoint_uid": checkpoint_uid,
             "interrupt_data": deepcopy(resume_cp.get("interrupt_data", {})),
             "message_history": deepcopy(self.message_history),
             "last_content": state.last_content,
         }
 
-    def _apply_hitl_resume_checkpoint(
+    def _apply_hitl_resume_state(
         self,
-        checkpoint_uid: Optional[str],
         resume_input: Optional[str],
         state: StagedExecutionState,
         resume_cp: JsonDict,
     ) -> Optional[JsonDict]:
-        self._apply_stage_resume_checkpoint(state, resume_cp)
+        self._apply_stage_resume_state(state, resume_cp)
         state.resumed_stage_index = state.stage_idx
         if resume_input is not None and resume_input.strip():
             state.resume_stage_input = resume_input
             return None
-        return self._hitl_replay_interrupt_payload(checkpoint_uid, resume_cp, state)
+        return self._hitl_replay_interrupt_payload(resume_cp, state)
 
-    def _apply_staged_resume_checkpoint(
+    def _apply_staged_resume_state(
         self,
-        checkpoint_uid: Optional[str],
         resume_input: Optional[str],
         resume_cp: Optional[JsonDict],
         state: StagedExecutionState,
@@ -120,10 +116,10 @@ class StagedResumeMixin(InterruptOutputMixin):
         if not resume_cp:
             return None
         if resume_cp.get("scope") == "stage":
-            self._apply_stage_resume_checkpoint(state, resume_cp)
+            self._apply_stage_resume_state(state, resume_cp)
             return None
         if resume_cp.get("scope") == "hitl":
-            return self._apply_hitl_resume_checkpoint(checkpoint_uid, resume_input, state, resume_cp)
+            return self._apply_hitl_resume_state(resume_input, state, resume_cp)
         return None
 
 
@@ -169,13 +165,12 @@ class StagedExecutionStateMixin(StagedResumeMixin):
 class StagedExecutionDispatchMixin(StagedExecutionStateMixin):
     def _run_staged_execution(
         self,
-        checkpoint_uid: Optional[str],
         resume_input: Optional[str],
         resume_cp: Optional[JsonDict],
         last_content: str,
     ) -> JsonDict:
         state = self._initial_staged_execution_state(last_content)
-        interrupt_payload = self._apply_staged_resume_checkpoint(checkpoint_uid, resume_input, resume_cp, state)
+        interrupt_payload = self._apply_staged_resume_state(resume_input, resume_cp, state)
         if interrupt_payload:
             self._last_interrupt = interrupt_payload
             return self._interrupt_output(interrupt_payload)
@@ -296,18 +291,15 @@ class ValidatedSimpleExecutionMixin(SimpleExecutionDispatchMixin):
 
 
 class ExecutionDispatchRuntimeMixin(ValidatedSimpleExecutionMixin):
-    def execution(self, checkpoint_uid: Optional[str] = None, resume_input: Optional[str] = None) -> JsonDict:
+    def execution(self, resume_input: Optional[str] = None) -> JsonDict:
         last_content = ""
         self._last_interrupt = None
 
-        if checkpoint_uid:
-            self.load_checkpoint(checkpoint_uid)
-
-        raw_resume_cp = getattr(self, "_resume_checkpoint", None)
+        raw_resume_cp = getattr(self, "_resume_state", None)
         resume_cp = cast(JsonDict, raw_resume_cp) if isinstance(raw_resume_cp, dict) else None
 
         if self.Stages:
-            return self._run_staged_execution(checkpoint_uid, resume_input, resume_cp, last_content)
+            return self._run_staged_execution(resume_input, resume_cp, last_content)
 
         if self.next_agent:
             return self._run_next_agent_execution()

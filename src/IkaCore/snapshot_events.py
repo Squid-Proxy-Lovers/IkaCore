@@ -21,7 +21,8 @@ def record_event(
     event_id = str(uuid4())
     payload = payload or {}
     with connect(self) as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT COALESCE(MAX(event_seq), 0) + 1 AS next_seq FROM events WHERE run_id = ?",
             (run_id,),

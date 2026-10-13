@@ -13,8 +13,8 @@ from IkaCore.agent_snapshot_execution import execute_with_snapshots
 class AgentExecutionMixin(ExecutionDispatchRuntimeMixin):
 
 
-    def execution(self, checkpoint_uid: Optional[str] = None, resume_input: Optional[str] = None) -> Dict[str, Any]:
-        return execute_with_snapshots(self, super().execution, checkpoint_uid, resume_input)
+    def execution(self, resume_input: Optional[str] = None) -> Dict[str, Any]:
+        return execute_with_snapshots(self, super().execution, resume_input)
 
 
 __all__ = ["AgentExecutionMixin"]

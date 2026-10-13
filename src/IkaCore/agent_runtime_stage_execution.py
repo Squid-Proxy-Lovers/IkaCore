@@ -117,9 +117,6 @@ class StageExecutionStepMixin(StageControlMixin):
                 cost=turn.response.get("cost", {}),
                 elapsed=time.time() - step_start,
             )
-        remaining_after = max(0, remaining_steps - used_steps)
-        if self.checkpoint:
-            self._save_stage_checkpoint(stage_index, remaining_after, turn.last_content)
 
 
 class StageExecutionRuntimeMixin(StageExecutionStepMixin):

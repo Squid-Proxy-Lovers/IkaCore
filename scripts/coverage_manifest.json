@@ -97,7 +97,8 @@
       "required_tests": [
         "src/IkaTest/test_tool_output_limits.py::test_output_limit_properties_across_unicode_and_boundaries",
         "src/IkaTest/test_tool_runtime_metadata.py::test_sync_tool_timeout_returns_at_configured_limit_and_worker_is_released",
-        "src/IkaTest/test_tool_runtime_metadata.py::test_async_tool_timeout_cancels_coroutine_and_reports_its_configured_limit"
+        "src/IkaTest/test_tool_runtime_metadata.py::test_async_tool_timeout_cancels_coroutine_and_reports_its_configured_limit",
+        "src/IkaTest/test_tool_schema.py::test_fresh_lists_cannot_grow_fast_cache_without_bound"
       ],
       "known_gap": "Tool side effects are synthetic; application tool implementations need their own tests.",
       "min_lines": 95,
@@ -120,7 +121,10 @@
         "src/IkaTest/test_snapshot_store.py::test_concurrent_events_have_unique_monotonic_sequence_numbers",
         "src/IkaTest/test_snapshot_store.py::test_unknown_tool_replay_is_denied_until_explicitly_allowed",
         "src/IkaTest/test_snapshot_store.py::test_snapshot_metadata_redacts_credentials_without_changing_ordinary_urls",
-        "src/IkaTest/test_quality_properties.py::test_snapshot_json_roundtrip_and_append_only_chain"
+        "src/IkaTest/test_quality_properties.py::test_snapshot_json_roundtrip_and_append_only_chain",
+        "src/IkaTest/test_snapshot_transactions.py::test_nested_transactions_rollback_only_failed_scope",
+        "src/IkaTest/test_snapshot_transactions.py::test_snapshot_boundary_is_atomic_and_pause_is_committed",
+        "src/IkaTest/test_snapshot_transactions.py::test_transactions_use_one_connection_and_isolate_workers"
       ],
       "known_gap": "No power-loss/process-kill durability or multi-process contention qualification; redaction is pattern-based.",
       "min_lines": 90,
@@ -224,7 +228,7 @@
       "min_branches": 85
     },
     {
-      "area": "Agent runtime / stages / checkpoints",
+      "area": "Agent runtime / stages",
       "sources": [
         "src/IkaCore/agent_chat_support.py",
         "src/IkaCore/agent_execution.py",
@@ -239,7 +243,6 @@
         "src/IkaCore/agent_runtime_simple_execution.py",
         "src/IkaCore/agent_runtime_stage_execution.py",
         "src/IkaCore/agents.py",
-        "src/IkaCore/checkpoint.py",
         "src/IkaCore/execution_types.py",
         "src/IkaCore/prompts.py",
         "src/IkaCore/stages.py"
@@ -272,11 +275,15 @@
         "src/IkaModel/codex/chat_helpers_codex.py",
         "src/IkaModel/codex/codex_responses.py",
         "src/IkaModel/codex/codex_stream.py",
+        "src/IkaModel/codex/async_request.py",
         "src/IkaModel/codex_constants.py"
       ],
       "required_tests": [
         "src/IkaTest/test_codex_sse.py::TestCollectStream::test_created_without_completed_is_retryable_truncation",
-        "src/IkaTest/test_codex_sse.py::TestCollectStream::test_top_level_error_after_partial_output_is_retryable"
+        "src/IkaTest/test_codex_sse.py::TestCollectStream::test_top_level_error_after_partial_output_is_retryable",
+        "src/IkaTest/test_codex_async_transport.py::test_codex_reuses_supplied_client_and_preserves_payload",
+        "src/IkaTest/test_codex_async_transport.py::test_native_codex_cancellation_closes_stream_but_keeps_shared_client",
+        "src/IkaTest/test_codex_async_transport.py::test_native_codex_retries_transient_failures"
       ],
       "known_gap": "Auth uses synthetic files/tokens; no live bearer, refresh service or backend stream exercised.",
       "min_lines": 90,
@@ -308,7 +315,8 @@
       "required_tests": [
         "src/IkaTest/test_history_replay.py::test_provider_payloads_send_each_round_once",
         "src/IkaTest/test_history_replay.py::test_hitl_resume_keeps_stage_prompt_in_place_and_ends_on_answer",
-        "src/IkaTest/test_quality_properties.py::test_history_replay_conserves_multiplicity_order_and_inputs"
+        "src/IkaTest/test_quality_properties.py::test_history_replay_conserves_multiplicity_order_and_inputs",
+        "src/IkaTest/test_provider_payload_equivalence.py::test_all_provider_payloads_match_baseline_without_mutating_inputs"
       ],
       "known_gap": "Provider schemas/metadata can drift; six live-provider checks are opt-in and skipped in offline CI.",
       "min_lines": 90,

@@ -34,7 +34,7 @@ def execute_instance(session: WorkflowSnapshotSession, node: str, instance: int,
     frame = session.store.create_frame(str(session.run_id), "workflow_node", node,
         parent_frame_id=session.root_frame_id, metadata={"workflow_node_name": node, "workflow_instance_id": instance})
     def context() -> dict[str, Any]:
-        return {"run_id": session.run_id, "frame_id": frame, "store_path": session.store.db_path, "control": session.control}
+        return {"run_id": session.run_id, "frame_id": frame, "store_path": session.store.db_path, "store": session.store, "control": session.control}
     hooks = ExecutionHooks(lambda label, payload: None, context, lambda name, args, meta: frame, lambda frame, result, error: None)
     status = "failed"
     try:
@@ -45,7 +45,7 @@ def execute_instance(session: WorkflowSnapshotSession, node: str, instance: int,
                 result = execute(*args, **kwargs)
         if result.get("status") == "paused":
             status, session.paused = "paused", True
-            raise RuntimePauseRequested("workflow_instance", result.get("checkpoint_uid"), frame)
+            raise RuntimePauseRequested("workflow_instance", result.get("snapshot_id"), frame)
         status = "completed"
         with session.lock:
             session.results[key] = deepcopy(result)

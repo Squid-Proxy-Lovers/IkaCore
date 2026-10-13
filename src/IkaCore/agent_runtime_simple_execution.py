@@ -126,7 +126,7 @@ class SimpleProgressMixin(SimpleAgentEndMixin):
         )
         return True
 
-    def _checkpoint_simple_progress(self, turn: AgentChatTurn, step_num: int, step_start: float) -> None:
+    def _log_simple_progress(self, turn: AgentChatTurn, step_num: int, step_start: float) -> None:
         self._log_simple_step(
             step_num,
             turn.last_content,
@@ -134,8 +134,6 @@ class SimpleProgressMixin(SimpleAgentEndMixin):
             turn.response,
             time.time() - step_start,
         )
-        remaining_after = max(0, int(self.maxsteps) - (int(step_num) + 1))
-        self._save_agent_checkpoint(remaining_after, turn.last_content)
 
 
 class SimpleIterationMixin(SimpleProgressMixin):
@@ -178,7 +176,7 @@ class SimpleIterationMixin(SimpleProgressMixin):
             step_start,
         )
         if not recorded_text:
-            self._checkpoint_simple_progress(turn, step_num, step_start)
+            self._log_simple_progress(turn, step_num, step_start)
 
         step_num += 1
         if step_num >= self.maxsteps and extension_count < self.max_step_extensions:

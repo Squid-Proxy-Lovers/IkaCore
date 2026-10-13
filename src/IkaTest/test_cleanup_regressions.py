@@ -15,8 +15,8 @@ import httpx
 import pytest
 
 from IkaCore.agents import IkaBaseAgent
-from IkaCore.checkpoint import CheckpointStore
 from IkaCore.logging_utils import IkaLogger
+from IkaCore.snapshot_store import SnapshotStore
 from IkaMem.long_term_memory import LTMemory
 from IkaMem.short_term_memory import STMemory
 from IkaModel import model_metadata
@@ -414,29 +414,28 @@ def test_gemini_api_key_uses_header_and_redaction_hides_secrets():
     assert "safe=value" in redacted_url
 
 
-def test_checkpoint_database_is_owner_private(tmp_path):
+def test_snapshot_database_is_owner_private(tmp_path):
     if os.name == "nt":
         return
     db_path = tmp_path / "checkpoints.db"
-    CheckpointStore(str(db_path))
+    SnapshotStore(str(db_path))
 
     mode = stat.S_IMODE(os.stat(db_path).st_mode)
     assert mode == 0o600
 
 
-def test_corrupt_checkpoint_payload_raises(tmp_path):
+def test_corrupt_snapshot_payload_raises(tmp_path):
     db_path = tmp_path / "checkpoints.db"
-    store = CheckpointStore(str(db_path))
+    store = SnapshotStore(str(db_path))
 
+    run = store.create_run("agent", "test")
+    frame = store.create_frame(run, "agent", "test")
+    snapshot = store.create_snapshot(run, frame, "frame_entry", {})
     with closing(sqlite3.connect(db_path)) as conn:
         with conn:
-            conn.execute(
-                "INSERT INTO checkpoints (uid, scope, payload_json, created_at) VALUES (?, ?, ?, ?)",
-                ("bad-json", "test", "{not-json", "2026-06-05T00:00:00+00:00"),
-            )
-
-    with pytest.raises(ValueError, match="invalid JSON"):
-        store.load_checkpoint("bad-json")
+            conn.execute("UPDATE snapshots SET state_json = ? WHERE snapshot_id = ?", ("{not-json", snapshot))
+    with pytest.raises(ValueError):
+        store.load_snapshot(snapshot)
 
 
 def test_agent_end_empty_functions_list_is_rejected():

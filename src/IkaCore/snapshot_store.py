@@ -1,8 +1,11 @@
-"""Opt-in runtime snapshots alongside the unchanged legacy checkpoint API."""
+"""Snapshot storage with atomic, scoped transactions."""
 
 # pyright: strict
 
-from .checkpoint import CheckpointStore
+import os
+import threading
+from pathlib import Path
+
 from .snapshot_data import (
     create_snapshot,
     get_frame_entry_snapshot,
@@ -23,14 +26,20 @@ from .snapshot_frames import (
 )
 from .snapshot_replay import fork_run_from_snapshot, restart_frame, resume_from_snapshot
 from .snapshot_runs import create_run, get_run, set_run_root_frame, update_run_status
-from .snapshot_schema import connect, decode_frame_row, init_schema
+from .snapshot_schema import connect, decode_frame_row, init_schema, transaction
 
 
-class SnapshotStore(CheckpointStore):
+class SnapshotStore:
     def __init__(self, db_path: str = "runtime-data/snapshots.db") -> None:
-        super().__init__(db_path)
+        self.db_path = str(db_path)
+        self._connections = threading.local()
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(self.db_path, os.O_CREAT | os.O_WRONLY, 0o600)
+        os.close(descriptor)
+        os.chmod(self.db_path, 0o600)
         init_schema(self)
 
+    transaction = transaction
     _connect = connect
     _decode_frame_row = staticmethod(decode_frame_row)
     create_run = create_run

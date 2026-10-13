@@ -61,6 +61,8 @@ jobs:
           python scripts/benchmark.py --python "$RUNNER_TEMP/ika-runtime/bin/python" \
             --wheel artifacts/quality/*.whl \
             --samples 3 --iterations 20 --soak-iterations 250
+          "$RUNNER_TEMP/ika-runtime/bin/python" scripts/provider_benchmark.py \
+            --output artifacts/benchmarks/providers.json --iterations 100
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -118,7 +118,7 @@ def build_provider_tool_payload(provider: str, tools: list[Any]) -> ProviderTool
     cache_key = (provider, tuple(_tool_fingerprint(tool) for tool in tools))
     cached = _PROVIDER_TOOL_CACHE.get(cache_key)
     if cached is not None:
-        _PROVIDER_TOOL_FAST_CACHE[fast_key] = (tools, cached)
+        _remember_tool_list(fast_key, tools, cached)
         return cached
 
     names = frozenset(getattr(tool, "name", "") for tool in tools)
@@ -132,8 +132,17 @@ def build_provider_tool_payload(provider: str, tools: list[Any]) -> ProviderTool
         _PROVIDER_TOOL_CACHE.clear()
         _PROVIDER_TOOL_FAST_CACHE.clear()
     _PROVIDER_TOOL_CACHE[cache_key] = payload
-    _PROVIDER_TOOL_FAST_CACHE[fast_key] = (tools, payload)
+    _remember_tool_list(fast_key, tools, payload)
     return payload
+
+def _remember_tool_list(key: tuple[Any, ...], tools: list[Any], payload: ProviderToolPayload) -> None:
+    # Fresh filtered lists can hit the schema cache indefinitely. Bound both caches.
+    # Fingerprints contain object IDs: retire them before releasing their tool lists.
+    if len(_PROVIDER_TOOL_FAST_CACHE) >= _PROVIDER_TOOL_CACHE_MAX:
+        _PROVIDER_TOOL_CACHE.clear()
+        _PROVIDER_TOOL_FAST_CACHE.clear()
+    _PROVIDER_TOOL_FAST_CACHE[key] = (tools, payload)
+
 
 def _tool_fingerprint(tool: Any) -> tuple[Any, ...]:
     tool_args = getattr(tool, "args", None)

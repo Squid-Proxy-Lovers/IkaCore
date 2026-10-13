@@ -78,7 +78,6 @@ class IkaStage(StageHitlToolMixin):
         hitl: bool = False,
         memory_access: Optional[Dict[str, bool]] = None,
         long_term_filter: Optional[Callable[..., Any]] = None,
-        checkpoint: bool = False,
         model_id: Optional[str] = None,
         api_key: Optional[str] = None,
         api_url: Optional[str] = None,
@@ -94,7 +93,6 @@ class IkaStage(StageHitlToolMixin):
         self.hitl = hitl
         self.memory_access = memory_access
         self.long_term_filter = long_term_filter
-        self.checkpoint = checkpoint
         self.model_id = model_id
         self.api_key = api_key
         self.api_url = api_url

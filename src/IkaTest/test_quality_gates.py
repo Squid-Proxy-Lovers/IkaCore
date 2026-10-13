@@ -30,7 +30,6 @@ STRICT_TYPE_FILES = (
     REPO_ROOT / "src" / "IkaCore" / "agent_runtime_stage_execution.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_tools.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_tool_conversion.py",
-    REPO_ROOT / "src" / "IkaCore" / "checkpoint.py",
     REPO_ROOT / "src" / "IkaCore" / "execution_types.py",
     REPO_ROOT / "src" / "IkaCore" / "logging_utils.py",
     REPO_ROOT / "src" / "IkaCore" / "prompts.py",

@@ -26,11 +26,11 @@ def test_default_execution_does_not_enable_snapshot_store(tmp_path, monkeypatch)
     agent.shutdown()
 
 
-def test_execution_creates_agent_and_boundary_snapshots_without_legacy_checkpoint_changes(tmp_path, monkeypatch):
+def test_execution_creates_agent_and_boundary_snapshots_with_one_persistence_api(tmp_path, monkeypatch):
     monkeypatch.setattr("IkaCore.agent_chat_support.chat", lambda *args, **kwargs: _finished())
     agent = _agent(tmp_path)
     store = agent.enable_snapshots(str(tmp_path / "runtime.db"))
-    assert not agent.checkpoint and agent.checkpoint_store is None
+    assert not hasattr(agent, "checkpoint_store")
     result = agent.execution()
     assert result["final_message"] == "done"
     run = result["runtime"]["run_id"]
@@ -50,7 +50,7 @@ def test_pre_model_pause_and_resume_calls_provider_once(tmp_path, monkeypatch):
     agent.enable_snapshots(str(tmp_path / "runtime.db"), RuntimeControl(pause_points={"pre_model"}))
     paused = agent.execution()
     assert paused["status"] == "paused" and not calls
-    resumed = agent.resume_from_snapshot(paused["checkpoint_uid"])
+    resumed = agent.resume_from_snapshot(paused["snapshot_id"])
     assert resumed["final_message"] == "done" and calls == [True]
     agent.shutdown()
 
@@ -63,7 +63,7 @@ def test_post_model_resume_reuses_pending_response_without_double_usage(tmp_path
     paused = agent.execution()
     assert paused["status"] == "paused" and calls == [True]
     usage_before = dict(agent._total_usage)
-    resumed = agent.resume_from_snapshot(paused["checkpoint_uid"])
+    resumed = agent.resume_from_snapshot(paused["snapshot_id"])
     assert resumed["final_message"] == "done" and calls == [True]
     assert agent._total_usage == usage_before
     agent.shutdown()
@@ -116,11 +116,11 @@ def test_generator_tool_records_mid_tool_pause_and_requires_replay_decision(tmp_
     monkeypatch.setattr("IkaCore.agent_chat_support.chat", chat)
     result = agent.execution()
     assert result["status"] == "paused"
-    snapshot = store.load_snapshot(result["checkpoint_uid"])
+    snapshot = store.load_snapshot(result["snapshot_id"])
     assert snapshot["state_json"]["tool_checkpoint"]
     assert snapshot["state_json"]["tool_payload"] == {"progress": 1}
     with pytest.raises(ValueError, match="unsafe-replay"):
-        agent.resume_from_snapshot(result["checkpoint_uid"])
+        agent.resume_from_snapshot(result["snapshot_id"])
     agent.shutdown()
 
 
@@ -163,7 +163,7 @@ def test_agent_fork_and_restart_leave_original_run_untouched(tmp_path, monkeypat
     store = agent.enable_snapshots(str(tmp_path / "runtime.db"), RuntimeControl(pause_points={"pre_model"}))
     first = agent.execution()
     agent.clear_pause_requests()
-    fork = agent.fork_from_snapshot(first["checkpoint_uid"])
+    fork = agent.fork_from_snapshot(first["snapshot_id"])
     assert fork["runtime"]["run_id"] != first["runtime"]["run_id"]
     assert store.get_run(first["runtime"]["run_id"])["status"] == "paused"
     restarted = agent.restart_from_frame(fork["runtime"]["frame_id"])
@@ -195,9 +195,9 @@ def test_staged_human_input_snapshot_resumes_with_user_answer(tmp_path, monkeypa
     first = agent.execution()
     assert first['status'] == 'awaiting_user_input'
     assert store.get_run(first['runtime']['run_id'])['status'] == 'paused'
-    snapshot = store.load_snapshot(first['checkpoint_uid'])
+    snapshot = store.load_snapshot(first['snapshot_id'])
     assert snapshot['state_json']['scope'] == 'hitl'
-    second = agent.resume_from_snapshot(first['checkpoint_uid'], resume_input='User answer')
+    second = agent.resume_from_snapshot(first['snapshot_id'], resume_input='User answer')
     assert second['final_message'] == 'done'
     assert messages_seen[-1] == 'User answer'
     agent.shutdown()

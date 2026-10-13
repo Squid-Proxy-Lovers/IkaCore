@@ -191,50 +191,16 @@ def _codex_rate_headers(response: httpx.Response) -> dict[str, str]:
     }
 
 
-def _handle_codex_429(response: httpx.Response, body: str, attempt: int, max_retries: int, wait_seconds: float) -> None:
-    if attempt >= max_retries - 1:
-        raise RuntimeError(f"codex backend returned 429 after {max_retries} attempts: {body[:500]}")
-    retry_after = retry_delay(attempt, retry_hint_seconds(response.headers, response_body(response)), wait_seconds)
-    LOG.warning(
-        "codex backend 429 (rate-limited); sleeping %.1fs (attempt %d/%d)",
-        retry_after, attempt + 1, max_retries,
-    )
-    sleep_with_controls(retry_after, time.sleep)
-
-
-def _handle_codex_5xx(status: int, body: str, backoff: float, attempt: int, max_retries: int) -> None:
-    if attempt >= max_retries - 1:
-        raise RuntimeError(f"codex backend returned {status} after {max_retries} attempts: {body[:500]}")
-    _sleep_before_retry(
-        "codex backend %d (transient)",
-        backoff, attempt, max_retries, status,
-    )
-
-
-def _handle_codex_non_200(
-    response: httpx.Response,
-    body: str,
-    backoff: float,
-    attempt: int,
-    max_retries: int,
-    wait_seconds: float,
-) -> None:
+def codex_retry_delay(response: httpx.Response, body: str, attempt: int,
+                      max_retries: int, wait_seconds: float) -> float:
     status = response.status_code
     if status == 401:
-        raise RuntimeError(
-            f"codex backend returned 401 (bearer rejected): {body[:500]}. "
-            "Caller may need to refresh the token and retry."
-        )
-    if status == 429:
-        _handle_codex_429(response, body, attempt, max_retries, wait_seconds)
-        return
-    if 500 <= status < 600:
-        _handle_codex_5xx(status, body, backoff, attempt, max_retries)
-        return
-    if status in {408, 409}:
-        _handle_codex_5xx(status, body, backoff, attempt, max_retries)
-        return
-    raise RuntimeError(f"codex backend returned {status}: {body[:2000]}")
+        raise RuntimeError(f"codex backend returned 401 (bearer rejected): {body[:500]}. Caller may need to refresh the token and retry.")
+    if status not in {408, 409, 429} and not 500 <= status < 600:
+        raise RuntimeError(f"codex backend returned {status}: {body[:2000]}")
+    if attempt >= max_retries - 1:
+        raise RuntimeError(f"codex backend returned {status} after {max_retries} attempts: {body[:500]}")
+    return retry_delay(attempt, retry_hint_seconds(response.headers, response_body(response)), wait_seconds)
 
 
 def _request_codex_once(
@@ -242,13 +208,13 @@ def _request_codex_once(
     headers: dict[str, str],
     payload: JsonDict,
     timeout: float,
-    backoff: float,
     attempt: int,
     max_retries: int,
     wait_seconds: float,
+    client: Optional[httpx.Client] = None,
 ) -> Optional[_CodexResponseShim]:
     check_request_controls()
-    with open_stream(api_url, headers, payload, effective_timeout(timeout)) as response:
+    with open_stream(api_url, headers, payload, effective_timeout(timeout), client) as response:
         # Older test/client shims need not expose close when controls are unused.
         close = getattr(response, "close", lambda: None)
         with request_scope(close):
@@ -258,7 +224,8 @@ def _request_codex_once(
                 return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
 
             body = response.read().decode("utf-8", "replace")
-            _handle_codex_non_200(response, body, backoff, attempt, max_retries, wait_seconds)
+            delay = codex_retry_delay(response, body, attempt, max_retries, wait_seconds)
+    sleep_with_controls(delay, time.sleep)
     return None
 
 
@@ -283,6 +250,7 @@ def _request_codex_with_retries(
     timeout: float,
     max_retries: int,
     wait_seconds: float,
+    client: Optional[httpx.Client] = None,
 ) -> _CodexResponseShim:
     max_retries = effective_max_retries(max_retries)
     last_exc: Optional[Exception] = None
@@ -295,10 +263,10 @@ def _request_codex_with_retries(
                 headers,
                 payload,
                 timeout,
-                backoff,
                 attempt,
                 max_retries,
                 wait_seconds,
+                client,
             )
             if response is not None:
                 return response
@@ -341,6 +309,7 @@ def request_codex(
     timeout: float = 900.0,
     max_retries: int = 3,
     wait_seconds: float = 1.0,
+    client: Optional[httpx.Client] = None,
 ) -> _CodexResponseShim:
     """POST to the Codex Responses endpoint and return a Response-shaped shim."""
     return _request_codex_with_retries(
@@ -350,6 +319,7 @@ def request_codex(
         timeout,
         max_retries,
         wait_seconds,
+        client,
     )
 
 
