@@ -18,6 +18,7 @@ STRICT_TYPE_ROOTS = (REPO_ROOT / "src" / "IkaMem",)
 STRICT_TYPE_FILES = (
     REPO_ROOT / "src" / "IkaCore" / "__init__.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_execution.py",
+    REPO_ROOT / "src" / "IkaCore" / "agent_execution_loop.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_execution_helpers.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_helper_support.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_helpers.py",
@@ -26,8 +27,6 @@ STRICT_TYPE_FILES = (
     REPO_ROOT / "src" / "IkaCore" / "agent_runtime_dispatch.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_runtime_foundation.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_runtime_payloads.py",
-    REPO_ROOT / "src" / "IkaCore" / "agent_runtime_simple_execution.py",
-    REPO_ROOT / "src" / "IkaCore" / "agent_runtime_stage_execution.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_tools.py",
     REPO_ROOT / "src" / "IkaCore" / "agent_tool_conversion.py",
     REPO_ROOT / "src" / "IkaCore" / "execution_types.py",

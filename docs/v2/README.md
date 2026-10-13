@@ -55,6 +55,22 @@ and application behavior remain separate release checks.
   preserving caller-owned clients. Retry responses close before backoff; HTTP retry hints
   use the same policy in both transports. No new runtime dependency is added.
 
+## Shared execution loop
+
+Simple agents and stages now run through one turn loop. Control-call parsing,
+completion fallback, progress logging, rate-limit entry, and extension bookkeeping
+share one implementation. Stage transitions, human-input pauses, and each mode's
+existing extension and empty-turn policies are preserved.
+
+The preparation mixin chain is collapsed into one component, and dispatch uses the
+shared history helper. Two loop modules become `agent_execution_loop.py`; this pass
+removes 301 runtime Python lines and one module, without changing the public execution
+entry points or adding dependencies.
+
+A local before/after comparison against `78047e7` matched all 42 synthetic scenarios:
+returned results, model-call sequences, usage, step limits, and snapshot boundaries.
+The permanent suite also checks these behaviors across both execution modes.
+
 ## Breaking changes and migration
 
 | Previous call or behavior | V2 behavior / migration |
@@ -125,7 +141,7 @@ cannot identify all private content, so keep runtime databases private.
 
 | Area | Evidence and proposed direction |
 | --- | --- |
-| Agent configuration/inheritance | `IkaBaseAgent` accepts 35 constructor arguments; the runtime has many small mixins and duplicated simple/staged loops. Group configuration by responsibility and consolidate the execution state machine in a separate focused change. |
+| Agent configuration/inheritance | The turn loop and preparation component are unified. `IkaBaseAgent` still accepts 35 constructor arguments; group configuration by responsibility and separate configuration from live run state. |
 | Built-in memory | At least 842 lines plus tool/schema integration. No explicit memory opt-ins appeared in the small downstream constructor sample. Consider a separate integration implemented through ordinary tools; this sample is not proof that nobody uses it. |
 | Logging and CLI presentation | About 860 lines across the logger/CLI modules, coupled to runtime calls and global sinks. Consider a small event interface with optional presentation adapters. |
 | Public API organization | The dependency-copying/private facades have been removed. Consolidate the remaining agent mixins into coherent components before expanding the public API. |
@@ -151,10 +167,10 @@ caches, forks, or other clones.
 
 ## Measured quality and footprint
 
-The full local quality run passes **745 tests**, with six live-provider checks skipped:
-**95.40% line coverage**, **85.77% branch coverage**, Ruff, Pyright, and an
-isolated wheel build/import check. The matrix assigns all 122 runtime modules to 16
-areas and requires 61 named scenarios. Coverage excludes 459 lines, including type-only
+The full local quality run passes **760 tests**, with six live-provider checks skipped:
+**95.40% line coverage**, **86.25% branch coverage**, Ruff, Pyright, and an
+isolated wheel build/import check. The matrix assigns all 121 runtime modules to 16
+areas and requires 67 named scenarios. Coverage excludes 458 lines, including type-only
 and abstract declarations. Existing global and per-area coverage floors are unchanged.
 
 The following results use an installed runtime-only wheel on macOS arm64 / CPython
@@ -163,26 +179,33 @@ benchmark artifact; development dependencies are excluded.
 
 | Measurement | Result |
 | --- | ---: |
-| Wheel download | 204.3 KiB |
-| Unpacked wheel content | 667.0 KiB |
-| Installed runtime + dependencies + bytecode | 5.38 MiB |
+| Wheel download | 202.8 KiB |
+| Unpacked wheel content | 661.3 KiB |
+| Installed runtime + dependencies + bytecode | 5.37 MiB |
 | Direct runtime dependency | 1 (`httpx`); 7 dependency distributions total |
-| Public imports / full runtime import | 3.52 / 33.27 ms |
-| Runtime / Python-worker / HTTPX-only peak RSS | 32.50 / 19.23 / 27.12 MiB |
+| Public imports / full runtime import | 3.39 / 33.16 ms |
+| Runtime / Python-worker / HTTPX-only peak RSS | 32.50 / 19.36 / 27.16 MiB |
 | Agent construction and shutdown | 0.0042 ms |
-| One-step agent, sync / async bridge | 0.233 / 0.661 ms |
-| Same agent with SQLite snapshots | 7.59 ms (previously 11.81 ms) |
-| 4 KiB snapshot append | 0.469 ms (previously 0.586 ms) |
-| Pure four-node workflow, sequential / parallel | 0.008 / 0.232 ms |
+| One-step agent, sync / async bridge | 0.250 / 0.679 ms |
+| Same agent with SQLite snapshots | 7.53 ms (before persistence consolidation: 11.81 ms) |
+| 4 KiB snapshot append | 0.477 ms |
+| Pure four-node workflow, sequential / parallel | 0.008 / 0.254 ms |
 
 Medians use nine fresh-process samples and 100 warm operations per sample. The snapshot
-fixture is about 36% faster than the preceding draft's measurement on this machine.
+fixture is about 36% faster than the measurement before persistence consolidation on this machine.
 Imports have a warmed filesystem cache; RSS includes Python and the measurement worker.
+The installed-size figure counts the complete runtime-only site-packages directory,
+including compiled bytecode that some installers omit from distribution RECORD files.
 Real provider/model latency is excluded. The first 1,000 repeated runs retained about
 1.08 MiB of traced allocations; the next 1,000 changed retained allocations by
 -46 KiB. This short soak does not establish leak freedom for every workload.
 
-### All-provider comparison
+For the execution-loop refactor specifically, seven alternating before/after batches
+of 1,000 operations measured sync **0.2193 → 0.2194 ms** and async bridge
+**0.6582 → 0.6564 ms**. This longer paired run reduces ordering noise in the short
+samples above and supports treating execution latency as unchanged for this fixture.
+
+### Provider optimization comparison (`2a1ccaf` → `78047e7`)
 
 Payload construction for the 1,000-message / ten-tool synthetic fixture, in microseconds:
 
@@ -212,21 +235,21 @@ architectural complexity. Further removal should follow observed use and product
 
 | Area | Modules | Lines | Branches | Floors L/B | Tests observed | Excluded lines |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Public API / package imports | 4 | 95.97% | 90.91% | 95/90% | 296 | 12 |
-| Request controls / cancellation | 6 | 95.53% | 90.91% | 95/90% | 173 | 0 |
-| HTTP ownership / TLS / connection reuse | 5 | 95.19% | 91.67% | 95/90% | 107 | 2 |
+| Public API / package imports | 4 | 95.97% | 90.91% | 95/90% | 311 | 12 |
+| Request controls / cancellation | 6 | 95.53% | 90.91% | 95/90% | 192 | 0 |
+| HTTP ownership / TLS / connection reuse | 5 | 95.19% | 91.67% | 95/90% | 126 | 2 |
 | Retries / request errors | 2 | 87.34% | 77.38% | 85/75% | 150 | 0 |
-| Tools / schemas / output bounds | 14 | 95.56% | 88.74% | 95/85% | 207 | 161 |
+| Tools / schemas / output bounds | 14 | 95.56% | 88.74% | 95/85% | 227 | 161 |
 | Snapshot storage / privacy / replay rules | 8 | 95.05% | 91.96% | 90/90% | 40 | 0 |
-| Agent snapshots / human resume | 6 | 98.12% | 91.67% | 95/90% | 30 | 0 |
+| Agent snapshots / human resume | 6 | 98.12% | 91.67% | 95/90% | 51 | 0 |
 | Workflow snapshots / selective replay | 3 | 96.82% | 88.89% | 95/85% | 24 | 0 |
-| Workflows / fan-in / instance isolation | 9 | 98.25% | 93.24% | 95/90% | 40 | 66 |
+| Workflows / fan-in / instance isolation | 9 | 98.25% | 93.24% | 95/90% | 51 | 66 |
 | Memory integration | 9 | 93.23% | 76.14% | 90/75% | 17 | 10 |
-| Logging / CLI | 3 | 96.58% | 86.92% | 95/85% | 215 | 69 |
-| Agent runtime / stages | 16 | 97.77% | 82.59% | 95/80% | 357 | 139 |
+| Logging / CLI | 3 | 96.58% | 86.92% | 95/85% | 231 | 69 |
+| Agent runtime / stages | 15 | 97.91% | 86.84% | 95/80% | 372 | 138 |
 | Summarization / compaction | 1 | 97.81% | 84.62% | 95/80% | 31 | 0 |
 | Codex auth / streaming / payloads | 7 | 94.54% | 87.17% | 90/80% | 139 | 0 |
-| Provider payloads / metadata / history | 19 | 94.01% | 82.92% | 90/80% | 164 | 0 |
+| Provider payloads / metadata / history | 19 | 94.01% | 82.92% | 90/80% | 163 | 0 |
 | Chat loop / accounting / human interruption | 10 | 94.04% | 81.58% | 90/80% | 71 | 0 |
 
 The generated matrix includes required scenario outcomes, exact uncovered locations,

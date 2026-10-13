@@ -510,123 +510,6 @@ class TestExecutionRuntimeHelpers:
             step_num=1,
         ) is False
 
-    def test_parse_simple_control_promotes_agent_end_exception_and_reports_parse_errors(self):
-        cli = MagicMock()
-        a = _minimal_agent()
-        a.parse_control_calls = MagicMock(return_value=(None, False, None))
-        turn = self._turn(agent_end_exception=True, content_before_tools="before")
-
-        agent_end_called, agent_end_text = a._parse_simple_control(turn, MagicMock(), ["A"], current_step=3)
-
-        assert agent_end_called is True
-        assert agent_end_text is None
-        a.parse_control_calls.assert_called_once_with([], None, response_content="before")
-
-        a.parse_control_calls = MagicMock(side_effect=ValueError("bad control"))
-        with pytest.raises(ValueError, match="bad control"):
-            a._parse_simple_control(self._turn(), cli, ["A"], current_step=4)
-        cli.agent_response.assert_called_once_with(
-            "A",
-            "ERROR: bad control",
-            ["A"],
-            step=4,
-            is_final=False,
-        )
-
-    def test_finish_simple_agent_end_emits_final_or_reports_empty_result(self):
-        cli = MagicMock()
-        a = _minimal_agent()
-        a.logger = MagicMock()
-        turn = self._turn(
-            last_content="last",
-            content_before_tools="before",
-            tool_calls=[{"function": {"name": "agent_end"}}],
-            response={"usage": {"total_tokens": 1}, "cost": {"total_cost": 0.1}},
-        )
-
-        final_response, summary = a._finish_simple_agent_end(
-            "final",
-            turn,
-            cli,
-            ["A"],
-            current_step=2,
-            step_num=1,
-            step_start=0.0,
-        )
-
-        assert final_response == "final"
-        assert summary == "final"
-        cli.agent_response.assert_called_once_with("A", "final", ["A"], step=2, is_final=True)
-        a.logger.log_step.assert_called_once()
-
-        bad_cli = MagicMock()
-        with pytest.raises(ValueError, match="no output"):
-            a._finish_simple_agent_end(
-                None,
-                self._turn(),
-                bad_cli,
-                ["A"],
-                current_step=3,
-                step_num=2,
-                step_start=0.0,
-            )
-        bad_cli.agent_response.assert_called_once_with(
-            "A",
-            "ERROR: agent_end was called but no output was provided. "
-            "The agent MUST provide a final answer when calling agent_end.",
-            ["A"],
-            step=3,
-            is_final=False,
-        )
-
-    def test_simple_non_terminal_step_records_text_and_logs_progress(self):
-        a = _minimal_agent(maxsteps=3)
-        a.logger = MagicMock()
-        runtime = SimpleRuntimeContext(
-            system_prompt="system",
-            current_hierarchy=["A"],
-            barebone_model=SimpleNamespace(),
-            messages=[],
-            tool_executors={},
-            cli=MagicMock(),
-        )
-        text_turn = self._turn(last_content="intermediate text")
-
-        step_num, extension_count, should_continue = a._finish_simple_non_terminal_step(
-            text_turn,
-            runtime.messages,
-            runtime,
-            current_step=1,
-            step_num=0,
-            step_start=0.0,
-            extension_count=0,
-        )
-
-        assert (step_num, extension_count, should_continue) == (1, 0, True)
-        assert runtime.messages[-1] == {"role": "assistant", "content": "intermediate text"}
-        runtime.cli.agent_response.assert_called_once_with(
-            "A",
-            "intermediate text",
-            ["A"],
-            step=1,
-            is_final=False,
-        )
-
-        tool_turn = self._turn(
-            last_content="tool result",
-            tool_calls=[{"function": {"name": "search"}}],
-        )
-        step_num, extension_count, should_continue = a._finish_simple_non_terminal_step(
-            tool_turn,
-            runtime.messages,
-            runtime,
-            current_step=2,
-            step_num=1,
-            step_start=0.0,
-            extension_count=0,
-        )
-
-        assert (step_num, extension_count, should_continue) == (2, 0, False)
 
     def test_prepare_simple_runtime_builds_start_prompt_tools_and_context_budget(self):
         cli = MagicMock()
@@ -668,39 +551,6 @@ class TestExecutionRuntimeHelpers:
             parent_hierarchy=["A"],
         )
 
-    def test_parse_and_finish_stage_control_handle_agent_end_exception_and_errors(self):
-        stage = IkaStage("Review", "Review prompt", [])
-        a = _minimal_agent(Stages=[stage])
-        a.logger = MagicMock()
-        a.parse_control_calls = MagicMock(return_value=(None, False, None))
-        turn = self._turn(agent_end_exception=True, content_before_tools="before")
-
-        target_stage, agent_end_called, agent_end_text = a._parse_stage_control(turn, stage, 0)
-
-        assert target_stage is None
-        assert agent_end_called is True
-        assert agent_end_text is None
-        a.parse_control_calls.assert_called_once_with([], stage, 0, response_content="before")
-
-        a.parse_control_calls = MagicMock(side_effect=ValueError("bad stage control"))
-        with pytest.raises(ValueError, match="bad stage control"):
-            a._parse_stage_control(self._turn(), stage, 0)
-        a.logger.log_action.assert_called_with("ERROR in agent_end: bad stage control")
-
-        result = a._finish_stage_agent_end(
-            stage_index=0,
-            agent_end_text=None,
-            turn=self._turn(last_content="last", content_before_tools="before"),
-            used_steps=2,
-        )
-        assert tuple(result) == (0, "before", True, "before", 2)
-
-        with pytest.raises(ValueError, match="no output"):
-            a._finish_stage_agent_end(0, None, self._turn(), used_steps=1)
-        a.logger.log_action.assert_called_with(
-            "ERROR: agent_end was called but no output was provided. "
-            "The agent MUST provide a final answer when calling agent_end."
-        )
 
     @pytest.mark.parametrize(
         ("target_stage", "expected_next"),
@@ -726,7 +576,7 @@ class TestExecutionRuntimeHelpers:
         a._enforce_rate_limit_model = MagicMock()
         a._run_chat_turn = MagicMock(return_value=self._turn(last_content="partial"))
         a._handle_stage_interrupt = MagicMock(return_value=None)
-        a._parse_stage_control = MagicMock(return_value=(target_stage, False, None))
+        a._parse_turn_control = MagicMock(return_value=(target_stage, False, None))
 
         result = a.execute_stage(0, remaining_steps=5)
 
@@ -756,7 +606,7 @@ class TestExecutionRuntimeHelpers:
             return_value=self._turn(last_content="partial", tool_calls=[{"function": {"name": "search"}}])
         )
         a._handle_stage_interrupt = MagicMock(return_value=None)
-        a._parse_stage_control = MagicMock(return_value=(None, False, None))
+        a._parse_turn_control = MagicMock(return_value=(None, False, None))
         a._maybe_extend_stage = MagicMock(return_value=(1, 0, "forced answer", True))
 
         result = a.execute_stage(0, remaining_steps=5)
@@ -767,67 +617,6 @@ class TestExecutionRuntimeHelpers:
         a.logger.log_step.assert_called_once()
         a.logger.log_stage_end.assert_called_once_with("Review", 1)
 
-    def test_start_simple_step_initializes_first_step_and_rate_limits_each_step(self):
-        cli = MagicMock()
-        a = _minimal_agent(maxsteps=3)
-        a._enforce_rate_limit_model = MagicMock()
-
-        with patch.object(a._start_simple_step.__func__.__globals__["time"], "time", side_effect=[10.5, 11.5]):
-            first_step, first_start = a._start_simple_step(cli, ["A"], step_num=0)
-            second_step, second_start = a._start_simple_step(cli, ["A"], step_num=1)
-
-        assert (first_step, first_start) == (1, 10.5)
-        assert (second_step, second_start) == (2, 11.5)
-        cli.agent_init.assert_called_once_with("A", ["A"], step=1, description="Step 1/3")
-        assert cli.set_step.call_args_list[0].args == ("A", 1)
-        assert cli.set_step.call_args_list[1].args == ("A", 2)
-        assert a._enforce_rate_limit_model.call_count == 2
-
-    def test_run_simple_returns_agent_end_and_finalizes_after_no_progress(self):
-        a = _minimal_agent(maxsteps=2)
-        runtime = SimpleRuntimeContext(
-            system_prompt="system",
-            current_hierarchy=["A"],
-            barebone_model=SimpleNamespace(),
-            messages=[],
-            tool_executors={},
-            cli=MagicMock(),
-        )
-        a._prepare_simple_runtime = MagicMock(return_value=runtime)
-        a._start_simple_step = MagicMock(return_value=(1, 0.0))
-        turn = self._turn(last_content="content", content_before_tools="before")
-        a._run_chat_turn = MagicMock(return_value=turn)
-        a._simple_turn_has_no_progress = MagicMock(return_value=False)
-        a._parse_simple_control = MagicMock(return_value=(True, "final"))
-        a._finish_simple_agent_end = MagicMock(return_value=("final", "final"))
-
-        assert a.run_simple() == ("final", "final")
-        a._finish_simple_agent_end.assert_called_once_with(
-            "final",
-            turn,
-            runtime.cli,
-            ["A"],
-            1,
-            0,
-            0.0,
-        )
-
-        b = _minimal_agent(maxsteps=2)
-        b._prepare_simple_runtime = MagicMock(return_value=runtime)
-        b._start_simple_step = MagicMock(return_value=(1, 0.0))
-        empty_turn = self._turn()
-        b._run_chat_turn = MagicMock(return_value=empty_turn)
-        b._simple_turn_has_no_progress = MagicMock(return_value=True)
-        b._finalize_simple_after_max_steps = MagicMock(return_value=("fallback", "fallback"))
-
-        assert b.run_simple() == ("fallback", "fallback")
-        b._finalize_simple_after_max_steps.assert_called_once_with(
-            "system",
-            ["A"],
-            runtime.cli,
-            None,
-            "",
-        )
 
     def test_run_simple_extends_after_text_only_progress_at_step_limit(self):
         a = _minimal_agent(maxsteps=1, max_step_extensions=1, extend_steps_by=1)
@@ -848,7 +637,7 @@ class TestExecutionRuntimeHelpers:
                 self._turn(last_content="final", content_before_tools="final"),
             ]
         )
-        a._parse_simple_control = MagicMock(side_effect=[(False, None), (True, "final")])
+        a._parse_turn_control = MagicMock(side_effect=[(None, False, None), (None, True, "final")])
         summarizer = MagicMock(return_value="remaining work")
 
         with patch.dict(a._maybe_extend_simple_run.__func__.__globals__, {"run_summarization": summarizer}):
@@ -1101,8 +890,6 @@ class TestRuntimeHelpers:
         a.client = client
 
         assert a._get_chat_client() is client
-
-
 
 
 class TestParseControlCalls:

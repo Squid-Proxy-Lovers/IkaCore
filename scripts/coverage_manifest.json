@@ -232,6 +232,7 @@
       "sources": [
         "src/IkaCore/agent_chat_support.py",
         "src/IkaCore/agent_execution.py",
+        "src/IkaCore/agent_execution_loop.py",
         "src/IkaCore/agent_execution_helpers.py",
         "src/IkaCore/agent_helper_support.py",
         "src/IkaCore/agent_helpers.py",
@@ -240,15 +241,19 @@
         "src/IkaCore/agent_runtime_dispatch.py",
         "src/IkaCore/agent_runtime_foundation.py",
         "src/IkaCore/agent_runtime_payloads.py",
-        "src/IkaCore/agent_runtime_simple_execution.py",
-        "src/IkaCore/agent_runtime_stage_execution.py",
         "src/IkaCore/agents.py",
         "src/IkaCore/execution_types.py",
         "src/IkaCore/prompts.py",
         "src/IkaCore/stages.py"
       ],
       "required_tests": [
-        "src/IkaTest/test_agent_helpers.py::TestFinalPrompt::test_execute_stage_refreshes_first_input_for_each_stage"
+        "src/IkaTest/test_agent_helpers.py::TestFinalPrompt::test_execute_stage_refreshes_first_input_for_each_stage",
+        "src/IkaTest/test_agent_execution_loop.py::test_loop_counts_turns_and_uses_executed_control_calls",
+        "src/IkaTest/test_agent_execution_loop.py::test_agent_end_exception_uses_content_and_counts_usage_once",
+        "src/IkaTest/test_agent_execution_loop.py::test_loop_preserves_extension_limits_and_forced_finalization",
+        "src/IkaTest/test_agent_execution_loop.py::test_stages_advance_and_jump_without_replaying_extra_turns",
+        "src/IkaTest/test_agent_execution_loop.py::test_cancel_at_second_step_prevents_another_model_call",
+        "src/IkaTest/test_agent_execution_loop.py::test_empty_turns_keep_existing_mode_policy"
       ],
       "known_gap": "Model behavior, task success and downstream application semantics are outside offline unit coverage.",
       "min_lines": 95,

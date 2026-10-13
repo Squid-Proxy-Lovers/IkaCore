@@ -73,7 +73,6 @@ class _RuntimeChatServices:
     def _get_chat_client(self) -> Optional[Any]:
         ...
 
-
     def _reset_tool_call_counts(self) -> None:
         ...
 
@@ -154,7 +153,7 @@ else:
         pass
 
 
-class AgentChatTurnMixin(_RuntimeState):
+class RuntimePreparationMixin(_RuntimeState):
     def _run_chat_turn(
         self,
         barebone_model: Any,
@@ -201,8 +200,6 @@ class AgentChatTurnMixin(_RuntimeState):
             executed_tool_calls=cast(list[JsonDict], response.get("executed_tool_calls", []) or []),
         )
 
-
-class StageInterruptMixin(AgentChatTurnMixin):
     def _handle_stage_interrupt(
         self,
         stage: Any,
@@ -230,8 +227,6 @@ class StageInterruptMixin(AgentChatTurnMixin):
         }
         return StageExecutionResult(stage_index, turn.last_content, False, None, used_steps)
 
-
-class StageExtensionMixin(StageInterruptMixin):
     def _maybe_extend_stage(
         self,
         barebone_model: Any,
@@ -268,12 +263,6 @@ class StageExtensionMixin(StageInterruptMixin):
             last_content = force_answer.strip()
         return step_limit, extension_count, last_content, True
 
-
-class StageRuntimeSupportMixin(StageExtensionMixin):
-    pass
-
-
-class SimpleInstructionMixin(StageRuntimeSupportMixin):
     def _simple_end_instruction(self) -> str:
         submit_tools = [
             getattr(t, "name", "") for t in (self.tools or [])
@@ -290,27 +279,6 @@ class SimpleInstructionMixin(StageRuntimeSupportMixin):
             "a premature finish and fails the task."
         )
 
-    def _log_simple_step(
-        self,
-        step_idx: int,
-        output: str,
-        tool_calls: list[JsonDict],
-        response: JsonDict,
-        elapsed: float,
-    ) -> None:
-        if self.logger:
-            self.logger.log_step(
-                stage_name="simple",
-                step_idx=step_idx,
-                output=output,
-                tool_calls=tool_calls,
-                usage=response.get("usage", {}),
-                cost=response.get("cost", {}),
-                elapsed=elapsed,
-            )
-
-
-class SimpleRunExtensionMixin(SimpleInstructionMixin):
     def _maybe_extend_simple_run(
         self,
         system_prompt: str,
@@ -357,8 +325,6 @@ class SimpleRunExtensionMixin(SimpleInstructionMixin):
         )
         return extension_count + 1
 
-
-class SimpleStepExtensionMixin(SimpleRunExtensionMixin):
     def _finalize_simple_after_max_steps(
         self,
         system_prompt: str,
@@ -396,12 +362,6 @@ class SimpleStepExtensionMixin(SimpleRunExtensionMixin):
         )
         return final_response, final_response
 
-
-class SimpleRuntimeSupportMixin(SimpleStepExtensionMixin):
-    pass
-
-
-class StageRuntimeModelBuildMixin(SimpleRuntimeSupportMixin):
     def _stage_system_prompt(self, stage: Any) -> str:
         base_system = self.final_prompt(stage)
         return (self.system_prompt + "\n\n" + base_system) if self.system_prompt else base_system
@@ -432,8 +392,6 @@ class StageRuntimeModelBuildMixin(SimpleRuntimeSupportMixin):
             barebone_model.context_budget = self.context_budget
         return barebone_model
 
-
-class StageRuntimeBuildMixin(StageRuntimeModelBuildMixin):
     def _stage_initial_messages(self, stage: Any, resume_input: Optional[str], message_history: JsonDict,
                                 content_prompt: str) -> list[JsonDict]:
         from .snapshot_agent_state import stage_initial_messages
@@ -459,8 +417,6 @@ class StageRuntimeBuildMixin(StageRuntimeModelBuildMixin):
             remaining_steps=remaining_steps,
         )
 
-
-class StageRuntimePreparationMixin(StageRuntimeBuildMixin):
     def _prepare_stage_runtime(
         self,
         stage_index: int,
@@ -506,10 +462,9 @@ class StageRuntimePreparationMixin(StageRuntimeBuildMixin):
             messages=messages,
             tool_executors=tool_executors,
             step_limit=step_limit,
+            stage_index=stage_index,
         )
 
-
-class SimpleRuntimePreparationMixin(StageRuntimePreparationMixin):
     def _prepare_simple_runtime(self) -> SimpleRuntimeContext:
         dynamic_tools = self.build_simple_tools()
         system_prompt = self.system_prompt or ""
@@ -546,7 +501,3 @@ class SimpleRuntimePreparationMixin(StageRuntimePreparationMixin):
             tool_executors=tool_executors,
             cli=cli,
         )
-
-
-class RuntimePreparationMixin(SimpleRuntimePreparationMixin):
-    pass

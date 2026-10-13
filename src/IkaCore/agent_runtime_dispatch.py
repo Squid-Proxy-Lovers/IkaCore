@@ -14,25 +14,12 @@ from IkaModel.chat_interface.chat_interface import (
     summarise_message_history as _summarise_message_history_untyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .agent_runtime_simple_execution import SimpleExecutionRuntimeMixin
+from .agent_execution_loop import AgentExecutionLoopMixin
+from .agent_runtime_payloads import history_section
 
 JsonDict = dict[str, Any]
 SummariseMessageHistory = Callable[..., str]
 summarise_message_history = cast(SummariseMessageHistory, _summarise_message_history_untyped)
-
-
-def _history_section(message_history: JsonDict, key: str) -> JsonDict:
-    raw_section = message_history.get(key)
-    if isinstance(raw_section, dict):
-        return cast(JsonDict, raw_section)
-    section: JsonDict = {}
-    message_history[key] = section
-    return section
-
-
-def _history_message_text(message_history: JsonDict, key: str) -> str:
-    value = _history_section(message_history, key).get("message", "")
-    return value if isinstance(value, str) else str(value)
 
 
 def _string_attr(obj: object, attr: str, default: str = "unknown") -> str:
@@ -40,7 +27,7 @@ def _string_attr(obj: object, attr: str, default: str = "unknown") -> str:
     return value if isinstance(value, str) else default
 
 
-class InterruptOutputMixin(SimpleExecutionRuntimeMixin):
+class InterruptOutputMixin(AgentExecutionLoopMixin):
     def _interrupt_output(self, interrupt: JsonDict) -> JsonDict:
         raw_interrupt_data = interrupt.get("interrupt_data")
         question = ""
@@ -152,7 +139,7 @@ class StagedExecutionStateMixin(StagedResumeMixin):
             else state.last_content
         )
         current_hierarchy = getattr(self, '_parent_hierarchy', []) + [self.name]
-        system_message = _history_message_text(self.message_history, "system")
+        system_message = str(history_section(self.message_history, "system").get("message", ""))
         barebone_model = self.get_barebone(
             system_message,
             [],
@@ -278,7 +265,7 @@ class ValidatedSimpleExecutionMixin(SimpleExecutionDispatchMixin):
             )
             self.prompt = f"{original_prompt}\n\n[FEEDBACK]: {feedback_msg}"
             message_history = self.message_history
-            _history_section(message_history, "first_input")["message"] = self.prompt
+            history_section(message_history, "first_input")["message"] = self.prompt
             message_history["messages"] = {}
             retry_count += 1
             cli = get_cli_output()
