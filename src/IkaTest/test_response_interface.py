@@ -5,7 +5,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from IkaModel.base import AgentEndException, HumanInputRequired
-from IkaModel.chat_interface import response_interface as ri
+from IkaModel.chat_interface import tool_execution_async as _test_tool_execution_async
+from IkaModel.chat_interface import tool_execution_sync as _test_tool_execution_sync
+from IkaModel.chat_interface import tool_result_formatters as _test_tool_result_formatters
 
 
 class _CompletedFuture:
@@ -35,7 +37,7 @@ def _tool_call(name, arguments="{}", call_id="call_1"):
 
 
 def test_validate_tool_args_coerces_scalars_and_rejects_invalid_payloads():
-    out = ri.validate_tool_args(
+    out = _test_tool_execution_sync.validate_tool_args(
         "search",
         {"enabled": "true", "count": "3", "ratio": "1.5", "query": "text"},
     )
@@ -43,26 +45,26 @@ def test_validate_tool_args_coerces_scalars_and_rejects_invalid_payloads():
     assert out == {"enabled": True, "count": 3, "ratio": 1.5, "query": "text"}
 
     with pytest.raises(ValueError, match="got None"):
-        ri.validate_tool_args("search", None)
+        _test_tool_execution_sync.validate_tool_args("search", None)
     with pytest.raises(ValueError, match="JSON object"):
-        ri.validate_tool_args("search", ["not", "a", "dict"])
+        _test_tool_execution_sync.validate_tool_args("search", ["not", "a", "dict"])
     with pytest.raises(ValueError, match="JSON-serializable"):
-        ri.validate_tool_args("search", {"bad": object()})
+        _test_tool_execution_sync.validate_tool_args("search", {"bad": object()})
     with pytest.raises(ValueError, match="non-empty 'input'"):
-        ri.validate_tool_args("agent_end", {"input": ""})
+        _test_tool_execution_sync.validate_tool_args("agent_end", {"input": ""})
 
 
 def test_formatters_handle_missing_unknown_and_gemini_edge_results():
     calls = [_tool_call("lookup", call_id="call_a"), {"name": "gemini_tool"}]
 
-    assert ri.format_provider_tool_results("unknown", calls, ["result"]) == []
-    assert json.loads(ri.format_openai_results(calls, [])[0]["content"]) == {"error": "No result"}
-    assert ri.format_openai_responses_results(calls, ["ok"])[0]["tool_call_id"] == "call_a"
-    anthropic = ri.format_anthropic_results(calls, [])
+    assert _test_tool_result_formatters.format_provider_tool_results("unknown", calls, ["result"]) == []
+    assert json.loads(_test_tool_result_formatters.format_openai_results(calls, [])[0]["content"]) == {"error": "No result"}
+    assert _test_tool_result_formatters.format_openai_responses_results(calls, ["ok"])[0]["tool_call_id"] == "call_a"
+    anthropic = _test_tool_result_formatters.format_anthropic_results(calls, [])
     assert anthropic[0]["content"][0]["tool_use_id"] == "call_a"
     assert json.loads(anthropic[0]["content"][0]["content"]) == {"error": "No result"}
 
-    formatted = ri.format_gemini_results(
+    formatted = _test_tool_result_formatters.format_gemini_results(
         [{"name": "none"}, {"name": "blank"}, {"name": "empty"}, {"name": "list"}],
         [None, "", "{}", "[1, 2]"],
     )
@@ -75,17 +77,17 @@ def test_formatters_handle_missing_unknown_and_gemini_edge_results():
 def test_execute_tool_reports_missing_validation_timeout_and_executor_errors():
     cli = MagicMock()
     with patch("IkaModel.chat_interface.tool_execution_sync.get_cli_output", return_value=cli):
-        missing = json.loads(ri.execute_tool("missing", {}, {}, agent_hierarchy=["A"], step=2))
-        invalid = json.loads(ri.execute_tool("search", None, {"search": lambda _args: "ok"}))
+        missing = json.loads(_test_tool_execution_sync.execute_tool("missing", {}, {}, agent_hierarchy=["A"], step=2))
+        invalid = json.loads(_test_tool_execution_sync.execute_tool("search", None, {"search": lambda _args: "ok"}))
 
     assert "not found" in missing["error"]
     assert "Validation error" in invalid["error"]
     assert cli.tool_result.call_count == 2
 
-    timeout_future = _CompletedFuture(exc=ri.FutureTimeoutError())
+    timeout_future = _CompletedFuture(exc=_test_tool_execution_sync.FutureTimeoutError())
     with patch("IkaModel.chat_interface.tool_execution_sync.get_cli_output", return_value=MagicMock()) as cli_factory:
         with patch("IkaModel.chat_interface.tool_execution_sync._ensure_tool_executor_pool", return_value=_FakePool(timeout_future)):
-            timed_out = json.loads(ri.execute_tool("slow", {}, {"slow": lambda _args: "ok"}, timeout=0.01))
+            timed_out = json.loads(_test_tool_execution_sync.execute_tool("slow", {}, {"slow": lambda _args: "ok"}, timeout=0.01))
 
     assert "timed out" in timed_out["error"]
     assert timeout_future.cancel.called
@@ -94,7 +96,7 @@ def test_execute_tool_reports_missing_validation_timeout_and_executor_errors():
     error_future = _CompletedFuture(exc=RuntimeError("executor failed"))
     with patch("IkaModel.chat_interface.tool_execution_sync.get_cli_output", return_value=MagicMock()):
         with patch("IkaModel.chat_interface.tool_execution_sync._ensure_tool_executor_pool", return_value=_FakePool(error_future)):
-            errored = json.loads(ri.execute_tool("boom", {}, {"boom": lambda _args: "ok"}))
+            errored = json.loads(_test_tool_execution_sync.execute_tool("boom", {}, {"boom": lambda _args: "ok"}))
 
     assert "executor failed" in errored["error"]
 
@@ -108,7 +110,7 @@ def test_execute_tool_recreates_shutdown_pool_once_and_reraises_control_exceptio
     with patch("IkaModel.chat_interface.tool_execution_sync.get_cli_output", return_value=cli):
         with patch("IkaModel.chat_interface.tool_execution_sync._ensure_tool_executor_pool", return_value=first_pool):
             with patch("IkaModel.chat_interface.tool_execution_sync._reset_tool_executor_pool", return_value=retry_pool):
-                out = ri.execute_tool("lookup", {"q": "x"}, {"lookup": lambda _args: {"unused": True}})
+                out = _test_tool_execution_sync.execute_tool("lookup", {"q": "x"}, {"lookup": lambda _args: {"unused": True}})
 
     assert json.loads(out) == {"ok": True}
     assert first_pool.submit.called
@@ -117,13 +119,13 @@ def test_execute_tool_recreates_shutdown_pool_once_and_reraises_control_exceptio
 
     with patch("IkaModel.chat_interface.tool_execution_sync.get_cli_output", return_value=MagicMock()):
         with pytest.raises(AgentEndException):
-            ri.execute_tool(
+            _test_tool_execution_sync.execute_tool(
                 "finish",
                 {},
                 {"finish": lambda _args: (_ for _ in ()).throw(AgentEndException(response={"content": "done"}))},
             )
         with pytest.raises(HumanInputRequired):
-            ri.execute_tool(
+            _test_tool_execution_sync.execute_tool(
                 "ask",
                 {},
                 {"ask": lambda _args: (_ for _ in ()).throw(HumanInputRequired({"question": "Q?"}))},
@@ -139,7 +141,7 @@ def test_tool_call_planning_handles_schema_fallback_limits_duplicates_and_orderi
         "required": ["query"],
     }
     counts = {"limited": 1}
-    plan = ri._prepare_tool_call_plan(
+    plan = _test_tool_execution_sync._prepare_tool_call_plan(
         [
             _tool_call("needs_query", "{}", "empty"),
             _tool_call("limited", '{"q":"x"}', "limited"),
@@ -162,11 +164,11 @@ def test_tool_call_planning_handles_schema_fallback_limits_duplicates_and_orderi
     assert plan.sequential_calls == [("sequential", {"q": "x"}, "seq")]
     assert plan.parallel_calls == [("parallel", {"q": "x"}, "par")]
     assert counts["needs_query"] == 1
-    assert ri._ordered_tool_results(plan)[0] == plan.tool_call_id_to_result["empty"]
+    assert _test_tool_execution_sync._ordered_tool_results(plan)[0] == plan.tool_call_id_to_result["empty"]
 
 
 def test_execute_tool_calls_surfaces_parallel_and_sequential_interrupts():
-    parallel_plan = ri.ToolCallPlan(
+    parallel_plan = _test_tool_execution_sync.ToolCallPlan(
         tool_call_order=[_tool_call("ask", "{}", "ask")],
         parallel_calls=[("ask", {}, "ask")],
     )
@@ -174,7 +176,7 @@ def test_execute_tool_calls_surfaces_parallel_and_sequential_interrupts():
         "IkaModel.chat_interface.tool_execution_sync.execute_tool",
         side_effect=HumanInputRequired({"question": "Parallel?"}),
     ):
-        interrupt = ri._execute_parallel_tool_plan(
+        interrupt = _test_tool_execution_sync._execute_parallel_tool_plan(
             parallel_plan,
             {"ask": lambda _args: "unused"},
             timeout=1,
@@ -186,7 +188,7 @@ def test_execute_tool_calls_surfaces_parallel_and_sequential_interrupts():
     assert interrupt == {"question": "Parallel?"}
     assert json.loads(parallel_plan.tool_call_id_to_result["ask"])["__ika_interrupt__"] is True
 
-    sequential_plan = ri.ToolCallPlan(
+    sequential_plan = _test_tool_execution_sync.ToolCallPlan(
         tool_call_order=[_tool_call("ask", "{}", "ask")],
         sequential_calls=[("ask", {}, "ask")],
     )
@@ -195,7 +197,7 @@ def test_execute_tool_calls_surfaces_parallel_and_sequential_interrupts():
         "IkaModel.chat_interface.tool_execution_sync.execute_tool",
         side_effect=HumanInputRequired({"question": "Sequential?"}),
     ):
-        interrupt = ri._execute_sequential_tool_plan(
+        interrupt = _test_tool_execution_sync._execute_sequential_tool_plan(
             sequential_plan,
             {"ask": lambda _args: "unused"},
             timeout=1,
@@ -208,7 +210,7 @@ def test_execute_tool_calls_surfaces_parallel_and_sequential_interrupts():
     assert counts == {"ask": 1}
     assert json.loads(sequential_plan.tool_call_id_to_result["ask"])["__ika_interrupt__"] is True
 
-    assert ri.execute_tool_calls([], {"tool": lambda _args: "ok"}, "openai", tool_call_counts={"tool": 1}) == (
+    assert _test_tool_execution_sync.execute_tool_calls([], {"tool": lambda _args: "ok"}, "openai", tool_call_counts={"tool": 1}) == (
         [],
         [],
         {"tool": 1},
@@ -222,7 +224,7 @@ def test_execute_tool_calls_keeps_parallel_errors_ordered_with_successful_result
         return {"ok": args["q"]}
 
     with patch("IkaModel.chat_interface.tool_execution_sync.get_cli_output", return_value=MagicMock()):
-        formatted, tool_results, counts, executed, interrupt = ri.execute_tool_calls(
+        formatted, tool_results, counts, executed, interrupt = _test_tool_execution_sync.execute_tool_calls(
             [_tool_call("ok", '{"q":"x"}', "ok"), _tool_call("boom", "{}", "boom")],
             {"ok": ok, "boom": lambda _args: (_ for _ in ()).throw(RuntimeError("bad"))},
             "openai",
@@ -244,7 +246,7 @@ def test_execute_tool_calls_preserves_successful_parallel_result_without_timeout
         return {"saved": args["finding_id"]}
 
     with patch("IkaModel.chat_interface.tool_execution_sync.get_cli_output", return_value=MagicMock()):
-        formatted, tool_results, counts, executed, interrupt = ri.execute_tool_calls(
+        formatted, tool_results, counts, executed, interrupt = _test_tool_execution_sync.execute_tool_calls(
             [_tool_call("save_result", '{"finding_id":"finding-1"}', "save")],
             {"save_result": save_result},
             "openai",
@@ -271,13 +273,13 @@ def test_async_execute_tool_reports_common_errors_and_runs_sync_or_async_executo
             return "late"
 
         with patch("IkaModel.chat_interface.tool_execution_async.get_cli_output", return_value=cli):
-            missing = json.loads(await ri.async_execute_tool("missing", {}, {}))
-            invalid = json.loads(await ri.async_execute_tool("bad", None, {"bad": lambda _args: "ok"}))
-            sync_out = json.loads(await ri.async_execute_tool("sync", {"value": 1}, {"sync": lambda args: {"sync": args["value"]}}))
-            async_out = json.loads(await ri.async_execute_tool("async", {"value": 2}, {"async": async_executor}))
-            timed_out = json.loads(await ri.async_execute_tool("slow", {}, {"slow": slow}, timeout=0.001))
+            missing = json.loads(await _test_tool_execution_async.async_execute_tool("missing", {}, {}))
+            invalid = json.loads(await _test_tool_execution_async.async_execute_tool("bad", None, {"bad": lambda _args: "ok"}))
+            sync_out = json.loads(await _test_tool_execution_async.async_execute_tool("sync", {"value": 1}, {"sync": lambda args: {"sync": args["value"]}}))
+            async_out = json.loads(await _test_tool_execution_async.async_execute_tool("async", {"value": 2}, {"async": async_executor}))
+            timed_out = json.loads(await _test_tool_execution_async.async_execute_tool("slow", {}, {"slow": slow}, timeout=0.001))
             errored = json.loads(
-                await ri.async_execute_tool("boom", {}, {"boom": lambda _args: (_ for _ in ()).throw(RuntimeError("bad"))})
+                await _test_tool_execution_async.async_execute_tool("boom", {}, {"boom": lambda _args: (_ for _ in ()).throw(RuntimeError("bad"))})
             )
 
         return missing, invalid, sync_out, async_out, timed_out, errored, cli
@@ -297,7 +299,7 @@ def test_async_execute_tool_and_call_plans_propagate_control_interrupts():
     async def run_case():
         with patch("IkaModel.chat_interface.tool_execution_async.get_cli_output", return_value=MagicMock()):
             with pytest.raises(AgentEndException):
-                await ri.async_execute_tool(
+                await _test_tool_execution_async.async_execute_tool(
                     "finish",
                     {},
                     {
@@ -307,13 +309,13 @@ def test_async_execute_tool_and_call_plans_propagate_control_interrupts():
                     },
                 )
             with pytest.raises(HumanInputRequired):
-                await ri.async_execute_tool(
+                await _test_tool_execution_async.async_execute_tool(
                     "ask",
                     {},
                     {"ask": lambda _args: (_ for _ in ()).throw(HumanInputRequired({"question": "Q?"}))},
                 )
 
-        formatted, results, counts, executed, interrupt = await ri.async_execute_tool_calls(
+        formatted, results, counts, executed, interrupt = await _test_tool_execution_async.async_execute_tool_calls(
             [_tool_call("ask", "{}", "ask")],
             {"ask": lambda _args: (_ for _ in ()).throw(HumanInputRequired({"question": "Async?"}))},
             "openai",
@@ -334,8 +336,8 @@ def test_async_execute_tool_calls_sequential_path_and_empty_short_circuit():
         async def sequential(args):
             return {"ok": args["q"]}
 
-        empty = await ri.async_execute_tool_calls([], {"tool": sequential}, "openai", tool_call_counts={"tool": 2})
-        formatted, results, counts, executed, interrupt = await ri.async_execute_tool_calls(
+        empty = await _test_tool_execution_async.async_execute_tool_calls([], {"tool": sequential}, "openai", tool_call_counts={"tool": 2})
+        formatted, results, counts, executed, interrupt = await _test_tool_execution_async.async_execute_tool_calls(
             [_tool_call("sequential", '{"q":"x"}', "seq")],
             {"sequential": sequential},
             "openai",

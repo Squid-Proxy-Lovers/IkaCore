@@ -91,3 +91,18 @@ def test_provider_tool_payload_renders_provider_shapes_and_cache_eviction():
         ts._PROVIDER_TOOL_CACHE_MAX = original_max
         ts._PROVIDER_TOOL_CACHE.clear()
         ts._PROVIDER_TOOL_FAST_CACHE.clear()
+
+
+def test_fresh_lists_cannot_grow_fast_cache_without_bound(monkeypatch):
+    ts._PROVIDER_TOOL_CACHE.clear()
+    ts._PROVIDER_TOOL_FAST_CACHE.clear()
+    monkeypatch.setattr(ts, '_PROVIDER_TOOL_CACHE_MAX', 8)
+    tool = AgentTool('tool', 'tool', 'fixture', ToolArgs('input', 'fixture'))
+    for provider in ('openai', 'openai_responses', 'anthropic', 'deepseek', 'gemini', 'openrouter', 'codex'):
+        expected = ts.build_provider_tool_payload(provider, [tool])
+        for _ in range(100):
+            assert ts.build_provider_tool_payload(provider, [tool]) == expected
+            assert len(ts._PROVIDER_TOOL_FAST_CACHE) <= 8
+            assert len(ts._PROVIDER_TOOL_CACHE) <= 8
+    ts._PROVIDER_TOOL_CACHE.clear()
+    ts._PROVIDER_TOOL_FAST_CACHE.clear()

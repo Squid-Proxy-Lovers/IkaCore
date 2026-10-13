@@ -8,6 +8,7 @@ from IkaCore.agent_helper_support import RawFinalAnswerCheck
 from IkaCore.agent_helpers import AgentHelpersMixin
 from IkaCore.agent_initialization import AgentInitializationMixin
 from IkaCore.agent_memory import AgentMemoryMixin
+from IkaCore.agent_snapshots import AgentSnapshotReplayMixin
 from IkaCore.agent_tools import AgentToolsMixin
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
@@ -28,8 +29,6 @@ class _AgentConstructorConfig:
     max_tokens: int
     temperature: float
     use_responses_api: bool
-    checkpoint: bool
-    checkpoint_db_path: str
     Stages: Optional[list[IkaStage]]
     subagents: Optional[list[IkaBaseAgent]]
     next_agent: Optional["IkaBaseAgent"]
@@ -95,8 +94,6 @@ def _initialize_base_agent(agent: "IkaBaseAgent", config: _AgentConstructorConfi
         config.extend_stage_steps_by,
     )
     agent._assign_runtime_state(
-        config.checkpoint,
-        config.checkpoint_db_path,
         config.rate_limit_per_min,
         config.per_tool_rate_limit,
         config.memory,
@@ -107,7 +104,8 @@ def _initialize_base_agent(agent: "IkaBaseAgent", config: _AgentConstructorConfi
     )
 
 
-class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, AgentHelpersMixin, AgentInitializationMixin):
+class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, AgentHelpersMixin, AgentInitializationMixin,
+                   AgentSnapshotReplayMixin):
     def __init__(
         self,
         name: str, description: str, prompt: str,
@@ -115,7 +113,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         tools: Optional[list[IkaTools]] = None,
         model_id: str = "", api_key: str = "", api_url: Optional[str] = None,
         max_tokens: int = 50000, temperature: float = 0.0, use_responses_api: bool = True,
-        checkpoint: bool = False, checkpoint_db_path: str = "checkpoints.db",
         Stages: Optional[list[IkaStage]] = None,
         subagents: Optional[list[IkaBaseAgent]] = None,
         next_agent: Optional["IkaBaseAgent"] = None,
@@ -146,8 +143,6 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
                 max_tokens=max_tokens,
                 temperature=temperature,
                 use_responses_api=use_responses_api,
-                checkpoint=checkpoint,
-                checkpoint_db_path=checkpoint_db_path,
                 Stages=Stages,
                 subagents=subagents,
                 next_agent=next_agent,

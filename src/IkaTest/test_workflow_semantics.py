@@ -13,11 +13,11 @@ mock_ika_mem = MagicMock()
 with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
     from IkaCore.agents import IkaBaseAgent
 from IkaCore.stages import IkaStage
-from IkaCore.workflow import AsyncWorkflowExecutor, IkaWorkflow, WorkflowEdge, WorkflowNode, WorkflowResult
+from IkaCore.workflow import AsyncWorkflowExecutor, IkaWorkflow, WorkflowEdge, WorkflowNode
 
 
 def _agent(name: str, stages=None):
-    return IkaBaseAgent(
+    agent = IkaBaseAgent(
         name=name,
         description=f"{name} description",
         prompt=f"{name} prompt",
@@ -25,6 +25,17 @@ def _agent(name: str, stages=None):
         api_key="test-key",
         Stages=stages or [],
     )
+
+    agent._test_clones = []
+    original_clone = agent.clone_for_run
+    def clone(**kwargs):
+        copied = original_clone(**kwargs)
+        if "execution" in vars(agent):
+            copied.execution = agent.execution
+        agent._test_clones.append(copied)
+        return copied
+    agent.clone_for_run = clone
+    return agent
 
 
 def _compress_hook(contexts, agent):
@@ -111,7 +122,7 @@ class TestWorkflowChildEdges:
         assert "follower" in results
         assert "child" not in results
         assert child.execution.call_count == 0
-        assert parent.Stages[0].subagents == [child]
+        assert parent._test_clones[0].Stages[0].subagents == [child]
 
     def test_async_workflow_ignores_child_only_nodes(self):
         parent_stage = IkaStage("ParentStage", "Do parent work", [])
@@ -271,14 +282,13 @@ class TestWorkflowValidationDisplayAndContext:
         results = workflow.run(initial_context="initial")
 
         assert set(results) == {"root", "follower"}
-        assert "initial" in root.message_history["first_input"]["message"]
-        assert "root summary" in follower.message_history["first_input"]["message"]
-        assert workflow._run_node("root", {}) is results["root"]
-
-        workflow._results.pop("follower")
-        workflow._visiting.add("follower")
-        with pytest.raises(ValueError, match="Cycle detected"):
-            workflow._run_node("follower", {})
+        assert "initial" in root._test_clones[0].message_history["first_input"]["message"]
+        assert "root summary" in follower._test_clones[0].message_history["first_input"]["message"]
+        cyclic = IkaWorkflow("cycle", "test", workflow.nodes,
+                             [WorkflowEdge("root", "follower"), WorkflowEdge("follower", "root")])
+        for asynchronous in (False, True):
+            with pytest.raises(ValueError, match="cyclic"):
+                cyclic.run(use_async=asynchronous)
 
 
 class TestWorkflowAsyncSemantics:
@@ -501,172 +511,31 @@ class TestWorkflowAsyncSemantics:
         assert results == [{"result": {"error": "future exploded"}, "success": False}]
         executor.wait_for_completion.assert_called_once_with([pending_future])
 
-    def test_async_state_scheduling_and_dependency_activation_helpers(self):
+    def test_async_instances_receive_initial_context_and_preserve_each_task(self):
         root = _agent("root")
-        mid = _agent("mid")
-        leaf = _agent("leaf")
+        root.execution = MagicMock(return_value={"final_message": "done", "summary": "summary"})
         executor = InlineWorkflowExecutor()
-        workflow = IkaWorkflow(
-            name="async-helpers",
-            description="workflow",
-            nodes=[
-                WorkflowNode("root", root, instances=2, instance_inputs=["first"]),
-                WorkflowNode("mid", mid),
-                WorkflowNode("leaf", leaf),
-            ],
-            edges=[WorkflowEdge("root", "mid"), WorkflowEdge("mid", "leaf")],
-            compress_hook=_compress_hook,
-            async_executor=executor,
-        )
+        workflow = IkaWorkflow("instances", "test", [WorkflowNode("root", root, instances=2,
+                              instance_inputs=["first"])], [], compress_hook=_compress_hook, async_executor=executor)
+        result = workflow.run("initial", use_async=True)
+        assert [row["prompt"] for row in executor.scheduled] == ["first", "root prompt"]
+        assert all(row["context"] == "initial" for row in executor.scheduled)
+        assert "[Instance 0]: summary" in result["root"].summary
+        assert "[Instance 1]: summary" in result["root"].summary
 
-        upstream_contexts, ready_nodes, completed_nodes, pending_nodes, node_futures = workflow._initial_async_state(
-            "initial"
-        )
+    def test_failed_instance_blocks_its_dependents_even_when_a_sibling_succeeds(self):
+        root, follower = _agent("root"), _agent("follower")
+        root.execution = MagicMock(side_effect=[{"final_message": "success"}, ValueError("failed")])
+        follower.execution = MagicMock(side_effect=AssertionError("blocked node ran"))
+        workflow = IkaWorkflow("failure", "test", [WorkflowNode("root", root, instances=2),
+                              WorkflowNode("follower", follower)], [WorkflowEdge("root", "follower")],
+                              compress_hook=_compress_hook, async_executor=InlineWorkflowExecutor())
+        assert workflow.run(use_async=True) == {}
+        follower.execution.assert_not_called()
 
-        assert upstream_contexts == {"root": ["initial"]}
-        assert ready_nodes == {"root"}
-        assert completed_nodes == set()
-        assert pending_nodes == {"mid", "leaf"}
-        assert node_futures == {}
-        assert workflow._instance_inputs_for_node(workflow._node_index["root"]) == ["first", None]
-        assert workflow._async_context_for_node(workflow._node_index["root"], "root", {}, "initial") == "initial"
-
-        cli = MagicMock()
-        root.execution = MagicMock(
-            side_effect=[
-                {"final_message": "first final", "summary": "first summary"},
-                {"final_message": "second final", "summary": "second summary"},
-            ]
-        )
-        futures = workflow._schedule_async_node("root", upstream_contexts, "initial", cli, step=1)
-
-        assert len(futures) == 2
-        assert [item["prompt"] for item in executor.scheduled] == ["first", "root prompt"]
-        assert executor.scheduled[0]["context"] == "initial"
-        cli.workflow_status.assert_called_once()
-
-        workflow._results = {}
-        workflow._record_async_success(
-            {"node_name": "root", "instance_id": 0, "result": {"final_message": "root final"}, "success": True}
-        )
-        workflow._record_async_success(
-            {"node_name": "root", "instance_id": 1, "result": {"summary": "second summary"}, "success": True}
-        )
-        assert "[Instance 0]: root final" in workflow._results["root"].summary
-        assert "[Instance 1]: second summary" in workflow._results["root"].summary
-
-        ready_nodes = set()
-        pending_nodes = {"mid", "leaf"}
-        upstream_contexts = {}
-        workflow._activate_async_dependents(
-            {"node_name": "root", "instance_id": 0, "result": {"summary": "root summary"}, "success": False},
-            upstream_contexts,
-            completed_nodes=set(),
-            ready_nodes=ready_nodes,
-            pending_nodes=pending_nodes,
-        )
-        assert ready_nodes == set()
-        assert upstream_contexts == {}
-
-        completed_nodes = set()
-        workflow._activate_async_dependents(
-            {"node_name": "root", "instance_id": 0, "result": {"summary": "root summary"}, "success": True},
-            upstream_contexts,
-            completed_nodes=completed_nodes,
-            ready_nodes=ready_nodes,
-            pending_nodes=pending_nodes,
-        )
-        assert completed_nodes == {"root"}
-        assert ready_nodes == {"mid"}
-        assert pending_nodes == {"leaf"}
-        assert upstream_contexts == {"mid": ["root summary"]}
-
-        ready_nodes.clear()
-        pending_nodes = {"leaf"}
-        workflow._activate_unblocked_pending_nodes(pending_nodes, completed_nodes | {"mid"}, ready_nodes)
-        assert ready_nodes == {"leaf"}
-        assert pending_nodes == set()
-
-    def test_process_async_results_skips_failures_and_cleans_node_futures(self):
-        root = _agent("root")
-        follower = _agent("follower")
-        workflow = IkaWorkflow(
-            name="process-results",
-            description="workflow",
-            nodes=[WorkflowNode("root", root), WorkflowNode("follower", follower)],
-            edges=[WorkflowEdge("root", "follower")],
-            compress_hook=_compress_hook,
-            async_executor=InlineWorkflowExecutor(),
-        )
-        success_future = concurrent.futures.Future()
-        success_future.set_result(
-            {"node_name": "root", "instance_id": 0, "result": {"summary": "root summary"}, "success": True}
-        )
-        failure_future = concurrent.futures.Future()
-        failure_future.set_result(
-            {"node_name": "follower", "instance_id": 0, "result": {"error": "bad"}, "success": False}
-        )
-        node_futures = {"root": [success_future], "follower": [failure_future]}
-        ready_nodes = set()
-        pending_nodes = {"follower"}
-        completed_nodes = set()
-        upstream_contexts = {}
-
-        workflow._process_async_results(
-            [],
-            upstream_contexts,
-            completed_nodes,
-            ready_nodes,
-            pending_nodes,
-            node_futures,
-        )
-        assert node_futures == {"root": [success_future], "follower": [failure_future]}
-
-        workflow._process_async_results(
-            [success_future, failure_future],
-            upstream_contexts,
-            completed_nodes,
-            ready_nodes,
-            pending_nodes,
-            node_futures,
-        )
-
-        assert "root" in workflow._results
-        assert "follower" not in workflow._results
-        assert completed_nodes == {"root"}
-        assert ready_nodes == {"follower"}
-        assert node_futures == {}
-
-    def test_create_agent_instance_and_run_node_async_apply_instance_overrides(self):
-        stage = IkaStage("S", "P", [])
-        worker = _agent("worker", stages=[stage])
-        child = _agent("child")
-        workflow = IkaWorkflow(
-            name="async-node",
-            description="workflow",
-            nodes=[WorkflowNode("worker", worker, stage_wiring={0: {"subagents": [child]}})],
-            edges=[],
-            compress_hook=_compress_hook,
-        )
-
-        worker.execution = MagicMock(return_value={"final_message": "original", "summary": "original summary"})
-        first = workflow._run_node_async("worker", {}, instance_id=0)
-        cached = workflow._run_node_async("worker", {}, instance_id=0)
-
-        assert first is cached
-        assert isinstance(first, WorkflowResult)
-
-        worker.execution = MagicMock(return_value={"final_message": "second", "summary": ""})
-        second = workflow._run_node_async(
-            "worker",
-            {"worker": ["upstream"]},
-            instance_id=2,
-            instance_input="instance prompt",
-        )
-        assert second.final == "second"
-        assert second.summary == "second"
-        assert "worker_instance_2" not in workflow._results
-
-        copy = workflow._create_agent_instance(worker, 3, instance_input="prompt override")
-        assert copy.name == "worker_instance_3"
-        assert copy.prompt == "prompt override"
+    def test_clone_isolated_instance_names_and_task_overrides(self):
+        worker = _agent("worker")
+        workflow = IkaWorkflow("clones", "test", [WorkflowNode("worker", worker)], [])
+        clone = workflow._create_agent_instance(worker, 3, "instance task")
+        assert clone.name == "worker_instance_3" and clone.prompt == "instance task"
+        assert worker.name == "worker" and worker.prompt == "worker prompt"

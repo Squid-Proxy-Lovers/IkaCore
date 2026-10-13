@@ -1,3 +1,4 @@
+
 """
 Codex provider — SSE collection (_collect_stream + _iter_sse) tests.
 
@@ -13,8 +14,10 @@ Covers:
   - _CodexResponseShim's .json() returns the collected envelope, exposes
     .status_code / .headers / .raise_for_status.
 """
+
 import json
 
+import httpx
 import pytest
 
 from IkaModel.codex.chat_helpers_codex import (
@@ -226,7 +229,7 @@ class TestCollectStream:
         """Stream that ends without created / in_progress / completed."""
         with pytest.raises(
             _CodexRetryableStreamError,
-            match="before response.completed",
+            match=r"before response\.completed",
         ):
             _collect_stream(_FakeStreamResponse([]))
 
@@ -307,7 +310,7 @@ class TestResponseShim:
 
     def test_raise_for_status_on_400(self):
         shim = _CodexResponseShim(data={}, status_code=400)
-        with pytest.raises(Exception):
+        with pytest.raises(httpx.HTTPStatusError):
             shim.raise_for_status()
 
     def test_raise_for_status_on_200(self):

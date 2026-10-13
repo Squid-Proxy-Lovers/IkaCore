@@ -1,4 +1,5 @@
 import importlib
+from typing import ClassVar
 
 import pytest
 
@@ -65,7 +66,7 @@ def test_base_exceptions_default_payloads_and_final_text():
 
 def test_global_long_term_memory_initializes_once(monkeypatch):
     class DummyLTMemory:
-        instances = []
+        instances: ClassVar[list] = []
 
         def __init__(self, embedder_config):
             self.embedder_config = embedder_config

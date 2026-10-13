@@ -6,13 +6,15 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
 from typing import Optional, cast
 
 import httpx
 
 from IkaCore.agent_runtime_payloads import JsonDict, json_dict, string_value
+
+from ..request_control import check_request_controls
 
 LOG = logging.getLogger(__name__)
 
@@ -72,27 +74,39 @@ def classify_stream_error(err_obj: object) -> bool:
     )
 
 
-def iter_sse(
-    response: httpx.Response,
-) -> Iterator[tuple[Optional[str], object]]:
-    """Yield an explicit event name and parsed JSON for each SSE data line."""
-    current_event: Optional[str] = None
-    for line in response.iter_lines():
+class _SSEDecoder:
+    event: Optional[str] = None
+
+    def feed(self, line: str) -> Optional[tuple[Optional[str], object]]:
+        check_request_controls()
         if not line:
-            current_event = None
-            continue
-        if line.startswith("event:"):
-            current_event = line[6:].strip()
-            continue
-        if not line.startswith("data:"):
-            continue
-        data = line[5:].strip()
-        if not data or data == "[DONE]":
-            continue
-        try:
-            yield current_event, json.loads(data)
-        except json.JSONDecodeError:
-            LOG.debug("Skipping unparseable SSE data line: %r", data[:200])
+            self.event = None
+        elif line.startswith("event:"):
+            self.event = line[6:].strip()
+        elif line.startswith("data:"):
+            data = line[5:].strip()
+            if data and data != "[DONE]":
+                try:
+                    return self.event, json.loads(data)
+                except json.JSONDecodeError:
+                    LOG.debug("Skipping unparseable SSE data line: %r", data[:200])
+        return None
+
+
+def iter_sse(response: httpx.Response) -> Iterator[tuple[Optional[str], object]]:
+    decoder = _SSEDecoder()
+    for line in response.iter_lines():
+        event = decoder.feed(line)
+        if event is not None:
+            yield event
+
+
+async def _async_iter_sse(response: httpx.Response) -> AsyncIterator[tuple[Optional[str], object]]:
+    decoder = _SSEDecoder()
+    async for line in response.aiter_lines():
+        event = decoder.feed(line)
+        if event is not None:
+            yield event
 
 
 def _stream_failure_object(obj_data: JsonDict) -> object:
@@ -209,6 +223,16 @@ def collect_stream(response: httpx.Response) -> JsonDict:
     """Collect one complete Codex SSE response or raise a terminal error."""
     state = _StreamState()
     for event_name, obj in iter_sse(response):
+        obj_data = json_dict(obj)
+        if obj_data:
+            _apply_stream_event(state, event_name, obj_data)
+    return _finalize_stream(state)
+
+
+async def async_collect_stream(response: httpx.Response) -> JsonDict:
+    """Collect incrementally on the caller's event loop using the same SSE state machine."""
+    state = _StreamState()
+    async for event_name, obj in _async_iter_sse(response):
         obj_data = json_dict(obj)
         if obj_data:
             _apply_stream_event(state, event_name, obj_data)

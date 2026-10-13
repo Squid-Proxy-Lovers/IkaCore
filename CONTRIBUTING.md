@@ -56,6 +56,35 @@ Supported live smoke variables:
 - `GEMINI_API_KEY`, required `IKACORE_LIVE_GEMINI_MODEL`
 - `OPENROUTER_API_KEY`, required `IKACORE_LIVE_OPENROUTER_MODEL`
 
+### Live Codex integration checks
+
+Use a runtime-only installation of the current wheel. Specify the model you intend to
+ship, and choose either `CODEX_BEARER` or the explicit local-login option:
+
+```bash
+/tmp/ika-runtime-bench/bin/python scripts/live_codex_check.py \
+  --use-local-login --model gpt-5.6-sol
+```
+
+The local-login option uses the existing Codex credential helper and can refresh stored
+credentials. See the [official authentication documentation](https://learn.chatgpt.com/docs/auth).
+No credential values belong in command arguments or repository files.
+
+The runner checks sync/async text, sync/async tool-result replay, simple agents, two-stage
+execution, fresh-process snapshot resume, and cancellation after live response headers.
+Tools return only synthetic fixture data. Each case has a 60-second deadline and one
+request attempt; short prompts and disabled step extensions limit work. Codex does not
+accept the framework's per-request output-token cap, so this is not a strict token/spend
+limit. `--case CASE` selects individual checks. The report at `artifacts/live/codex.json`
+contains model/runtime identity and sanitized outcomes, without credentials or raw model
+output. A failed connectivity check stops the run; inspect requested/completed cases.
+
+On 2026-10-13, all eight checks passed against `gpt-5.6-sol` using the local Codex login
+and the installed v2 wheel at runtime revision `344348c`. This verifies that specific
+model/endpoint/account combination. Other providers, model variants, malformed/truncated
+streams, crashes during external tool effects and long-running workloads need separate
+validation. Offline CI continues to run without credentials.
+
 ## Project Conventions
 
 - keep runtime behavior aligned with tests
@@ -68,7 +97,81 @@ Supported live smoke variables:
 
 ## Current Cleanup Priorities
 
+The [v2 simplification and migration guide](docs/v2/README.md) records the intended
+runtime behavior, removed compatibility paths, and remaining cleanup candidates.
+V1 compatibility is not a requirement. Document breaking changes and retain tests
+that verify behavior and invariants.
+
 - keep `python scripts/quality.py` passing
 - keep packaging metadata and docs accurate
-- add regression tests for behavior changes before modifying provider logic
-- keep production functions and classes below the structural size gate enforced in `src/IkaTest/test_quality_gates.py`
+- cover changed provider/runtime semantics with meaningful regression tests
+- keep production functions within the 70-line limit and modules within the 600-line limit
+- group related behavior in cohesive classes; avoid mixin chains created solely to satisfy class-size limits
+
+## Quality evidence
+
+`python scripts/quality.py` runs Ruff correctness/async rules, a per-function cyclomatic
+complexity limit of 15, Python compilation, Pyright, the behavioral suite, the coverage
+matrix, and a fresh wheel build/import check. The dev extra includes the build backend
+and wheel tooling, so the no-isolation packaging check also works in fresh Python 3.12+ environments. Representative invalid snippets are tested
+against the actual Ruff configuration. Keep functions within 70 lines and modules within
+600; large cohesive classes are allowed.
+
+Coverage requires at least 91% combined coverage, **94% executable-line coverage**, and
+**85% branch coverage**, plus independent floors for each of the 16 subsystems in
+`scripts/coverage_manifest.json`. Every runtime module must belong to exactly one area.
+Required scenarios must appear and pass in JUnit; skipped/missing scenarios fail the gate.
+Generated reports include observed test contexts, exact missing line/branch locations,
+excluded-line counts, and known gaps. Line/branch coverage does not measure model quality.
+
+Reports are written to `artifacts/quality/coverage-matrix.md`, `coverage-matrix.json`,
+`coverage.json`, and `tests.xml`. They are uploaded from CI on Python 3.11, 3.12 and 3.13
+on Ubuntu, plus Python 3.11 with the minimum HTTPX 0.27.0 dependency. Live-provider tests remain opt-in; the offline CI records their skips.
+
+The policy deliberately exempts constant `getattr`/`setattr` adapters, public async
+`timeout` arguments, and typed dataclass-factory lambdas from style-oriented lint rules.
+Mutable defaults, lost tasks, missing exception causes, blocking async calls, blind
+exception assertions, and overly complex functions remain checked.
+
+## Reproducing the offline benchmarks
+
+Build/validate the wheel with the quality command first. Use a disposable runtime-only
+environment so development tools do not inflate the dependency footprint:
+
+```bash
+python -m venv --without-pip /tmp/ika-runtime-bench
+python -m pip --python /tmp/ika-runtime-bench/bin/python install artifacts/quality/*.whl
+python scripts/benchmark.py --python /tmp/ika-runtime-bench/bin/python \
+  --wheel artifacts/quality/*.whl \
+  --samples 9 --iterations 100 --soak-iterations 1000
+```
+
+Requires Linux or macOS for the RSS measurement. The worker rejects real socket
+connections and uses fixed data, HTTPX MockTransport, pure workflow fixtures, and local
+SQLite. Model/network latency, optional memory backends and real downstream applications
+are outside these measurements. Each sample uses a fresh interpreter; warm cases perform
+three untimed warmups. The filesystem cache is not flushed. P95 is across subprocess batch
+averages, not individual request latency. RSS includes the interpreter/measurement worker.
+
+`artifacts/benchmarks/benchmark.json` stores raw samples, versions, installed distribution
+sizes, RSS, wall times, and two phases of repeated-run allocation measurements. The report
+records revision/dirty state and wheel/harness hashes, and verifies that measured runtime files match the wheel. `benchmark.md` is the readable table.
+CI runs a smaller benchmark sample and uploads the evidence. Portable gates limit the
+wheel to 300 KiB, unpacked wheel content to 1 MiB, and direct runtime requirements to one.
+Timing results are reported rather than enforcing noisy cross-machine latency thresholds.
+
+
+The installed-wheel provider benchmark measures all seven registered routes, with 10,
+100 and 1,000 messages, and times payload construction separately from JSON encoding:
+
+```bash
+/tmp/ika-runtime-bench/bin/python scripts/provider_benchmark.py \
+  --output artifacts/benchmarks/providers.json
+```
+
+Use `--baseline /path/to/previous-providers.json` for before/after comparison. It rejects
+changed payload checksums before comparing timings. The test suite also checks all 21
+fixture checksums against the pre-optimization runtime. These are synthetic transcript
+checks, supplemented by existing tool, reasoning, history, image and retry regressions;
+they do not certify live provider compatibility. The offline suite blocks socket
+connections unless `IKACORE_LIVE_PROVIDER_TESTS=1` is explicitly set.

@@ -117,7 +117,7 @@ Current behavior:
 
 - `ask_user` raises a structured interrupt
 - the interrupt can be checkpointed
-- `resume_execution(..., resume_input=...)` continues the run
+- `resume_from_snapshot(snapshot_id, resume_input=...)` continues the run
 
 Regression coverage lives in [`test_hitl_interrupt_resume.py`](../src/IkaTest/test_hitl_interrupt_resume.py).
 

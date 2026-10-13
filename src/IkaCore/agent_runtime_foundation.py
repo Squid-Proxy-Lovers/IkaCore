@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Callable
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Optional, cast
@@ -45,7 +44,6 @@ class _RuntimeValueState:
     extend_steps_by: int
     max_stage_extensions: int
     extend_stage_steps_by: int
-    checkpoint: bool
     memory_access: dict[str, bool]
     summarize_final: bool
     final_answer_checks: list[Callable[[JsonDict], bool]]
@@ -73,19 +71,6 @@ class _RuntimeChatServices:
         ...
 
     def _get_chat_client(self) -> Optional[Any]:
-        ...
-
-    def _save_stage_checkpoint(
-        self,
-        stage_index: int,
-        remaining_steps: int,
-        last_content: str,
-        scope: str = "stage",
-        extra_payload: Optional[JsonDict] = None,
-    ) -> Any:
-        ...
-
-    def _save_agent_checkpoint(self, remaining_steps: int, last_content: str) -> Any:
         ...
 
     def _reset_tool_call_counts(self) -> None:
@@ -151,9 +136,6 @@ class _RuntimeControlServices:
     def _build_final_output(self, final_message: str, barebone_model: Any) -> JsonDict:
         ...
 
-    def load_checkpoint(self, uid: str) -> None:
-        ...
-
 
 if TYPE_CHECKING:
 
@@ -171,7 +153,7 @@ else:
         pass
 
 
-class AgentChatTurnMixin(_RuntimeState):
+class RuntimePreparationMixin(_RuntimeState):
     def _run_chat_turn(
         self,
         barebone_model: Any,
@@ -218,8 +200,6 @@ class AgentChatTurnMixin(_RuntimeState):
             executed_tool_calls=cast(list[JsonDict], response.get("executed_tool_calls", []) or []),
         )
 
-
-class StageInterruptMixin(AgentChatTurnMixin):
     def _handle_stage_interrupt(
         self,
         stage: Any,
@@ -234,34 +214,19 @@ class StageInterruptMixin(AgentChatTurnMixin):
         raw_interrupt_data = turn.response.get("interrupt_data", {})
         interrupt_data = cast(JsonDict, raw_interrupt_data) if isinstance(raw_interrupt_data, dict) else {}
         remaining_after = max(0, remaining_steps - used_steps)
-        checkpoint_uid = None
         if self.logger:
             self.logger.log_hitl_prompt(stage.name)
-        if self.checkpoint:
-            checkpoint_uid = self._save_stage_checkpoint(
-                stage_index,
-                remaining_after,
-                turn.last_content,
-                scope="hitl",
-                extra_payload={
-                    "interrupt_data": deepcopy(interrupt_data),
-                    "interrupt_status": turn.response.get("status", "awaiting_user_input"),
-                },
-            )
         self._last_interrupt = {
             "status": turn.response.get("status", "awaiting_user_input"),
             "stage_index": stage_index,
             "stage_name": stage.name,
             "remaining_steps": remaining_after,
-            "checkpoint_uid": checkpoint_uid,
             "interrupt_data": deepcopy(interrupt_data),
             "message_history": deepcopy(self.message_history),
             "last_content": turn.last_content,
         }
         return StageExecutionResult(stage_index, turn.last_content, False, None, used_steps)
 
-
-class StageExtensionMixin(StageInterruptMixin):
     def _maybe_extend_stage(
         self,
         barebone_model: Any,
@@ -298,12 +263,6 @@ class StageExtensionMixin(StageInterruptMixin):
             last_content = force_answer.strip()
         return step_limit, extension_count, last_content, True
 
-
-class StageRuntimeSupportMixin(StageExtensionMixin):
-    pass
-
-
-class SimpleInstructionMixin(StageRuntimeSupportMixin):
     def _simple_end_instruction(self) -> str:
         submit_tools = [
             getattr(t, "name", "") for t in (self.tools or [])
@@ -320,27 +279,6 @@ class SimpleInstructionMixin(StageRuntimeSupportMixin):
             "a premature finish and fails the task."
         )
 
-    def _log_simple_step(
-        self,
-        step_idx: int,
-        output: str,
-        tool_calls: list[JsonDict],
-        response: JsonDict,
-        elapsed: float,
-    ) -> None:
-        if self.logger:
-            self.logger.log_step(
-                stage_name="simple",
-                step_idx=step_idx,
-                output=output,
-                tool_calls=tool_calls,
-                usage=response.get("usage", {}),
-                cost=response.get("cost", {}),
-                elapsed=elapsed,
-            )
-
-
-class SimpleRunExtensionMixin(SimpleInstructionMixin):
     def _maybe_extend_simple_run(
         self,
         system_prompt: str,
@@ -387,8 +325,6 @@ class SimpleRunExtensionMixin(SimpleInstructionMixin):
         )
         return extension_count + 1
 
-
-class SimpleStepExtensionMixin(SimpleRunExtensionMixin):
     def _finalize_simple_after_max_steps(
         self,
         system_prompt: str,
@@ -426,12 +362,6 @@ class SimpleStepExtensionMixin(SimpleRunExtensionMixin):
         )
         return final_response, final_response
 
-
-class SimpleRuntimeSupportMixin(SimpleStepExtensionMixin):
-    pass
-
-
-class StageRuntimeModelBuildMixin(SimpleRuntimeSupportMixin):
     def _stage_system_prompt(self, stage: Any) -> str:
         base_system = self.final_prompt(stage)
         return (self.system_prompt + "\n\n" + base_system) if self.system_prompt else base_system
@@ -462,27 +392,10 @@ class StageRuntimeModelBuildMixin(SimpleRuntimeSupportMixin):
             barebone_model.context_budget = self.context_budget
         return barebone_model
 
-
-class StageRuntimeBuildMixin(StageRuntimeModelBuildMixin):
-    def _stage_initial_messages(
-        self,
-        stage: Any,
-        resume_input: Optional[str],
-        message_history: JsonDict,
-        content_prompt: str,
-    ) -> list[JsonDict]:
-        if resume_input is None:
-            return [{"role": "user", "content": content_prompt}]
-        if self.logger:
-            self.logger.log_hitl_input(stage.name, resume_input)
-        if resume_input.strip():
-            messages_bucket = history_section(message_history, "messages")
-            messages_bucket[str(uuid.uuid4())] = {
-                "message": resume_input,
-                "tokens": 0,
-                "type": "hitl_input",
-            }
-        return [{"role": "user", "content": resume_input}]
+    def _stage_initial_messages(self, stage: Any, resume_input: Optional[str], message_history: JsonDict,
+                                content_prompt: str) -> list[JsonDict]:
+        from .snapshot_agent_state import stage_initial_messages
+        return stage_initial_messages(self, stage, resume_input, message_history, content_prompt)
 
     def _stage_tool_executors(
         self,
@@ -504,8 +417,6 @@ class StageRuntimeBuildMixin(StageRuntimeModelBuildMixin):
             remaining_steps=remaining_steps,
         )
 
-
-class StageRuntimePreparationMixin(StageRuntimeBuildMixin):
     def _prepare_stage_runtime(
         self,
         stage_index: int,
@@ -520,6 +431,8 @@ class StageRuntimePreparationMixin(StageRuntimeBuildMixin):
         agent_tools = self.build_stage(stage)
         current_hierarchy = self._stage_current_hierarchy(stage, stage_index)
         content_prompt = build_stage_content_prompt(self.prompt, self.Stages, stage, stage_index)
+        from .workflow_prompt_context import stage_context
+        content_prompt = stage_context(self, content_prompt)
 
         first_input = history_section(message_history, "first_input")
         first_input["message"] = content_prompt
@@ -533,6 +446,8 @@ class StageRuntimePreparationMixin(StageRuntimeBuildMixin):
             content_prompt,
         )
         messages = self._stage_initial_messages(stage, resume_input, message_history, content_prompt)
+        from .snapshot_agent_state import stage_boundary
+        stage_boundary(stage_index, remaining_steps, stage.name, messages)
         tool_executors = self._stage_tool_executors(stage, stage_index, remaining_steps, current_hierarchy)
         step_limit = stage_step_limit(stage, remaining_steps)
         if self.logger:
@@ -547,10 +462,9 @@ class StageRuntimePreparationMixin(StageRuntimeBuildMixin):
             messages=messages,
             tool_executors=tool_executors,
             step_limit=step_limit,
+            stage_index=stage_index,
         )
 
-
-class SimpleRuntimePreparationMixin(StageRuntimePreparationMixin):
     def _prepare_simple_runtime(self) -> SimpleRuntimeContext:
         dynamic_tools = self.build_simple_tools()
         system_prompt = self.system_prompt or ""
@@ -571,6 +485,8 @@ class SimpleRuntimePreparationMixin(StageRuntimePreparationMixin):
         if getattr(self, 'context_budget', None):
             barebone_model.context_budget = self.context_budget
         messages: list[JsonDict] = [{"role": "user", "content": start_prompt}]
+        from .snapshot_agent_state import restore_messages
+        messages = restore_messages(self, messages)
         tool_executors = self.build_tool_executors(
             self.tools,
             memory_access=self.memory_access,
@@ -585,7 +501,3 @@ class SimpleRuntimePreparationMixin(StageRuntimePreparationMixin):
             tool_executors=tool_executors,
             cli=cli,
         )
-
-
-class RuntimePreparationMixin(SimpleRuntimePreparationMixin):
-    pass

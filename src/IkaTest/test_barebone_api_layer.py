@@ -20,7 +20,8 @@ from IkaModel.chat_interface.chat_interface import (
     get_total_tokens,
     init_message_history,
 )
-from IkaModel.chat_interface.response_interface import extract_usage, format_gemini_results
+from IkaModel.chat_interface.response_usage import extract_usage
+from IkaModel.chat_interface.tool_result_formatters import format_gemini_results
 from IkaModel.request_interface import get_max_tokens, get_provider
 
 PROVIDERS = ("openai", "deepseek", "anthropic", "gemini", "openrouter")
@@ -104,7 +105,7 @@ class TestBareBoneToRequestPayload:
         assert tools[0]["function"]["name"] == "agent_end"
         assert "parameters" in tools[0]["function"]
         assert "tool_choice" in payload
-        assert payload["tool_choice"]["function"]["name"] == "agent_end"
+        assert payload["tool_choice"] == "auto"
 
     def test_build_request_summary_in_messages(self):
         model = _barebone_with_tools()
@@ -203,7 +204,7 @@ class TestApiResponseParsing:
             "content": [{"type": "text", "text": "Claude says hi"}],
             "usage": {"input_tokens": 10, "output_tokens": 4},
         }
-        content, _, tool_calls, _ = parse_provider_response("anthropic", data, "claude-3")
+        content, _, _tool_calls, _ = parse_provider_response("anthropic", data, "claude-3")
         assert content == "Claude says hi"
         usage = extract_usage("anthropic", data)
         assert usage["input_tokens"] == 10
@@ -317,7 +318,7 @@ class TestModelCostResolution:
             "choices": [{"message": {"content": "OpenRouter reply", "tool_calls": []}}],
             "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
         }
-        content, reasoning, tool_calls, tokens = parse_provider_response("openrouter", data, "meta-llama/llama-3.1-70b-instruct")
+        content, _reasoning, tool_calls, tokens = parse_provider_response("openrouter", data, "meta-llama/llama-3.1-70b-instruct")
         assert content == "OpenRouter reply"
         assert tool_calls == []
         assert tokens == 8
@@ -409,7 +410,7 @@ class TestChatReturnShape:
             "choices": [{"message": {"content": "Hi", "tool_calls": []}}],
             "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
         }
-        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=resp):
+        with patch("IkaModel.request_interface.api_request_retry", return_value=resp):
             out = chat(model, messages, message_history=history)
         assert "content" in out
         assert out["content"] == "Hi"
@@ -435,7 +436,7 @@ class TestChatReturnShape:
             "choices": [{"message": {"content": "Answer here", "tool_calls": []}}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
         }
-        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=resp):
+        with patch("IkaModel.request_interface.api_request_retry", return_value=resp):
             out = chat(model, messages, message_history=history)
         assert out["message_history"] is history
         assert history["first_input"]["message"] == "Reply"
@@ -459,7 +460,7 @@ class TestChatReturnShape:
             "choices": [{"message": {"content": "Hi", "tool_calls": []}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
-        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=resp):
+        with patch("IkaModel.request_interface.api_request_retry", return_value=resp):
             out = chat(model, messages, message_history=history, logger=logger)
         assert out["usage"]["total_tokens"] == 15
         assert out["cost"] == {"input_cost": 0.01, "output_cost": 0.02, "total_cost": 0.03}
@@ -486,7 +487,7 @@ class TestChatWithToolCallsFlow:
             }],
             "usage": {"total_tokens": 25},
         }
-        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=first_resp):
+        with patch("IkaModel.request_interface.api_request_retry", return_value=first_resp):
             with pytest.raises(AgentEndException) as excinfo:
                 chat(model, messages, message_history=history, tool_executors=tool_executors)
         out = excinfo.value.response
@@ -517,7 +518,7 @@ class TestAllProvidersCoverage:
         openrouter_data = {"choices": [{"message": {"content": "x", "tool_calls": []}}], "usage": {"total_tokens": 1}}
         data_by_provider = {"openai": openai_data, "anthropic": anthropic_data, "deepseek": deepseek_data, "gemini": gemini_data, "openrouter": openrouter_data}
         for provider in PROVIDERS:
-            content, _, tool_calls, tokens = parse_provider_response(provider, data_by_provider[provider], "model")
+            content, _, tool_calls, _tokens = parse_provider_response(provider, data_by_provider[provider], "model")
             assert content == "x"
             assert isinstance(tool_calls, list)
             usage = extract_usage(provider, data_by_provider[provider])
@@ -550,7 +551,7 @@ class TestRequestLayerContract:
         assert "model" in payload
         assert "messages" in payload
         assert isinstance(payload["messages"], list)
-        assert all("role" in m and "content" in m or "role" in m for m in payload["messages"])
+        assert all(("role" in m and "content" in m) or "role" in m for m in payload["messages"])
         if model.agent_tools:
             assert "tools" in payload
             for t in payload["tools"]:
@@ -576,7 +577,7 @@ class TestResponseParsingContract:
         data = {"choices": [{"message": {"content": "x", "tool_calls": []}}], "usage": {"total_tokens": 1}}
         out = parse_provider_response("openai", data, "gpt-4o")
         assert len(out) == 4
-        content, reasoning, tool_calls, tokens = out
+        content, _reasoning, tool_calls, tokens = out
         assert isinstance(content, str)
         assert isinstance(tool_calls, list)
         assert isinstance(tokens, (int, float))

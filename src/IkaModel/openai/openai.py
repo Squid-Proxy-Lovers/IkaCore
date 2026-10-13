@@ -34,7 +34,7 @@ def _default_message_history() -> JsonDict:
 
 
 def _message_content(message: object) -> str:
-    if isinstance(message, Mapping):
+    if isinstance(message, dict) or isinstance(message, Mapping):
         mapped = cast(Mapping[str, object], message)
         content = mapped.get("content")
         return content if isinstance(content, str) else str(dict(mapped))
@@ -66,7 +66,7 @@ def _append_history_messages(api_messages: list[JsonDict], message_history: Json
 
 
 def _normalise_openai_message(message: object) -> JsonDict:
-    if isinstance(message, Mapping):
+    if isinstance(message, dict) or isinstance(message, Mapping):
         mapped = cast(Mapping[str, Any], message)
         if "role" in mapped and "content" in mapped:
             return dict(mapped)

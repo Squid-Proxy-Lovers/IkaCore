@@ -8,7 +8,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from threading import Lock, local
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, cast
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Protocol, Tuple, cast
 
 _stdout_lock = Lock()
 _stdout_enabled = True
@@ -75,9 +75,9 @@ class OutputContext:
 
 class _BoxTextState(Protocol):
     use_colors: bool
-    COLORS: Dict[OutputType, str]
+    COLORS: ClassVar[Dict[OutputType, str]]
     RESET: str
-    NO_TRUNCATE_TYPES: set[OutputType]
+    NO_TRUNCATE_TYPES: ClassVar[set[OutputType]]
     MAX_CONTENT_LENGTH: int
 
     def _wrap_paragraph(self, paragraph: str, inner_width: int) -> List[str]:
@@ -90,7 +90,7 @@ class _BoxTextState(Protocol):
 class _BoxFrameState(Protocol):
     width: int
     MIN_BOX_WIDTH: int
-    TYPE_LABELS: Dict[OutputType, str]
+    TYPE_LABELS: ClassVar[Dict[OutputType, str]]
     HORIZONTAL: str
     VERTICAL: str
     T_RIGHT: str
@@ -227,7 +227,7 @@ class BoxRenderer(BoxFrameMixin, BoxTextMixin):
     T_RIGHT: str = "\u251c"
     T_LEFT: str = "\u2524"
 
-    COLORS: Dict[OutputType, str] = {
+    COLORS: ClassVar[Dict[OutputType, str]] = {
         OutputType.AGENT_INIT: "\033[93m",
         OutputType.TOOL_CALL: "\033[92m",
         OutputType.TOOL_RESULT: "\033[91m",
@@ -237,7 +237,7 @@ class BoxRenderer(BoxFrameMixin, BoxTextMixin):
     RESET: str = "\033[0m"
     BOLD: str = "\033[1m"
 
-    TYPE_LABELS: Dict[OutputType, str] = {
+    TYPE_LABELS: ClassVar[Dict[OutputType, str]] = {
         OutputType.AGENT_INIT: "AGENT INIT",
         OutputType.TOOL_CALL: "TOOL CALL",
         OutputType.TOOL_RESULT: "TOOL RESULT",
@@ -247,7 +247,7 @@ class BoxRenderer(BoxFrameMixin, BoxTextMixin):
 
     MAX_CONTENT_LENGTH: int = 999999
     DEFAULT_WIDTH: int = 80
-    NO_TRUNCATE_TYPES: set[OutputType] = {OutputType.AGENT_INIT, OutputType.SUMMARIZATION}
+    NO_TRUNCATE_TYPES: ClassVar[set[OutputType]] = {OutputType.AGENT_INIT, OutputType.SUMMARIZATION}
 
     def __init__(self, use_colors: bool = True, width: int = 80):
         self.use_colors = use_colors

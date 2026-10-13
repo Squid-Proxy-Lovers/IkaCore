@@ -7,7 +7,6 @@ import typing
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional, Protocol, cast, get_type_hints
 
-from IkaCore.checkpoint import CheckpointStore
 from IkaCore.logging_utils import IkaLogger
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
@@ -107,7 +106,7 @@ def build_memory_access_defaults(
         "long_term_search": True,
     }
     if not memory_enabled:
-        defaults = {key: False for key in defaults}
+        defaults = dict.fromkeys(defaults, False)
     if overrides:
         defaults.update(overrides)
     return defaults
@@ -135,7 +134,6 @@ class AgentAttributeDeclarationsMixin:
     api_url: Optional[str]
     max_tokens: int
     temperature: float
-    checkpoint: bool
     Stages: list[IkaStage]
     subagents: list["IkaBaseAgent"]
     next_agent: Optional["IkaBaseAgent"]
@@ -150,8 +148,7 @@ class AgentAttributeDeclarationsMixin:
     rate_limit_per_min: Optional[float]
     per_tool_rate_limit: dict[str, float]
     _last_api_call_ts: float
-    checkpoint_store: Optional[CheckpointStore]
-    _resume_checkpoint: Optional[JsonDict]
+    _resume_state: Optional[JsonDict]
     short_term_memory: Optional[Any]
     long_term_memory: Optional[Any]
     summarize_final: bool
@@ -208,8 +205,11 @@ class AgentRuntimeUtilityMixin:
         if self.use_async:
             return self.client
         if self.client is None:
-            import httpx
-            self.client = httpx.Client(timeout=self.step_timeout)
+            from IkaModel.request_transport import new_sync_client
+            from IkaModel.runtime_policy import current_runtime_options
+            if current_runtime_options().reuse_connections:
+                return None
+            self.client = new_sync_client(self.step_timeout)
         return self.client
 
     def _enforce_rate_limit(self, per_minute: Optional[float], last_ts_attr: str) -> None:
@@ -220,7 +220,8 @@ class AgentRuntimeUtilityMixin:
         last_ts = getattr(self, last_ts_attr, 0.0)
         elapsed = now - last_ts
         if elapsed < interval:
-            time.sleep(interval - elapsed)
+            from IkaModel.request_lifecycle import sleep_with_controls
+            sleep_with_controls(interval - elapsed, time.sleep)
         setattr(self, last_ts_attr, time.time())
 
     def _enforce_rate_limit_model(self: _RuntimeUtilityState) -> None:

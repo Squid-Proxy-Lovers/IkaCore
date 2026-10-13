@@ -8,8 +8,10 @@ The current runtime supports:
 - `IkaStage` for bounded staged execution
 - `IkaWorkflow` for multi-agent graphs
 - OpenAI, Anthropic, DeepSeek, Gemini, OpenRouter, and Codex backends
-- checkpoint/resume and interruptible HITL flows
+- snapshot/resume and interruptible HITL flows
 - optional short-term and long-term memory helpers
+
+This branch develops v2 with intentional breaking changes. See the [migration guide](docs/v2/README.md) before adopting it.
 
 ## Install
 
@@ -43,7 +45,7 @@ print(result["final_message"])
 
 ## Main Concepts
 
-- `IkaBaseAgent`: provider config, prompt, tools, memory, checkpoints, optional stages
+- `IkaBaseAgent`: provider config, prompt, tools, memory, snapshots, optional stages
 - `IkaTools`: Python callables exposed to the model as structured tool calls
 - `IkaStage`: phase-specific prompt, tool set, and optional model overrides
 - `IkaWorkflow`: graph runner with `next` and tool-only `child` edges
@@ -60,6 +62,7 @@ print(result["final_message"])
 
 - [Usage Guide](docs/USAGE.md)
 - [Architecture Notes](docs/indepth.md)
+- [IkaCore v2 draft: simplification and migration](docs/v2/README.md)
 - [Memory Notes](src/IkaMem/docs/README.md)
 
 Codex support is documented in the [Provider Selection](docs/USAGE.md#provider-selection) section. IkaCore treats Codex auth as opt-in: pass a bearer token as `api_key`, or call `IkaModel.codex.codex_auth.get_bearer()` to read and refresh the Codex CLI token from `~/.codex/auth.json`.

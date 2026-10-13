@@ -9,3 +9,7 @@ dist/
 logs.txt
 checkpoints.db
 runtime-data/
+
+.coverage
+.coverage.*
+artifacts/

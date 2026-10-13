@@ -56,7 +56,7 @@ class WorkflowResult:
     child_summaries: dict[str, str] = field(default_factory=lambda: {})
 
 
-class _WorkflowValueState(Protocol):
+class WorkflowStateProtocol(Protocol):
     name: str
     description: str
     nodes: list[WorkflowNode]
@@ -66,22 +66,13 @@ class _WorkflowValueState(Protocol):
     async_executor: Any
     _node_index: dict[str, WorkflowNode]
     _results: dict[str, WorkflowResult]
-    _visiting: set[str]
     _node_dependencies: dict[str, set[str]]
     _node_dependents: dict[str, set[str]]
     _edges_by_source: dict[str, list[WorkflowEdge]]
     _next_edges_by_source: dict[str, list[WorkflowEdge]]
     _next_reachable_nodes: set[str]
 
-
-class _WorkflowCoreServices(Protocol):
     def _prepare_context(self, node: WorkflowNode, upstream: list[str]) -> str:
-        ...
-
-    def _apply_stage_wiring(self, node: WorkflowNode) -> None:
-        ...
-
-    def _run_node(self, node_name: str, upstream_contexts: dict[str, list[str]]) -> WorkflowResult:
         ...
 
     def _create_agent_instance(
@@ -95,8 +86,6 @@ class _WorkflowCoreServices(Protocol):
     def _instance_inputs_for_node(self, node: WorkflowNode) -> list[Optional[str]]:
         ...
 
-
-class _WorkflowAsyncSchedulingServices(Protocol):
     def _initial_async_state(
         self,
         initial_context: Optional[str],
@@ -105,7 +94,6 @@ class _WorkflowAsyncSchedulingServices(Protocol):
         set[str],
         set[str],
         set[str],
-        dict[str, list[WorkflowFuture]],
     ]:
         ...
 
@@ -124,29 +112,6 @@ class _WorkflowAsyncSchedulingServices(Protocol):
     ) -> str:
         ...
 
-    def _schedule_async_node(
-        self,
-        node_name: str,
-        upstream_contexts: dict[str, list[str]],
-        initial_context: Optional[str],
-        cli: Any,
-        step: int,
-    ) -> list[WorkflowFuture]:
-        ...
-
-    def _schedule_ready_async_nodes(
-        self,
-        ready_nodes: set[str],
-        upstream_contexts: dict[str, list[str]],
-        initial_context: Optional[str],
-        node_futures: dict[str, list[WorkflowFuture]],
-        cli: Any,
-        completed_count: int,
-    ) -> list[WorkflowFuture]:
-        ...
-
-
-class _WorkflowAsyncResultServices(Protocol):
     def _record_async_success(self, result: dict[str, Any]) -> None:
         ...
 
@@ -160,17 +125,6 @@ class _WorkflowAsyncResultServices(Protocol):
     ) -> None:
         ...
 
-    def _process_async_results(
-        self,
-        current_futures: list[WorkflowFuture],
-        upstream_contexts: dict[str, list[str]],
-        completed_nodes: set[str],
-        ready_nodes: set[str],
-        pending_nodes: set[str],
-        node_futures: dict[str, list[WorkflowFuture]],
-    ) -> None:
-        ...
-
     def _activate_unblocked_pending_nodes(
         self,
         pending_nodes: set[str],
@@ -180,11 +134,5 @@ class _WorkflowAsyncResultServices(Protocol):
         ...
 
 
-class WorkflowStateProtocol(
-    _WorkflowValueState,
-    _WorkflowCoreServices,
-    _WorkflowAsyncSchedulingServices,
-    _WorkflowAsyncResultServices,
-    Protocol,
-):
-    pass
+    def _validate_execution_graph(self) -> None:
+        ...

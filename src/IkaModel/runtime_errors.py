@@ -1,7 +1,22 @@
 # pyright: strict
 
+from .api_errors import IkaAPIError
+
+
 class IkaRuntimeError(RuntimeError):
     """Base error for IkaCore runtime orchestration failures."""
+
+
+class IkaRequestControlError(IkaRuntimeError, IkaAPIError):
+    """An explicit cancellation or deadline stopped the current execution."""
+
+
+class IkaRequestCancelled(IkaRequestControlError):
+    """The caller cancelled the current execution."""
+
+
+class IkaRequestDeadlineExceeded(IkaRequestControlError):
+    """The caller's execution deadline expired."""
 
 
 class IkaProviderPayloadError(IkaRuntimeError):

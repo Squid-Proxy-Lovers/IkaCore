@@ -104,7 +104,7 @@ class TestBuildToolExecutors:
     def test_agent_end_rejects_empty_json_values(self, value):
         a = _minimal_agent()
         executors = a.build_tool_executors([])
-        with pytest.raises(ValueError, match="empty|invalid"):
+        with pytest.raises(ValueError, match=r"empty|invalid"):
             executors["agent_end"]({"input": value})
 
     def test_stage_end_executor(self):
@@ -254,7 +254,7 @@ class TestApiPayloadToolSchema:
         model.agent_tools = [agent_end]
         messages = [{"role": "user", "content": "Hi"}]
         history = {"system": {"message": ""}, "first_input": {"message": ""}, "summary": {"message": ""}, "messages": {}}
-        _, headers, payload = build_provider_request("openai", model, messages, history)
+        _, _headers, payload = build_provider_request("openai", model, messages, history)
         assert "tools" in payload
         tools = payload["tools"]
         assert len(tools) == 1
@@ -264,7 +264,7 @@ class TestApiPayloadToolSchema:
         assert params["type"] == "object"
         assert "input" in params["properties"]
         assert "input" in params["required"]
-        assert payload["tool_choice"]["function"]["name"] == "agent_end"
+        assert payload["tool_choice"] == "auto"
 
     def test_subagent_tool_type_input_in_payload(self):
         at = AgentTool("Sub", "Sub", "Subagent", ToolArgs(type="input", description="Task"), required=True)

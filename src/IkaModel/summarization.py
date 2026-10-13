@@ -19,6 +19,7 @@ from .model_metadata import (
     uses_openai_max_completion_tokens,
 )
 from .request_interface import api_request_retry, async_api_request_retry, get_provider
+from .runtime_errors import IkaRequestControlError
 
 _LOG = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 def _load_prompt(relative_path: str, fallback: str) -> str:
     try:
-        from src.resources import read_text as read_ika_resource
+        from .resource_loader import read_embedded_resource as read_ika_resource
 
         return read_ika_resource(f"IkaCore/src/IkaModel/prompts/{relative_path}").strip()
     except (ImportError, ModuleNotFoundError, OSError):
@@ -384,6 +385,17 @@ def get_conversation_text(message_history: JsonDict) -> str:
     return "\n".join(parts)
 
 
+def get_context_usage(message_history: JsonDict, model_id: str, context_budget: Optional[int] = None) -> JsonDict:
+    """Read token accounting without changing history or triggering a provider call."""
+    from .chat_interface.chat_request import get_total_tokens
+    from .model_metadata import get_max_tokens_for_model
+    token_count = get_total_tokens(message_history)
+    max_tokens = context_budget or get_max_tokens_for_model(model_id)
+    ratio = token_count / max_tokens if max_tokens > 0 else 0.0
+    return {"token_count": token_count, "max_tokens": max_tokens, "usage_ratio": ratio,
+            "warning_level": "critical" if ratio >= 0.8 else "warning" if ratio >= 0.6 else None}
+
+
 def run_summarization(
     barebone_model: BareBoneModel,
     message_history: JsonDict,
@@ -427,6 +439,8 @@ def run_summarization(
             _write_summary_to_history(message_history, summary, summary_tokens)
 
         return summary
+    except IkaRequestControlError:
+        raise
     except httpx.HTTPError as e:
         _LOG.error(f"Failed to summarize message history: {e}")
         return ""
@@ -492,6 +506,8 @@ async def async_summarise_message_history(
             _write_summary_to_history(message_history, summary, summary_tokens)
 
         return summary
+    except IkaRequestControlError:
+        raise
     except httpx.HTTPError as e:
         _LOG.error(f"Failed to summarize message history: {e}")
         return ""

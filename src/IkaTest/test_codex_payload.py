@@ -182,7 +182,7 @@ class TestBuildCodexRequest:
 
     def test_returns_codex_url(self):
         m = _model()
-        url, headers, _ = build_codex_request(m, [{"role": "user", "content": "hi"}], _mh(m.system_prompt))
+        url, _headers, _ = build_codex_request(m, [{"role": "user", "content": "hi"}], _mh(m.system_prompt))
         assert url == CODEX_API_URL
 
     def test_authorization_bearer_header(self):

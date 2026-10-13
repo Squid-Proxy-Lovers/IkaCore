@@ -32,6 +32,7 @@ from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict,
 
 from ..base import AgentTool, BareBoneModel
 from ..model_metadata import CODEX_KNOWN_MODELS as CODEX_KNOWN_MODELS
+from ..tool_output import codex_output_limit_enabled, truncate_codex_tool_output
 from ..tool_schema import build_provider_tool_payload
 
 
@@ -111,7 +112,7 @@ def _codex_tool_output_item(message: JsonDict) -> JsonDict:
     return {
         "type": "function_call_output",
         "call_id": string_value(message.get("tool_call_id")),
-        "output": content if isinstance(content, str) else json.dumps(content),
+        "output": truncate_codex_tool_output(content if isinstance(content, str) else json.dumps(content)),
     }
 
 
@@ -144,10 +145,13 @@ def _codex_user_items(message: JsonDict) -> list[JsonDict]:
     for block in cast(list[object], content):
         block_data = cast(JsonDict, block) if isinstance(block, dict) else {}
         if block_data.get("type") == "tool_result":
+            output = block_data.get("content", "")
+            if codex_output_limit_enabled():
+                output = truncate_codex_tool_output(output if isinstance(output, str) else json.dumps(output))
             items.append({
                 "type": "function_call_output",
                 "call_id": string_value(block_data.get("tool_use_id")),
-                "output": block_data.get("content", ""),
+                "output": output,
             })
         else:
             items.append({

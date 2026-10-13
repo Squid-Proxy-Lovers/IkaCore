@@ -91,10 +91,8 @@ def append_anthropic_tool_messages(
     repeated_warning_msg: str = ""
 ) -> None:
     content_blocks: list[JsonDict] = []
-    if content:
+    if content and content.strip():
         content_blocks.append({"type": "text", "text": content})
-    else:
-        content_blocks.append({"type": "text", "text": " "})
     for tool_call in executed_tool_call_list:
         function_payload = json_dict(tool_call.get("function"))
         content_blocks.append({
