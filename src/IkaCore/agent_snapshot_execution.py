@@ -61,6 +61,7 @@ def execute_with_snapshots(
                 "snapshot_id": paused.snapshot_id,
                 "runtime": runtime_info(session),
                 "pause_point": paused.checkpoint_kind,
+                "validation": {"status": "not_run", "attempts": 0, "failed_checks": []},
             }
         except IkaRequestControlError:
             finished = True

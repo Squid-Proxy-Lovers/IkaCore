@@ -19,6 +19,7 @@ from .api_errors import IkaRateLimitError as IkaRateLimitError
 from .api_errors import IkaTimeoutError as IkaTimeoutError
 from .model_metadata import get_max_tokens_for_model, get_provider_for_model
 from .reasoning_replay import redact_opaque_reasoning
+from .request_adapter import current_request_adapter
 from .request_control import check_request_controls, effective_max_retries
 from .request_control import register_request_abort_callback as register_request_abort_callback
 from .request_control import request_cancelled as request_cancelled
@@ -267,10 +268,11 @@ def api_request_retry(
     client: Optional[httpx.Client] = None,
 ) -> httpx.Response:
     check_request_controls()
+    adapter = current_request_adapter()
+    if adapter is not None:
+        return adapter(api_url, payload)
     max_retries = effective_max_retries(max_retries)
-    # codex backend forces streaming (rejects stream:false). Dispatch into the
-    # codex client, which drains the SSE stream and returns a Response-shaped
-    # shim so callers continue to call .json() / .status_code as usual.
+    # Codex drains mandatory SSE into a Response-shaped result.
     if _is_codex_endpoint(api_url):
         from .codex.chat_helpers_codex import request_codex
         return cast(
@@ -338,6 +340,9 @@ async def async_api_request_retry(
     client: Optional[httpx.AsyncClient] = None
 ) -> httpx.Response:
     check_request_controls()
+    adapter = current_request_adapter()
+    if adapter is not None:
+        return adapter(api_url, payload)
     max_retries = effective_max_retries(max_retries)
     if _is_codex_endpoint(api_url):
         from .codex.async_request import async_request_codex

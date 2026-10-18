@@ -76,6 +76,21 @@ The permanent suite also checks these behaviors across both execution modes.
 
 | Previous call or behavior | V2 behavior / migration |
 | --- | --- |
+| Validator receives an empty history at construction; docstring/return annotation required | Construction checks callability/signature only. A check receives `IkaCore.AgentResult` on completion and returns `bool`; runtime rejects non-bools. Docstrings are optional correction feedback. |
+| Staged completion skips final checks; simple correction reruns application tools | Both validate final answers. Bounded correction passes use the transcript and only `agent_end`, without repeating application side effects. |
+| Invalid output silently returned after retry exhaustion | Inspect `result["validation"]` (`status`, `attempts`, `failed_checks`); opt into `ExecutionPolicy(fail_closed=True)` and catch `FinalAnswerValidationError.result`. |
+| Assigning `agent.prompt` leaves stale first input | Assignment starts a fresh task and clears transcript/pending state. Use `agent.send(message)` for an appended conversation turn and fresh per-turn steps. |
+| Final tool completion may omit answer text from history | User turns and final answers are recorded in order; `.transcript` is a defensive, possibly compacted replay transcript. |
+| Completed-snapshot restore returns before loading conversation; ignores an answer | Restores transcript/usage/counters and returns saved output without a request. Use `send()` next. `resume_input` on completed agent snapshots now raises `ValueError`. |
+| Agent fork has no answer argument; workflow fork requires two calls | `agent.fork_from_snapshot(id, resume_input=...)` and `workflow.fork_from_snapshot(id, resume_input=...)` fork and continue independently. |
+| `agent.context_budget = N` is outside grouped config | Prefer `limits=ExecutionLimits(context_budget=N)` in tokens; `compaction_count` and `compaction` events are observable and snapshot-persisted. The direct attribute still works. |
+| `workflow.run(use_async=True)` means threads | Prefer blocking `run(parallel=True, concurrency=N)`. `use_async` remains a deprecated alias. Context preparation uses a separate bounded pool. Default instance workers decrease from 30 to 4. |
+| `.client = caller_client` is closed on shutdown; workflow clones discard it | Direct assignment and `ProviderConfig(client=...)` now borrow clients, preserve them across clones, and never close them. `client_factory` and internally created clients are owned; each clone gets its own. |
+| `WorkflowResult.history` misleadingly means output | Use `.output` for the execution result and `.transcript` for history; `.instance_outputs`/`.instance_transcripts` retain fan-out results. `.history` remains a deprecated output alias. |
+| Worker errors yield missing results and downstream KeyError | `WorkflowError.errors` identifies nodes/instances and `.partial_results` preserves completed nodes. Dependents are blocked; cancellation/deadline types remain unchanged. |
+| Global logging configuration and fallback stderr warnings | Named library loggers have NullHandler and never configure the root logger. `cli=False` silences presentation; configure Python logging explicitly for diagnostics. |
+| Verbose default model prompt; `Stages=` spelling | Default prompt is concise. Use `PromptConfig` for style and canonical `stages=`/`.stages`; `Stages=`/`.Stages` remain compatibility aliases. |
+| Small apps must override many unrestricted defaults; mocks patch internals | Use `ProviderConfig.bounded()`, `ExecutionLimits.bounded()`, `ExecutionPolicy.bounded()`, plus `request_controls(timeout=...)`. Use public `IkaCore.testing.MockProvider` for native fixtures. |
 | Agent `memory`, `memory_access`, backend fields/helpers and `MemoryConfig` | Construct `IkaMem.agent_tools.MemoryTools(name, short_term=..., long_term=...)`; pass `.tools(access=...)` using ordinary agent/stage `tools`. |
 | Stage `memory_access`, `long_term_filter` | Select `.tools(access=..., long_term_filter=...)` for that stage. |
 | `IkaModel.init_global_long_term_memory` / `get_global_long_term_memory` | Construct and explicitly share an `LTMemory` backend. No global backend is read. |

@@ -74,19 +74,63 @@ agent = IkaBaseAgent("configured", prompt="Answer clearly.", model_id="gpt-4o-mi
                      output=OutputConfig(cli=False, subscribers=(observed_events.append,)))
 ```
 
-`ExecutionPolicy(final_answer_checks=(check,))` preserves final-answer validation;
-`validation_retries=3` and `validation_extra_steps=10` are explicit defaults.
-Checks require a docstring and a boolean return value. Currently construction also
-invokes each check with an initial history dictionary, while execution passes the final
-result dictionary. Use `result.get("final_message", "")` when checking answer text.
-Staged execution currently bypasses final checks; use a separate simple writer and verify
-its result at the application boundary. Even simple execution returns its last output after
-validation retries are exhausted, so applications must reject invalid results themselves.
-See the [usage findings](v2/dogfood-report.md) and the research example for a working pattern.
-Extension counts and sizes
-also belong to this policy. `policy.use_async` selects the async request bridge.
-Configuration is retained in `agent.config`; transcripts, counters, usage and the
-current (possibly extended) budget live in `agent.state`.
+Final-answer validators run only on completed answers, never during construction.
+Construction checks only that each callback is a synchronous callable accepting one positional
+argument. The single contract is `AgentResult` (import from `IkaCore`): `final_message: str`,
+`summary: str`, `usage: dict[str, int]`, `cost: dict[str, float]`, `model_id: str`, and
+`validation: ValidationStatus`. Every callback must return an actual `bool`; other return
+values raise `TypeError` at execution. Exceptions from checks propagate. A docstring is
+optional and, when present, supplies correction feedback.
+
+```python
+from IkaCore import AgentResult, ExecutionPolicy
+
+def has_answer(result: AgentResult) -> bool:
+    """Provide a nonempty final answer."""
+    return bool(result["final_message"].strip())
+
+checked_agent = IkaBaseAgent("checked", prompt="Answer briefly.", model_id="gpt-4o-mini", api_key="...",
+                            policy=ExecutionPolicy.bounded(final_answer_checks=(has_answer,), fail_closed=True))
+checked_result = checked_agent.execution()
+assert checked_result["validation"]["status"] == "passed"
+checked_agent.shutdown()
+```
+
+Simple and staged completion use the same policy. `result["validation"]` contains
+`status` (`not_run`, `passed`, `failed`), `attempts` (number of completed validation passes),
+and `failed_checks` (callback names). No checks or an interrupted run means `not_run` with
+zero attempts. A failed check permits at most `validation_retries` correction passes.
+Corrections use the existing transcript and only `agent_end`; they cannot repeat application
+tools or stages. Every correction receives the original step allowance plus
+`validation_extra_steps`. The configured extension policy still applies to simple correction
+passes. With `fail_closed=True`, exhaustion raises `IkaCore.FinalAnswerValidationError`;
+`.result` retains the rejected answer and status. The default returns that result with
+`validation.status == "failed"`. Consumers must inspect it before accepting an answer.
+Snapshot replay preserves correction mode, consumed steps and the retry budget.
+
+For small applications, use all three bounded presets:
+
+```python
+bounded_agent = IkaBaseAgent("bounded", prompt="Answer briefly.", model_id="gpt-4o-mini", api_key="...",
+                            provider=ProviderConfig.bounded(), limits=ExecutionLimits.bounded(),
+                            policy=ExecutionPolicy.bounded(), output=OutputConfig(cli=False))
+```
+
+The presets cap each response at 1,024 output tokens, use six steps, 30 seconds per step,
+three tool rounds and twelve tool calls, disable step/stage extensions, and allow one
+validation correction with two additional steps. Override fields on each `.bounded(...)`
+constructor. Existing unrestricted defaults remain available: 50,000 output tokens,
+100 steps, 900 seconds per step, two extensions, three corrections with ten additional
+steps. A step may contain several provider calls for tools; each extension adds a summary
+request, exhaustion can add a forced-answer request, `summarize_final=True` adds a summary,
+and compaction/workflow context compression can add more. Token limits are per response,
+not a total spending cap. Wrap the entire operation in `request_controls(timeout=...,
+max_retries=1)` for a shared wall-clock bound. Arbitrary tools must cooperate with cancellation.
+
+`policy.use_async` selects the agent async request bridge; it is independent of workflow
+thread scheduling. Configuration is retained in `agent.config`; transcripts, counters,
+usage and the current budget live in `agent.state`. The [API reference](API.md) lists
+all grouped fields, defaults, public signatures and import locations.
 
 Request lifetimes are a separate scope from agent configuration and snapshot pauses:
 
@@ -191,7 +235,7 @@ agent = IkaBaseAgent(
     name="staged_agent",
     description="Performs a staged file analysis",
     prompt="Complete the staged workflow.",
-    Stages=[list_stage, read_stage],
+    stages=[list_stage, read_stage],
     model_id="gpt-4o-mini",
     api_key="...",
 )
@@ -232,7 +276,7 @@ agent = IkaBaseAgent(
     name="reviewer",
     description="Requests a filtering decision",
     prompt="Review the filtering options.",
-    Stages=[review],
+    stages=[review],
     model_id="gpt-4o-mini",
     api_key="...",
 )
@@ -248,12 +292,10 @@ if result.get("status") == "awaiting_user_input":
 
 For a full process-exit/resume/fork example, run
 `python -m examples.apps.approval_workflow.main --offline`. A workflow fork with a different
-human answer uses the `SnapshotStore` returned by `enable_snapshots()`:
-
-Call `store = workflow.enable_snapshots("state/workflow.db")` before running the
-workflow. After a pause, read `info = workflow.snapshot_runtime_info()`, create
-`fork = store.fork_run_from_snapshot(info["last_snapshot_id"])`, then call
-`workflow.resume_from_snapshot(fork["snapshot_id"], resume_input="NO")`.
+human answer uses `workflow.fork_from_snapshot(snapshot_id, resume_input="NO")`.
+The same convenience exists on agents. `SnapshotStore.fork_run_from_snapshot()` remains
+available when you need the fork IDs before executing it. Original snapshot lineage stays
+immutable; the convenience creates an independent run and answers its pending question.
 
 The interrupt payload includes the stage name, question, and snapshot identifier when snapshots are enabled.
 Resume consumes the saved transcript once and appends the human answer before continuing.
@@ -453,25 +495,91 @@ Current workflow semantics:
 - Sync and async workflow execution now use the same child-edge semantics.
 - With workflow snapshots enabled, an instance returning `paused` or `awaiting_user_input` pauses the workflow and blocks its dependents in both execution modes. Interrupted outputs are not completed results.
 
-`workflow.run(use_async=True)` schedules eligible instances in parallel worker threads;
-it is a blocking call. Set `max_parallel_workers` on the workflow to bound concurrency.
-`WorkflowResult.final` is answer text; `WorkflowResult.history` contains execution output,
-not the agent's transcript. The parallel pipeline example demonstrates fan-out/fan-in,
-request deadlines, cooperative SIGINT cancellation and explicit borrowed-client ownership.
-Workflow clones do not inherit `.client`, and agent shutdown closes an attached client;
-follow that example when sharing a caller-owned client.
+`workflow.run(parallel=True, concurrency=2)` blocks while eligible instances execute in
+worker threads. `concurrency` is the maximum number of instance workers; absent an override,
+`max_parallel_workers` defaults to four. With a caller-supplied `async_executor`,
+`concurrency` must match its worker count; the workflow never replaces that executor. Context preparation uses its own pool (up to the
+same worker count); it may issue summary requests concurrently with instances. Set
+`runtime_options(parallel_context_preparation=False)` for one context-preparation worker.
+All instances of a node must complete successfully before a dependent starts. Each node
+gets one prepared context; all upstream instance summaries reach fan-in. Completion order
+between independent branches is unspecified. `use_async=True` is a deprecated workflow
+alias for `parallel=True`; `run_async()` is also a blocking legacy entry point.
+A borrowed synchronous HTTPX client can be shared across threads. An `AsyncClient` must
+remain on its owning event loop; do not lend one to independent sync-bridge loops.
 
-For multi-turn chat, the long_chat application demonstrates explicit turn updates.
-Currently changing `agent.prompt` alone after the first execution reuses the saved
-`first_input`; the example refreshes that section and records the prior user turn using
-the existing `stage_input` history type. This workaround is a current API limitation,
-tracked by a strict repro in the usage report. The transcript remains available on
-`agent.message_history`. `agent.context_budget` and
-`runtime_options(compact_at_fraction=...)` control compaction; the long_chat example uses
-`post_compaction` snapshots to verify it happened. Persist your memory backend separately:
-agent snapshots do not serialize arbitrary storage backends. A completed snapshot returns
-its saved output; to restore a pending chat turn in a new process, pause at `post_model`
-and resume that snapshot before starting the next turn.
+`WorkflowResult.final` is answer text and `.output` is the full execution result.
+`.transcript` is the actual replayable agent history, including any compaction summary.
+`.instance_outputs` and `.instance_transcripts` retain every fan-out instance by integer
+ID; `.output`/`.transcript` identify the first recorded instance. `.summary` aggregates all
+instance summaries. `.history` remains a deprecated alias for `.output`.
+Node failures raise `IkaCore.WorkflowError` with `.errors` (structured `WorkflowNodeError`
+records: `node_name`, `instance_id`, `error_type`, `message`) and `.partial_results`.
+Dependents of a failed node do not run. Request cancellation/deadline exceptions retain
+their types. Other already running branches may finish; failure does not undo their tools.
+
+Lend a client with `provider=ProviderConfig(client=client)`: clones preserve the borrowed
+reference and `shutdown()` never closes it. Direct `.client = client` assignment also
+borrows. For per-agent ownership, use `ProviderConfig(client_factory=lambda: httpx.Client())`;
+every clone creates its own client and shutdown closes it. Automatically created clients
+are owned too. Workflow workers shut down their clones; callers shut down their templates.
+
+### Chat turns and compaction
+
+Use `agent.send(message)` to append a user turn and continue the transcript with a fresh
+configured step allowance. User turns and final answers are recorded in order for every
+provider. `agent.transcript` returns a defensive copy; `agent.message_history` remains the
+mutable advanced interface. Usage, cost and compaction counters are cumulative for the
+agent/conversation and survive snapshots. A transcript may contain a summary in place of
+older turns; it is not an unabridged audit log.
+
+```python
+chat_agent = IkaBaseAgent("chat", prompt="Be a concise assistant.", model_id="gpt-4o-mini", api_key="...",
+                         limits=ExecutionLimits.bounded(context_budget=2000))
+first_turn = chat_agent.send("Remember that my preferred color is blue.")
+second_turn = chat_agent.send("What color did I choose?")
+chat_agent.shutdown()
+```
+
+Assigning `agent.prompt = "New task"` explicitly starts a fresh task: it clears the transcript
+and pending continuation, resets the step allowance, and starts a new snapshot run on next
+execution. Existing saved snapshots and cumulative usage/cost/compaction totals stay intact.
+`execution()` runs the current task; use `send()` for an additional conversational turn.
+Resume a paused/pending turn before sending another message.
+
+Configure `limits=ExecutionLimits(context_budget=2000)` in **tokens**;
+`runtime_options(compact_at_fraction=0.8)` selects its compaction threshold. When unset,
+the model metadata supplies its context size. Each successful compaction increments
+`agent.compaction_count` and publishes a `RuntimeEvent(kind="compaction")` with `agent_name`,
+`count`, and `context_budget`; snapshots also record `post_compaction` boundaries.
+Persist memory backends separately: their lifetime follows the caller-owned backend,
+and agent snapshots do not serialize arbitrary storage backends.
+
+### Offline testing
+
+`IkaCore.testing.MockProvider` scopes scripted provider-native envelopes to the current
+context, including worker threads and summary calls. Agents, serializers, tools, validation
+and snapshots still run normally. Headers/credentials are not retained in `.requests`.
+Unexpected requests raise; unused responses fail on successful context exit.
+
+```python
+from IkaCore.testing import MockProvider, provider_response
+
+fixture = provider_response("https://api.openai.com/v1/responses", {}, ("agent_end", {"input": "OK"}))
+with MockProvider([fixture]) as mock:
+    offline_agent = IkaBaseAgent("offline", prompt="Say OK.", model_id="gpt-4o-mini", api_key="fixture",
+                                output=OutputConfig(cli=False))
+    assert offline_agent.execution()["final_message"] == "OK"
+    assert len(mock.requests) == 1
+    offline_agent.shutdown()
+```
+
+Pass raw native response dictionaries instead, or use `responder=lambda url, payload: ...`
+for task-based routing. The responder must be synchronous and thread-safe; invocations
+are serialized by the adapter. It returns a native dictionary or `httpx.Response`.
+`provider_response()` builds envelopes for OpenAI Chat/Responses, Codex, Anthropic, Gemini,
+DeepSeek and OpenRouter using the URL. Nested adapter scopes restore the parent on exit.
+See the [six applications](../examples/apps/README.md) for complete supported fixtures.
 
 ### Snapshots
 
@@ -494,8 +602,11 @@ under their own frames and restore the parent's execution context when they retu
 Historical agent resume checks tool effects recorded after the selected snapshot,
 including nested calls. If resuming would repeat unsafe effects, explicit approval is
 required: `agent.resume_from_snapshot(snapshot_id, allow_unsafe_replay=True)`.
-Mid-tool replay also requires this approval. Completed snapshots return saved output;
-post-model resume consumes the saved response without counting usage again. Fresh
+Mid-tool replay also requires this approval. Completed snapshots restore the saved transcript,
+usage/cost and counters, then return saved output with no model call; call `send(message)`
+afterward to continue chatting. A completed snapshot has no pending human input, so
+`resume_input` is rejected. Pending snapshots continue the saved turn: post-model resume
+consumes the saved response without counting usage again, and HITL accepts `resume_input`. Fresh
 executions clear replay state, including after a failed resume.
 
 Enable workflow persistence with `workflow.enable_snapshots(path, control)` and inspect
@@ -512,6 +623,19 @@ Use `enable_snapshots()` and `resume_from_snapshot()` instead. Returned IDs are 
 v1 before migrating. Snapshot replay does not restore a Python stack or undo tool effects.
 
 ### Logging And Debugging
+
+`OutputConfig(cli=False)` suppresses runtime presentation. Library diagnostics use named
+`IkaCore`, `IkaModel` and `IkaMem` loggers with `NullHandler`; the library does not configure
+the root logger or print exception tracebacks. To opt in, configure Python logging yourself
+(e.g. `logging.basicConfig(level=logging.WARNING)`). Application logging remains in control,
+including whether warnings and exception details go to stderr. Event/file subscribers are
+independent of CLI output. The default model prompt requests concise answers; override
+`PromptConfig(system_prompt="...")` for a different style.
+
+Control tools use these exact argument names: `agent_end(input="final answer")`,
+`stage_end(input="stage outcome")`, `ask_user(question="Approve?")`, and, where allowed,
+`change_stage(stage_index=0, reason="Recheck evidence")`. These are model tool calls,
+not Python methods on the agent. `ask_user` is available only for HITL stages.
 
 Useful options:
 

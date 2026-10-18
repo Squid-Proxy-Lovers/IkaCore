@@ -84,13 +84,16 @@
       "area": "Retries / request errors",
       "sources": [
         "src/IkaModel/request_interface.py",
-        "src/IkaModel/retry_policy.py"
+        "src/IkaModel/retry_policy.py",
+        "src/IkaModel/request_adapter.py",
+        "src/IkaCore/testing.py"
       ],
       "required_tests": [
         "src/IkaTest/test_retry_policy.py::test_permanent_errors_fail_on_first_attempt_without_sleeping",
         "src/IkaTest/test_retry_policy.py::test_rate_limit_honours_millisecond_hint",
         "src/IkaTest/test_retry_policy.py::test_programmer_errors_are_not_retried",
-        "src/IkaTest/test_retry_policy.py::test_default_context_overflow_still_reaches_summary_recovery"
+        "src/IkaTest/test_retry_policy.py::test_default_context_overflow_still_reaches_summary_recovery",
+        "src/IkaTest/test_dogfood_ergonomics.py::test_mock_provider_native_envelopes_nested_scopes_and_async"
       ],
       "known_gap": "Offline responses; provider rate-limit behavior must also be checked live.",
       "min_lines": 85,
@@ -290,7 +293,9 @@
         "src/IkaCore/stages.py",
         "src/IkaCore/config.py",
         "src/IkaCore/agent_state.py",
-        "src/IkaCore/agent_policy.py"
+        "src/IkaCore/agent_policy.py",
+        "src/IkaCore/agent_conversation.py",
+        "src/IkaCore/results.py"
       ],
       "required_tests": [
         "src/IkaTest/test_agent_helpers.py::TestFinalPrompt::test_execute_stage_refreshes_first_input_for_each_stage",
@@ -306,7 +311,9 @@
         "src/IkaTest/test_snapshot_resume_state.py::test_hitl_resume_preserves_the_stage_budget_already_consumed",
         "src/IkaTest/test_snapshot_resume_state.py::test_exhausted_hitl_resume_extends_or_finalizes_before_stage_completion",
         "src/IkaTest/test_execution_parity.py::test_execution_parity_with_dc9efbd[False]",
-        "src/IkaTest/test_execution_parity.py::test_execution_parity_with_dc9efbd[True]"
+        "src/IkaTest/test_execution_parity.py::test_execution_parity_with_dc9efbd[True]",
+        "src/IkaTest/test_dogfood_ergonomics.py::test_staged_correction_preserves_evidence_without_replaying_tools",
+        "src/IkaTest/test_dogfood_ergonomics.py::test_completed_snapshot_restores_conversation_before_send"
       ],
       "known_gap": "Model behavior, task success and downstream application semantics are outside offline unit coverage.",
       "min_lines": 95,

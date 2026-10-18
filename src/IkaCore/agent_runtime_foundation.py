@@ -9,6 +9,7 @@ from IkaCore.agent_execution_helpers import build_stage_content_prompt, resolve_
 from IkaCore.agent_runtime_payloads import JsonDict, history_message_text, history_section
 from IkaCore.events import current_output as get_cli_output
 from IkaCore.execution_types import AgentChatTurn, SimpleRuntimeContext, StageExecutionResult, StageRuntimeContext
+from IkaCore.prompts import AGENT_END_INSTRUCTION
 from IkaModel.base import AgentEndException
 from IkaModel.chat_interface.chat_interface import run_summarization as _run_summarization_untyped
 
@@ -152,6 +153,7 @@ class AgentPreparation:
         agent = self.agent
         message_history = agent.message_history
         stage = agent.Stages[stage_index]
+        agent.state.turn_message = None
         system_prompt = agent.preparation._stage_system_prompt(stage)
         history_section(message_history, "system")["message"] = system_prompt
         agent_tools = agent.build_stage(stage)
@@ -188,14 +190,28 @@ class AgentPreparation:
 
     def _prepare_simple_runtime(self) -> SimpleRuntimeContext:
         agent = self.agent
-        dynamic_tools = agent.build_simple_tools()
+        correcting = agent.state.validation_attempts > 0
+        dynamic_tools = ([agent.tool_runtime._simple_agent_end_tool([])]
+                         if correcting else agent.build_simple_tools())
         system_prompt = agent.system_prompt or ""
         current_hierarchy = getattr(agent, "_parent_hierarchy", []) + [agent.name]
         cli = get_cli_output()
         cli.set_step(agent.name, 1)
         message_history = agent.message_history
         first_msg = history_message_text(message_history, "first_input")
-        start_prompt = (first_msg or agent.prompt or "") + "\n\n" + agent.policy_runtime._simple_end_instruction()
+        turn_message = agent.state.turn_message
+        instruction = AGENT_END_INSTRUCTION if correcting else agent.policy_runtime._simple_end_instruction()
+        base_prompt = turn_message or first_msg or agent.prompt or ""
+        start_prompt = (base_prompt if instruction.strip() in base_prompt
+                        else base_prompt + "\n\n" + instruction)
+        initial = not history_section(message_history, "messages")
+        if not first_msg or initial:
+            history_section(message_history, "first_input")["message"] = start_prompt
+        if turn_message or not first_msg or initial:
+            from uuid import uuid4
+            history_section(message_history, "messages")[str(uuid4())] = {
+                "type": "user_input", "message": start_prompt, "tokens": max(1, len(start_prompt) // 4)}
+        agent.state.turn_message = None
         barebone_model = agent.get_barebone(
             system_prompt, dynamic_tools, parent_hierarchy=current_hierarchy, content_prompt_override=start_prompt
         )
@@ -207,7 +223,8 @@ class AgentPreparation:
 
         messages = restore_messages(agent, messages)
         tool_executors = agent.build_tool_executors(
-            agent.tools, subagents=agent.subagents, parent_hierarchy=current_hierarchy
+            [] if correcting else agent.tools, subagents=[] if correcting else agent.subagents,
+            parent_hierarchy=current_hierarchy
         )
         return SimpleRuntimeContext(
             system_prompt=system_prompt,

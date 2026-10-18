@@ -8,7 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from IkaModel import request_interface, summarization
+from IkaCore.testing import MockProvider
 from IkaModel.codex import codex_auth
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -60,15 +60,9 @@ def offline_provider(monkeypatch, tmp_path):
                           "prompt_tokens": 1, "completion_tokens": 1}}
         return httpx.Response(200, json=data, request=httpx.Request("POST", api_url))
 
-    async def async_respond(*args, **kwargs):
-        return respond(*args, **kwargs)
-
-    monkeypatch.setattr(request_interface, "api_request_retry", respond)
-    monkeypatch.setattr(request_interface, "async_api_request_retry", async_respond)
-    monkeypatch.setattr(summarization, "api_request_retry", respond)
-    monkeypatch.setattr(summarization, "async_api_request_retry", async_respond)
     (tmp_path / "fixture.txt").write_text("offline fixture", encoding="utf-8")
-    return calls
+    with MockProvider(responder=lambda url, payload: respond(url, {}, payload)):
+        yield calls
 
 
 @pytest.mark.parametrize("path", sorted((ROOT / "examples").glob("example_*.py")), ids=lambda path: path.name)

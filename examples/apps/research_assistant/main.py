@@ -1,10 +1,8 @@
 """Research a synthetic energy pilot, then validate its cited recommendation."""
 from __future__ import annotations
 
-from typing import Any
-
 from examples.apps.common import agent, call, emit, end, parser, session
-from IkaCore import ExecutionLimits, ExecutionPolicy, IkaStage, IkaTools
+from IkaCore import AgentResult, ExecutionLimits, ExecutionPolicy, IkaStage, IkaTools
 
 SOURCES = {
     "A": "Synthetic field study: LEDs reduce lighting energy by 20%; small sample.",
@@ -12,9 +10,9 @@ SOURCES = {
 }
 
 
-def cited_answer(result: dict[str, Any]) -> bool:
+def cited_answer(result: AgentResult) -> bool:
     """Include citations [A] and [B] and recommend a pilot, not guaranteed savings."""
-    text = result.get("final_message", "")
+    text = result["final_message"]
     return "[A]" in text and "[B]" in text and "pilot" in text.lower()
 
 
@@ -39,26 +37,17 @@ def main() -> None:
               IkaStage("verify", "Call fetch_page for B, then agent_end with a brief cited recommendation using [A] and [B].",
                        tools[1:], stage_max_step=3)]
     researcher = agent(args, "research", "Investigate whether a small office should pilot LED lighting. Sources are synthetic.",
-                       Stages=stages, limits=ExecutionLimits(maxsteps=7, max_tool_rounds=1, step_timeout=45),
-                       policy=ExecutionPolicy(max_stage_extensions=1, extend_stage_steps_by=2, max_step_extensions=0))
+                       stages=stages, limits=ExecutionLimits(maxsteps=7, max_tool_rounds=1, step_timeout=45),
+                       policy=ExecutionPolicy.bounded(max_stage_extensions=1, extend_stage_steps_by=2,
+                                                      final_answer_checks=(cited_answer,), fail_closed=True))
     answer = "Pilot one floor and measure savings [B]; the small study reports 20%, with uncertainty [A]."
     with session(args, {"research": [call("search_web", query="LED pilot"), call("stage_end", input="Found A and B"),
-                                     call("fetch_page", id="B"), end(answer)],
-                        "writer": [end(answer)]}) as mock:
+                                     call("fetch_page", id="B"), end(answer)]}) as mock:
         try:
             research = researcher.execution()
             assert {"search", "fetch"} <= set(seen), "Both research tools must actually execute"
-            # Staged final checks currently bypass validation (dogfood repro). Use a simple writer
-            # and also reject a failed final answer at the application boundary.
-            writer = agent(args, "writer", "Use the evidence below. Call agent_end with a concise pilot recommendation "
-                           "citing [A] and [B].\nEvidence: " + research["final_message"],
-                           policy=ExecutionPolicy(final_answer_checks=(cited_answer,), validation_retries=1,
-                                                  validation_extra_steps=1, max_step_extensions=0))
-            try:
-                result = writer.execution()
-                assert cited_answer(result), "Provider exhausted validation retries without meeting the contract"
-            finally:
-                writer.shutdown()
+            result = research
+            assert result["validation"]["status"] == "passed"
             if mock:
                 assert mock.summary_calls >= 1, "The one-step discovery stage must exercise its extension"
             emit("research_assistant", tools_used=seen, citations_valid=True,

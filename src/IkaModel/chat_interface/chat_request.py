@@ -128,8 +128,8 @@ def _summarize_sync_if_near_budget(
     max_tokens = getattr(barebone_model, 'context_budget', None) or get_max_tokens(barebone_model.model_id)
     if token_count > max_tokens * (current_runtime_options().compact_at_fraction or 0.8):
         emit_boundary("pre_compaction", {})
-        _summaries.summarise_message_history(barebone_model, message_history, client=client)
-        emit_boundary("post_compaction", {})
+        summary = _summaries.summarise_message_history(barebone_model, message_history, client=client)
+        _compaction_completed(barebone_model, bool(summary))
 
 
 async def _summarize_async_if_near_budget(
@@ -142,8 +142,8 @@ async def _summarize_async_if_near_budget(
     if token_count > max_tokens * (current_runtime_options().compact_at_fraction or 0.8):
         LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
         emit_boundary("pre_compaction", {})
-        await _summaries.async_summarise_message_history(barebone_model, message_history, client)
-        emit_boundary("post_compaction", {})
+        summary = await _summaries.async_summarise_message_history(barebone_model, message_history, client)
+        _compaction_completed(barebone_model, bool(summary))
 
 
 def _parse_provider_round(
@@ -250,8 +250,8 @@ def _api_request_with_context_fallback(
         get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
         try:
             emit_boundary("pre_compaction", {})
-            _summaries.summarise_message_history(barebone_model, message_history, client=client)
-            emit_boundary("post_compaction", {})
+            summary = _summaries.summarise_message_history(barebone_model, message_history, client=client)
+            _compaction_completed(barebone_model, bool(summary))
         except _SUMMARY_FALLBACK_EXCEPTIONS as summary_error:
             if isinstance(summary_error, IkaRequestControlError):
                 raise
@@ -297,8 +297,8 @@ async def _api_request_with_context_fallback_async(
         get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
         try:
             emit_boundary("pre_compaction", {})
-            await _summaries.async_summarise_message_history(barebone_model, message_history, client=client)
-            emit_boundary("post_compaction", {})
+            summary = await _summaries.async_summarise_message_history(barebone_model, message_history, client=client)
+            _compaction_completed(barebone_model, bool(summary))
         except _SUMMARY_FALLBACK_EXCEPTIONS as summary_error:
             if isinstance(summary_error, IkaRequestControlError):
                 raise
@@ -316,3 +316,10 @@ async def _api_request_with_context_fallback_async(
         return resp
     except (TypeError, ValueError) as e:
         raise IkaContextWindowError(f"Failed to build or retry provider request: {e}") from e
+
+
+def _compaction_completed(model: BareBoneModel, succeeded: bool) -> None:
+    callback = getattr(model, "_on_compaction", None)
+    if succeeded and callback is not None:
+        callback()
+    emit_boundary("post_compaction", {})

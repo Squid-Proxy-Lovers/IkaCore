@@ -1,5 +1,6 @@
 # pyright: strict
 
+import logging
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any
@@ -16,6 +17,9 @@ if TYPE_CHECKING:
     from IkaCore.events import RuntimeEvent as RuntimeEvent
     from IkaCore.events import RuntimeOutput as RuntimeOutput
     from IkaCore.events import output_scope as output_scope
+    from IkaCore.results import AgentResult as AgentResult
+    from IkaCore.results import FinalAnswerValidationError as FinalAnswerValidationError
+    from IkaCore.results import ValidationStatus as ValidationStatus
     from IkaCore.runtime_control import RuntimeControl as RuntimeControl
     from IkaCore.snapshot_store import SnapshotStore as SnapshotStore
     from IkaCore.stages import IkaStage as IkaStage
@@ -24,6 +28,8 @@ if TYPE_CHECKING:
     from IkaCore.workflow import WorkflowEdge as WorkflowEdge
     from IkaCore.workflow import WorkflowNode as WorkflowNode
     from IkaCore.workflow import WorkflowResult as WorkflowResult
+    from IkaCore.workflow_types import WorkflowError as WorkflowError
+    from IkaCore.workflow_types import WorkflowNodeError as WorkflowNodeError
 
 try:
     __version__ = version("ikacore")
@@ -40,6 +46,11 @@ __all__ = [
     "AgentTopology",
     "OutputConfig",
 
+    "AgentResult",
+    "ValidationStatus",
+    "FinalAnswerValidationError",
+    "WorkflowError",
+    "WorkflowNodeError",
     "__version__",
     "IkaBaseAgent",
     "IkaStage",
@@ -53,6 +64,11 @@ __all__ = [
 ]
 
 _EXPORTS: dict[str, tuple[str, str]] = {
+    "WorkflowNodeError": ("IkaCore.workflow_types", "WorkflowNodeError"),
+    "WorkflowError": ("IkaCore.workflow_types", "WorkflowError"),
+    "FinalAnswerValidationError": ("IkaCore.results", "FinalAnswerValidationError"),
+    "ValidationStatus": ("IkaCore.results", "ValidationStatus"),
+    "AgentResult": ("IkaCore.results", "AgentResult"),
     "RuntimeEvent": ("IkaCore.events", "RuntimeEvent"),
     "RuntimeOutput": ("IkaCore.events", "RuntimeOutput"),
     "output_scope": ("IkaCore.events", "output_scope"),
@@ -87,3 +103,6 @@ def __getattr__(name: str) -> Any:
 
 def __dir__() -> list[str]:
     return sorted({*globals(), *_EXPORTS})
+
+
+logging.getLogger("IkaCore").addHandler(logging.NullHandler())

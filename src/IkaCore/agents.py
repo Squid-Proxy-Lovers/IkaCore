@@ -61,7 +61,7 @@ class IkaBaseAgent:
     context_budget: int | None
     reasoning_effort: str | None
     max_tool_calls: int
-    client: Optional[Any]
+    _owns_events: bool
     final_answer_checks: list[FinalAnswerCheck]
     max_tool_rounds: int
     use_async: bool
@@ -98,6 +98,7 @@ class IkaBaseAgent:
         model_id: str = "",
         api_key: str = "",
         tools: list[IkaTools] | None = None,
+        stages: list[IkaStage] | None = None,
         Stages: list[IkaStage] | None = None,
         provider: ProviderConfig | None = None,
         prompts: PromptConfig | None = None,
@@ -106,6 +107,8 @@ class IkaBaseAgent:
         topology: AgentTopology | None = None,
         output: OutputConfig | None = None,
     ):
+        if stages is not None and Stages is not None:
+            raise ValueError("Use stages, or the deprecated Stages alias, not both")
         self.config = AgentConfig(
             name,
             name if description is None else description,
@@ -113,7 +116,7 @@ class IkaBaseAgent:
             model_id,
             api_key,
             tuple(tools or ()),
-            tuple(Stages or ()),
+            tuple(stages if stages is not None else Stages or ()),
             provider or _DEFAULT_PROVIDER,
             prompts or _DEFAULT_PROMPTS,
             limits or _DEFAULT_LIMITS,
@@ -151,7 +154,40 @@ class IkaBaseAgent:
 
     @prompt.setter
     def prompt(self, value: str) -> None:
-        self.state.prompt = value
+        from .agent_conversation import replace_prompt
+        replace_prompt(self, value)
+
+    @property
+    def stages(self) -> list[IkaStage]:
+        return self.Stages
+
+    @stages.setter
+    def stages(self, value: list[IkaStage]) -> None:
+        self.Stages = value
+
+    @property
+    def transcript(self) -> dict[str, Any]:
+        from .agent_conversation import transcript
+        return transcript(self)
+
+    @property
+    def compaction_count(self) -> int:
+        return self.state.compaction_count
+
+    @property
+    def client(self) -> Any:
+        return self._client
+
+    @client.setter
+    def client(self, value: Any) -> None:
+        # Direct assignment, like ProviderConfig(client=...), borrows the client.
+        self._client = value
+        self._client_owned = False
+
+    def send(self, message: str) -> dict[str, Any]:
+        """Append a user turn and execute it with a fresh per-turn step allowance."""
+        from .agent_conversation import send
+        return send(self, message)
 
     @property
     def _resume_state(self) -> dict[str, Any] | None:
@@ -283,8 +319,11 @@ class IkaBaseAgent:
     def final_prompt(self, stage: IkaStage) -> str:
         return self.lifecycle.final_prompt(stage)
 
-    def fork_from_snapshot(self, snapshot_id: str, *, allow_unsafe_replay: bool = False) -> dict[str, Any]:
-        return self.snapshots.fork_from_snapshot(snapshot_id, allow_unsafe_replay=allow_unsafe_replay)
+    def fork_from_snapshot(
+        self, snapshot_id: str, *, allow_unsafe_replay: bool = False, resume_input: str | None = None
+    ) -> dict[str, Any]:
+        return self.snapshots.fork_from_snapshot(
+            snapshot_id, allow_unsafe_replay=allow_unsafe_replay, resume_input=resume_input)
 
     def get_barebone(
         self,

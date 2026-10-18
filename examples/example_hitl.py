@@ -183,7 +183,7 @@ def main():
         prompts=PromptConfig(system_prompt=SYSTEM_PROMPT),
         prompt=PROMPT,
         tools=[],
-        Stages=[list_stage, read_stage, summarize_stage],
+        stages=[list_stage, read_stage, summarize_stage],
         model_id=model_id,
         api_key=api_key,
         output=OutputConfig(logging_level=2),

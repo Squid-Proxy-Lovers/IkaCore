@@ -36,7 +36,7 @@ JsonDict = dict[str, Any]
 
 _ROUND_TYPES = frozenset({"assistant_with_tools", "tool"})
 # Plain-text entries that were user turns: a stage's opening prompt and HITL answers.
-USER_ENTRY_TYPES = frozenset({"stage_input", "hitl_input"})
+USER_ENTRY_TYPES = frozenset({"stage_input", "hitl_input", "user_input"})
 _USER_TEXT_PREFIX = "\x00user:"
 
 
@@ -133,7 +133,7 @@ def plan_history_replay(message_history: JsonDict, messages: list[Any]) -> Repla
     if not chronological:
         return ReplayPlan(entries, first_input_first=True, emit_first_input=True)
     first_input = _section_text(message_history, "first_input")
-    already_sent = any(e.get("type") == "stage_input" and e.get("message") == first_input for e in entries)
+    already_sent = any(is_user_entry(e) and e.get("message") == first_input for e in entries)
     return ReplayPlan(entries, first_input_first=False, emit_first_input=bool(first_input) and not already_sent)
 
 

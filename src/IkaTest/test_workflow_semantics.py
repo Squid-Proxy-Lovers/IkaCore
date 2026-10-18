@@ -11,7 +11,7 @@ import pytest
 
 from IkaCore.agents import IkaBaseAgent
 from IkaCore.stages import IkaStage
-from IkaCore.workflow import AsyncWorkflowExecutor, IkaWorkflow, WorkflowEdge, WorkflowNode
+from IkaCore.workflow import AsyncWorkflowExecutor, IkaWorkflow, WorkflowEdge, WorkflowError, WorkflowNode
 
 
 def _agent(name: str, stages=None):
@@ -367,9 +367,11 @@ class TestWorkflowAsyncSemantics:
         )
 
         with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-            results = workflow.run(use_async=True)
+            with pytest.raises(WorkflowError) as caught:
+                workflow.run(parallel=True)
 
-        assert results == {}
+        assert caught.value.partial_results == {}
+        assert caught.value.errors[0].node_name == "root"
         assert [item["node_name"] for item in executor.scheduled] == ["root"]
         follower.execution.assert_not_called()
 
@@ -397,9 +399,11 @@ class TestWorkflowAsyncSemantics:
         )
 
         with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-            results = workflow.run(use_async=True)
+            with pytest.raises(WorkflowError) as caught:
+                workflow.run(parallel=True)
 
-        assert results == {}
+        assert caught.value.partial_results == {}
+        assert caught.value.errors[0].node_name == "root"
         assert [item["node_name"] for item in executor.scheduled] == ["root", "root"]
         follower.execution.assert_not_called()
 
@@ -528,7 +532,10 @@ class TestWorkflowAsyncSemantics:
         workflow = IkaWorkflow("failure", "test", [WorkflowNode("root", root, instances=2),
                               WorkflowNode("follower", follower)], [WorkflowEdge("root", "follower")],
                               compress_hook=_compress_hook, async_executor=InlineWorkflowExecutor())
-        assert workflow.run(use_async=True) == {}
+        with pytest.raises(WorkflowError) as caught:
+            workflow.run(parallel=True)
+        assert caught.value.partial_results == {}
+        assert caught.value.errors[0].instance_id == 1
         follower.execution.assert_not_called()
 
     def test_clone_isolated_instance_names_and_task_overrides(self):

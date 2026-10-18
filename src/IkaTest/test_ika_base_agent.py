@@ -96,18 +96,19 @@ class TestIkaBaseAgentInit:
         with pytest.raises(TypeError):
             _minimal_agent(Batch=True)
 
-    def test_logging_level_three_configures_debug_logging(self):
+    def test_logging_level_three_leaves_application_logging_configuration_untouched(self):
         logger = MagicMock()
 
         with patch("logging.basicConfig") as basic_config:
             with patch("logging.getLogger", return_value=logger) as get_logger:
                 _minimal_agent(output=OutputConfig(logging_level=3))
 
-        basic_config.assert_called_once()
-        get_logger.assert_called_once_with("IkaModel.chat_interface.chat_interface")
-        logger.setLevel.assert_called_once()
+        basic_config.assert_not_called()
+        get_logger.assert_called_once_with("IkaCore")
+        logger.debug.assert_called_once()
+        logger.setLevel.assert_not_called()
 
-    def test_shutdown_awaits_async_client_close_and_closes_logger(self):
+    def test_shutdown_borrows_attached_async_client_and_closes_logger(self):
         class AsyncClient:
             def __init__(self):
                 self.closed = False
@@ -122,7 +123,7 @@ class TestIkaBaseAgentInit:
 
         a.shutdown()
 
-        assert client.closed is True
+        assert client.closed is False
         assert a.client is None
         a.logger.shutdown.assert_called_once()
 

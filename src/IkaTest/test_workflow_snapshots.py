@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from IkaCore import IkaBaseAgent
+from IkaCore import IkaBaseAgent, WorkflowError
 from IkaCore.runtime_control import RuntimeControl
 from IkaCore.workflow import IkaWorkflow, WorkflowEdge, WorkflowNode
 
@@ -96,7 +96,10 @@ def test_worker_failures_are_recorded_and_dependents_are_blocked(tmp_path):
         return agent
     wf.nodes[0].agent.clone_for_run = clone
     with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-        assert wf.run(use_async=True) == {}
+        with pytest.raises(WorkflowError) as caught:
+            wf.run(parallel=True)
+        assert caught.value.partial_results == {}
+        assert caught.value.errors[0].node_name == "root"
     info = wf.snapshot_runtime_info()
     instances = store.list_workflow_node_instances(info["run_id"], "root")
     assert instances[0]["status"] == "failed"

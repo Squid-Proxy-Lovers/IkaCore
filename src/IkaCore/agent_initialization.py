@@ -72,8 +72,7 @@ def _configure_agent_logger(self: Any, logging_level: int, logging_file: str, sh
     if logging_level == 3:
         import logging
 
-        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-        logging.getLogger("IkaModel.chat_interface.chat_interface").setLevel(logging.DEBUG)
+        logging.getLogger("IkaCore").debug("Agent configured with detailed event logging")
 
 
 def _assign_execution_limits(
@@ -113,13 +112,19 @@ def _assign_runtime_state(
     self._tool_call_counts = {}
     self._total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "input_cached_tokens": 0}
     self._total_cost = {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
-    self.client = None
+    self.client = self.config.provider.client
+    self._owns_events = True
+    if self.config.provider.client_factory is not None:
+        self.client = self.config.provider.client_factory()
+        self._client_owned = True
+    self.context_budget = self.config.limits.context_budget
 
 
 def shutdown_agent(self: Any) -> None:
     client = getattr(self, "client", None)
-    if client is not None:
-        self.client = None
+    owned = getattr(self, "_client_owned", False)
+    self.client = None
+    if client is not None and owned:
         close = getattr(client, "close", None)
         if callable(close):
             close()
@@ -127,10 +132,9 @@ def shutdown_agent(self: Any) -> None:
             aclose = getattr(client, "aclose", None)
             if callable(aclose):
                 import asyncio
-
                 asyncio.run(cast(Coroutine[Any, Any, Any], aclose()))
     logger = getattr(self, "logger", None)
-    if logger:
+    if logger and getattr(self, "_owns_events", True):
         logger.shutdown()
 
 

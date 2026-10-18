@@ -38,6 +38,7 @@ class AgentExecution:
             "usage": getattr(agent, "_total_usage", {}),
             "cost": getattr(agent, "_total_cost", {}),
             "model_id": getattr(agent, "model_id", ""),
+            "validation": {"status": "not_run", "attempts": 0, "failed_checks": []},
             **interrupt,
         }
 
@@ -193,7 +194,9 @@ class AgentExecution:
         raw_resume_cp = getattr(agent, "_resume_state", None)
         resume_cp = cast(JsonDict, raw_resume_cp) if isinstance(raw_resume_cp, dict) else None
         if agent.Stages:
-            return agent.execution_runtime._run_staged_execution(resume_input, resume_cp, last_content)
+            def run() -> JsonDict:
+                return agent.execution_runtime._run_staged_execution(resume_input, resume_cp, last_content)
+            return agent.policy_runtime.run_validated(run) if agent.final_answer_checks else run()
         if agent.next_agent:
             return agent.execution_runtime._run_next_agent_execution()
         if resume_cp and resume_cp.get("scope") == "agent":

@@ -15,7 +15,7 @@ def worker(args) -> dict:
     state = args.state
     state.mkdir(parents=True, exist_ok=True)
     plan = agent(args, "plan", "Propose a harmless documentation release. Call agent_end with exactly DOCS_ONLY.")
-    approve = agent(args, "approve", "Obtain a human release decision.", Stages=[IkaStage(
+    approve = agent(args, "approve", "Obtain a human release decision.", stages=[IkaStage(
         "approval", "If no human decision is present, call ask_user with question 'Approve docs release?'. "
         "After YES, agent_end with exactly APPROVED. After NO, agent_end with exactly REJECTED.", [],
         hitl=True, stage_max_step=3)])
@@ -25,7 +25,7 @@ def worker(args) -> dict:
                            WorkflowNode("approve", approve), WorkflowNode("ship", ship)],
                           [WorkflowEdge("plan", "approve"), WorkflowEdge("approve", "ship")],
                           output=OutputConfig(cli=False))
-    store = workflow.enable_snapshots(str(state / "workflow.db"))
+    workflow.enable_snapshots(str(state / "workflow.db"))
     decision = "REJECTED" if args.phase == "fork" else "APPROVED"
     scripts = ({"plan": [end("DOCS_ONLY")], "approve": [call("ask_user", question="Approve docs release?")]}
                if args.phase == "start" else {"approve": [end(decision)],
@@ -39,11 +39,8 @@ def worker(args) -> dict:
                 (state / "pending.json").write_text(json.dumps({"id": info["last_snapshot_id"]}))
                 return {"paused": True, "dependent_blocked": True}
             snapshot_id = json.loads((state / "pending.json").read_text())["id"]
-            if args.phase == "fork":
-                fork = store.fork_run_from_snapshot(snapshot_id)
-                assert fork["snapshot_id"] != snapshot_id
-                snapshot_id = fork["snapshot_id"]
-            results = workflow.resume_from_snapshot(snapshot_id, resume_input="NO" if args.phase == "fork" else "YES")
+            results = (workflow.fork_from_snapshot(snapshot_id, resume_input="NO") if args.phase == "fork"
+                       else workflow.resume_from_snapshot(snapshot_id, resume_input="YES"))
             assert results["approve"].final == decision
             assert results["ship"].final == ("HOLD" if args.phase == "fork" else "READY")
             assert not workflow.snapshot_runtime_info()["interrupted_instances"]

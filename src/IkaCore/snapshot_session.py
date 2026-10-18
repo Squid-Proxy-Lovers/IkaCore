@@ -44,6 +44,10 @@ def capture_state(session: SnapshotSession, label: str, payload: dict[str, Any])
         "agent_name": session.agent.name, "remaining_steps": remaining,
         "last_content": session.last_content, "message_history": deepcopy(session.agent.message_history),
         "maxsteps": session.agent.maxsteps,
+        "prompt": getattr(session.agent, "prompt", ""),
+        "compaction_count": getattr(session.agent, "compaction_count", 0),
+        "validation_attempts": getattr(getattr(session.agent, "state", None), "validation_attempts", 0),
+        "validation_maxsteps": getattr(getattr(session.agent, "state", None), "validation_maxsteps", None),
         "timestamp": time.time(),
     }
     if session.stage_index is not None:

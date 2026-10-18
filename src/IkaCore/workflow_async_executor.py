@@ -8,7 +8,9 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional, cast
 
 from IkaCore.agents import IkaBaseAgent
 from IkaCore.events import current_output as get_cli_output
+from IkaCore.runtime_control import RuntimePauseRequested
 from IkaModel.async_runner import run_async
+from IkaModel.runtime_errors import IkaRequestControlError
 from IkaModel.worker_context import submit_with_controls
 
 
@@ -36,14 +38,25 @@ def _run_async_workflow_agent(
             "instance_id": instance_id,
             "result": result,
             "success": True,
+            "transcript": getattr(agent, "transcript", getattr(agent, "message_history", {})),
         }
+    except RuntimePauseRequested as paused:
+        return {"node_name": node_name, "instance_id": instance_id, "success": False,
+                "interrupted": True, "result": {"status": "paused", "snapshot_id": paused.snapshot_id}}
+    except IkaRequestControlError:
+        raise
     except Exception as e:
         return {
             "node_name": node_name,
             "instance_id": instance_id,
-            "result": {"error": str(e)},
+            "result": {"error": str(e), "error_type": type(e).__name__},
             "success": False,
         }
+
+    finally:
+        shutdown = getattr(agent, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
 
 
 class AsyncWorkflowExecutor:
@@ -84,6 +97,8 @@ class AsyncWorkflowExecutor:
                     self.completed_results[task_id] = result
                     if task_id in self.pending_tasks:
                         del self.pending_tasks[task_id]
+            except IkaRequestControlError:
+                raise
             except Exception as e:
                 results.append({
                     "result": {"error": str(e)},

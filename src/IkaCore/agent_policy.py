@@ -4,9 +4,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional, cast
 
-from IkaCore.agent_runtime_payloads import JsonDict, history_section
+from IkaCore.agent_runtime_payloads import JsonDict
 from IkaCore.events import current_output as get_cli_output
 from IkaCore.prompts import AGENT_END_INSTRUCTION
+from IkaCore.results import AgentResult, FinalAnswerValidationError
 from IkaModel.chat_interface.chat_interface import run_summarization as _run_summarization_untyped
 
 
@@ -121,55 +122,64 @@ class AgentPolicy:
         return (final_response, final_response)
 
     def _run_validated_simple_execution(self) -> JsonDict:
+        return self.run_validated(self.agent.execution_runtime._run_simple_final_output)
+
+    def _check_result(self, output: JsonDict, attempt: int) -> list[str]:
+        output["validation"] = {"status": "not_run", "attempts": attempt, "failed_checks": []}
+        failed: list[str] = []
+        for check in self.agent.final_answer_checks:
+            accepted = cast(Callable[[AgentResult], object], check)(cast(AgentResult, output))
+            if not isinstance(accepted, bool):
+                raise TypeError(f"final_answer_check {_string_attr(check, '__name__')} must return a boolean")
+            if not accepted:
+                failed.append(_string_attr(check, "__name__"))
+        output["validation"] = {"status": "failed" if failed else "passed",
+                                "attempts": attempt, "failed_checks": failed}
+        return failed
+
+    def _correction(self, output: JsonDict, failed: list[str], attempt: int) -> None:
         agent = self.agent
-        original_maxsteps = agent.maxsteps
-        original_prompt = agent.prompt
-        max_retries = agent.config.policy.validation_retries
-        retry_count = 0
-        while True:
-            final_output = agent.execution_runtime._run_simple_final_output()
-            failed_checks: list[str] = []
-            for check in agent.final_answer_checks:
-                if not check(final_output):
-                    func_name = _string_attr(check, "__name__")
-                    failed_checks.append(func_name)
-            if not failed_checks:
-                agent.maxsteps = original_maxsteps
-                agent.prompt = original_prompt
-                return final_output
-            failed_check_names = ", ".join(failed_checks)
-            if retry_count >= max_retries:
-                agent.maxsteps = original_maxsteps
-                agent.prompt = original_prompt
-                if agent.logger:
-                    agent.logger.log_action(
-                        f"Final answer validation failed after {max_retries} retries. Returning last output despite failed checks: {failed_check_names}"
-                    )
-                return final_output
-            agent.maxsteps = original_maxsteps + agent.config.policy.validation_extra_steps
-            check_descriptions: list[str] = []
-            for check in agent.final_answer_checks:
-                func_name = _string_attr(check, "__name__")
-                if func_name in failed_checks:
-                    raw_doc = getattr(check, "__doc__", None)
-                    doc = (
-                        raw_doc.strip() if isinstance(raw_doc, str) and raw_doc.strip() else "No description available"
-                    )
-                    check_descriptions.append(f"{func_name}: {doc}")
-            feedback_msg = (
-                f"Your previous answer failed validation checks: {failed_check_names}.\nFailed check requirements:\n"
-                + "\n".join((f"- {desc}" for desc in check_descriptions))
-                + f"\nPlease review the requirements and provide an improved answer. You have {agent.maxsteps} steps to complete this task."
-            )
-            agent.prompt = f"{original_prompt}\n\n[FEEDBACK]: {feedback_msg}"
-            message_history = agent.message_history
-            history_section(message_history, "first_input")["message"] = agent.prompt
-            message_history["messages"] = {}
-            retry_count += 1
-            cli = get_cli_output()
-            cli.agent_response(
-                agent.name,
-                f"Validation failed for checks: {failed_check_names}. Retrying (attempt {retry_count}/{max_retries})...",
-                [agent.name],
-                step=0,
-            )
+        descriptions = [f"{_string_attr(check, '__name__')}: {getattr(check, '__doc__', None) or 'Return True'}"
+                        for check in agent.final_answer_checks if _string_attr(check, "__name__") in failed]
+        agent.state.validation_attempts = attempt
+        agent.state.turn_message = (
+            f"Correct your previous final answer: {output.get('final_message', '')}\n"
+            "Failed check requirements:\n" + "\n".join(descriptions)
+            + "\nUse the existing evidence. Call agent_end(input=...) with the corrected answer."
+        )
+        get_cli_output().agent_response(agent.name,
+            f"Validation failed for checks: {', '.join(failed)}. Retrying "
+            f"(attempt {attempt}/{agent.config.policy.validation_retries})...", [agent.name], step=0)
+
+    def run_validated(self, execute: Callable[[], JsonDict]) -> JsonDict:
+        """Validate simple and staged answers; correction passes cannot replay application tools."""
+        agent = self.agent
+        original_maxsteps = agent.state.validation_maxsteps
+        if original_maxsteps is None:
+            original_maxsteps = agent.maxsteps
+        agent.state.validation_maxsteps = original_maxsteps
+        try:
+            for attempt in range(agent.state.validation_attempts, agent.config.policy.validation_retries + 1):
+                if attempt:
+                    agent.maxsteps = original_maxsteps + agent.config.policy.validation_extra_steps
+                    output = agent.execution_runtime._run_simple_final_output()
+                else:
+                    output = execute()
+                if output.get("status") in {"awaiting_user_input", "paused"}:
+                    output["validation"] = {"status": "not_run", "attempts": 0, "failed_checks": []}
+                    return output
+                failed = self._check_result(output, attempt + 1)
+                if not failed:
+                    return output
+                if attempt == agent.config.policy.validation_retries:
+                    if agent.logger:
+                        agent.logger.log_action("Final answer validation exhausted: " + ", ".join(failed))
+                    if agent.config.policy.fail_closed:
+                        raise FinalAnswerValidationError(cast(AgentResult, output))
+                    return output
+                self._correction(output, failed, attempt + 1)
+            raise RuntimeError("Invalid validation retry state")
+        finally:
+            agent.maxsteps = original_maxsteps
+            agent.state.validation_attempts = 0
+            agent.state.validation_maxsteps = None

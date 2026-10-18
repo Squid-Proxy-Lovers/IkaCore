@@ -9,6 +9,10 @@ class AgentRunState:
     message_history: dict[str, Any] = field(default_factory=dict)
     maxsteps: int = 100
     prompt: str = ""
+    turn_message: str | None = None
+    compaction_count: int = 0
+    validation_attempts: int = 0
+    validation_maxsteps: int | None = None
     _resume_state: dict[str, Any] | None = None
     _last_interrupt: dict[str, Any] | None = None
     _tool_call_counts: dict[str, int] = field(default_factory=dict)

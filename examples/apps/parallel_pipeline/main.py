@@ -3,33 +3,13 @@ from __future__ import annotations
 
 import signal
 import threading
-from typing import Any, ClassVar
 
 import httpx
 
 from examples.apps.common import agent, emit, end, parser, session
-from IkaCore import IkaBaseAgent, IkaWorkflow, OutputConfig, WorkflowEdge, WorkflowNode
+from IkaCore import IkaWorkflow, OutputConfig, ProviderConfig, WorkflowEdge, WorkflowNode
 from IkaModel import request_controls
 from IkaModel.runtime_errors import IkaRequestCancelled, IkaRequestDeadlineExceeded
-
-
-class BorrowedClientAgent(IkaBaseAgent):
-    """Workflow clones drop .client; explicitly inject our shared thread-safe client.
-
-    Workflow parallel mode runs synchronous agents in worker threads. A sync HTTPX
-    client can be shared across those threads; an AsyncClient cannot span their loops.
-    """
-    shared_client: ClassVar[httpx.Client]
-
-    def clone_for_run(self, **kwargs: Any) -> IkaBaseAgent:
-        clone = super().clone_for_run(**kwargs)
-        clone.client = self.shared_client
-        return clone
-
-    def shutdown(self) -> None:
-        if self.client is self.shared_client:
-            self.client = None  # The outer context owns close(), including on cancellation.
-        super().shutdown()
 
 
 def main() -> None:
@@ -42,11 +22,12 @@ def main() -> None:
                "risk": [end("RISK:LOW")], "join": [end("COST:100 RISK:LOW")]} if not args.cancel_demo else {}
     try:
         with httpx.Client(timeout=45) as client, session(args, scripts):
-            BorrowedClientAgent.shared_client = client
-            tasks = [agent(args, "seed", "Call agent_end with exactly OFFICE_PILOT.", agent_type=BorrowedClientAgent),
-                     agent(args, "cost", "For upstream OFFICE_PILOT call agent_end with exactly COST:100.", agent_type=BorrowedClientAgent),
-                     agent(args, "risk", "For upstream OFFICE_PILOT call agent_end with exactly RISK:LOW.", agent_type=BorrowedClientAgent),
-                     agent(args, "join", "Read BOTH upstream results. Call agent_end with exactly COST:100 RISK:LOW.", agent_type=BorrowedClientAgent)]
+            provider = ProviderConfig.bounded(api_url="https://chatgpt.com/backend-api/codex/responses",
+                                              max_tokens=700, reasoning_effort="low", client=client)
+            tasks = [agent(args, "seed", "Call agent_end with exactly OFFICE_PILOT.", provider=provider),
+                     agent(args, "cost", "For upstream OFFICE_PILOT call agent_end with exactly COST:100.", provider=provider),
+                     agent(args, "risk", "For upstream OFFICE_PILOT call agent_end with exactly RISK:LOW.", provider=provider),
+                     agent(args, "join", "Read BOTH upstream results. Call agent_end with exactly COST:100 RISK:LOW.", provider=provider)]
             joined_contexts = []
 
             def compress(contexts, target):
@@ -79,7 +60,7 @@ def main() -> None:
                     emit("parallel_pipeline", cancelled=True, caller_client_open=not client.is_closed)
                 else:
                     with request_controls(timeout=70, cancel_checker=cancelled.is_set):
-                        results = workflow.run(use_async=True)
+                        results = workflow.run(parallel=True, concurrency=2)
                     if cancelled.is_set():
                         raise IkaRequestCancelled("Pipeline cancelled")
                     assert results["join"].final == "COST:100 RISK:LOW"

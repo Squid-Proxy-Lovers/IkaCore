@@ -1,3 +1,4 @@
+import logging
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
@@ -60,3 +61,6 @@ def __getattr__(name: str) -> Any:
 
 def __dir__() -> list[str]:
     return sorted({*globals(), *_EXPORTS})
+
+
+logging.getLogger("IkaModel").addHandler(logging.NullHandler())

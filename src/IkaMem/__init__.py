@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 from importlib.metadata import PackageNotFoundError, version
 
 from IkaMem.long_term_memory import LTMemory
@@ -28,3 +29,6 @@ __all__ = [
     "Storage",
     "Mem0Store",
 ]
+
+
+logging.getLogger("IkaMem").addHandler(logging.NullHandler())

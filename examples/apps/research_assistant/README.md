@@ -1,6 +1,6 @@
 # Staged synthetic research
 
-Searches two synthetic web documents, fetches evidence, extends a one-step discovery stage, then gives the evidence to a simple agent with a cited-answer check. The application also checks the returned answer because validation retries do not fail closed. Staged checks currently bypass validation; see the strict repros.
+Searches two synthetic web documents, fetches evidence, extends a one-step discovery stage, then validates its own staged final answer with a typed `AgentResult` citation check. `ExecutionPolicy.bounded(..., fail_closed=True)` rejects exhausted checks; bounded correction uses the transcript without repeating research tools.
 
 From the repository root, after following [wheel setup](../README.md):
 

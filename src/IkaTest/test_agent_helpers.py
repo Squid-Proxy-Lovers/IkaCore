@@ -61,28 +61,25 @@ class TestFinalAnswerCheckValidation:
         with pytest.raises(ValueError, match="callable"):
             _minimal_agent(policy=ExecutionPolicy(final_answer_checks=("not-callable",)))
 
-    def test_rejects_check_without_docstring(self):
-        def no_docstring(_history) -> bool:
-            return True
+    def test_accepts_check_without_docstring_without_executing_it(self):
+        check = MagicMock(return_value=True)
+        a = _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(check,)))
+        assert a.final_answer_checks == [check]
+        check.assert_not_called()
 
-        with pytest.raises(ValueError, match="docstring"):
-            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(no_docstring,)))
+    def test_rejects_check_with_wrong_signature(self):
+        def wrong_signature(first, second):
+            raise AssertionError("Must not execute at construction")
+        with pytest.raises(ValueError, match="one positional AgentResult"):
+            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(wrong_signature,)))
 
-    def test_rejects_check_with_non_bool_annotation(self):
-        def wrong_annotation(_history) -> str:
-            """Return the validation result."""
+    def test_rejects_check_returning_non_bool_at_execution(self):
+        def wrong_result(_result):
             return "yes"
-
-        with pytest.raises(ValueError, match="return type annotation"):
-            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(wrong_annotation,)))
-
-    def test_rejects_check_returning_non_bool(self):
-        def wrong_result(_history):
-            """Return the validation result."""
-            return "yes"
-
-        with pytest.raises(ValueError, match="must return a boolean"):
-            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(wrong_result,)))
+        a = _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(wrong_result,)))
+        a.execution_runtime._run_simple_final_output = MagicMock(return_value={"final_message": "answer"})
+        with pytest.raises(TypeError, match="must return a boolean"):
+            a.execution()
 
     def test_accepts_valid_check(self):
         def valid_check(_history) -> bool:
@@ -795,7 +792,8 @@ class TestExecutionRuntimeHelpers:
         ):
             out = a.policy_runtime._run_validated_simple_execution()
 
-        assert out == {"final_message": "good"}
+        assert out == {"final_message": "good",
+                       "validation": {"status": "passed", "attempts": 2, "failed_checks": []}}
         assert a.execution_runtime._run_simple_final_output.call_count == 2
         assert a.maxsteps == 3
         assert a.prompt == "original prompt"

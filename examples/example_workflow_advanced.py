@@ -37,7 +37,7 @@ def build_sync_workflow(compress_hook: WorkflowCompressionHook, api_key: str, mo
         prompts=PromptConfig(system_prompt="You are a coordinator. Follow each stage and call stage_end when done."),
         prompt="Process the topic you receive: first gather and expand, then refine.",
         tools=[],
-        Stages=[stg0, stg1],
+        stages=[stg0, stg1],
         model_id=model_id,
         api_key=api_key,
         limits=ExecutionLimits(maxsteps=50),
@@ -179,7 +179,7 @@ def run_async() -> None:
     print("=" * 100)
     print("Running async workflow:")
     workflow = build_async_workflow(api_key=api_key, model_id=model_id)
-    results = workflow.run(initial_context="The future of renewable energy.", use_async=True)
+    results = workflow.run(initial_context="The future of renewable energy.", parallel=True)
     for name, res in results.items():
         summary = res.summary or ""
         has_instance_0 = "[Instance 0]:" in summary
