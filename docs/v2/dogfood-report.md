@@ -1,5 +1,8 @@
 # New-user application dogfood report
 
+Current status: all findings are addressed in the [Resolution section](#resolution--ergonomics-implementation).
+The original observations and validation numbers below are retained as historical evidence.
+
 Date: 2026-10-18. Runtime: unreleased IkaCore 2.0.0, wheel built from
 `aca8c53a57332c0e5ab225628ac7b29bae99d23b`, Python 3.13.15, HTTPX 0.28.1.
 Worktree: `/private/tmp/ikacore-w-dogfood`, branch `v2-dogfood`.
@@ -184,3 +187,18 @@ configuration defaults remain available alongside the bounded presets, and the o
 `Stages`, workflow `use_async`, and result `history` spellings remain documented aliases.
 Text-only corrections replace the suggested repeated staged execution to avoid replaying
 application tools with side effects.
+
+
+### Resolution verification
+
+Implementation commit: `ed55da5928451a26e600d59b3266fef33bc92d17`.
+The [handoff report](ergonomics-handoff.md) includes API before/after examples and every
+intentional behavior change. Fresh-wheel offline apps: **7 passed** (six apps plus SIGINT);
+Codex live apps: **6/6 passed**, **44 request boundaries**, four live chat turns with three
+compactions (twelve turns remain covered offline). Historical evidence is retained separately.
+
+Final `pytest -q`: **1,075 passed / 1 skipped**, **19.37 s**, no xfails.
+`python scripts/quality.py`: **passed**, including the same **1,075 passed / 1 skipped**
+under coverage, Ruff, Pyright (zero errors), compilation, wheel data/module inventory and
+isolated imports. Combined coverage **94.80%**, line **96.46%**, branch **88.82%**;
+**127 modules / 16 areas**, zero coverage gate failures, all floors intact.

@@ -25,6 +25,10 @@ V2 intentionally breaks compatibility with v1. See the
   deprecated alias. Default instance workers decrease from 30 to four; context preparation
   has its own bounded pool. Worker failures now raise `WorkflowError` with structured node/
   instance identity and partial results instead of returning incomplete mappings silently.
+- Use keyword fields when constructing extended grouped config/result dataclasses; inserted
+  context/validation/transcript fields can shift positional arguments. In particular, use
+  `WorkflowResult(..., output=..., child_summaries=...)` instead of `history=` or positional
+  child summaries.
 - `WorkflowResult.output` replaces the misleading `.history` name (deprecated alias retained).
   `.transcript` and per-instance output/transcript maps expose the actual conversation.
 - Direct client assignment and `ProviderConfig(client=...)` borrow rather than transfer

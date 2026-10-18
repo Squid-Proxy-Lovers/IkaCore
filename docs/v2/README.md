@@ -3,6 +3,8 @@
 V2 allows breaking changes. Its goal is a smaller, consistent runtime with explicit
 execution controls. Backward compatibility with v1 is no longer a release requirement.
 This branch remains a draft; applications should migrate deliberately before adopting it.
+See the [application ergonomics handoff](ergonomics-handoff.md), [usage guide](../USAGE.md),
+and generated/tested [API reference](../API.md).
 
 ## First simplification pass
 
@@ -76,6 +78,7 @@ The permanent suite also checks these behaviors across both execution modes.
 
 | Previous call or behavior | V2 behavior / migration |
 | --- | --- |
+| Positional construction of grouped config/result dataclasses | Use keyword fields when migrating: new context/validation/transcript fields change positional bindings. In particular, construct `WorkflowResult(..., output=..., child_summaries=...)` rather than `history=` or a positional child-summary mapping. |
 | Validator receives an empty history at construction; docstring/return annotation required | Construction checks callability/signature only. A check receives `IkaCore.AgentResult` on completion and returns `bool`; runtime rejects non-bools. Docstrings are optional correction feedback. |
 | Staged completion skips final checks; simple correction reruns application tools | Both validate final answers. Bounded correction passes use the transcript and only `agent_end`, without repeating application side effects. |
 | Invalid output silently returned after retry exhaustion | Inspect `result["validation"]` (`status`, `attempts`, `failed_checks`); opt into `ExecutionPolicy(fail_closed=True)` and catch `FinalAnswerValidationError.result`. |
