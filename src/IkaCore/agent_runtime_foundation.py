@@ -82,7 +82,7 @@ class AgentPreparation:
         if agent.logger:
             agent.logger.log_hitl_prompt(stage.name)
         agent._last_interrupt = {
-            "status": turn.response.get("status", "awaiting_user_input"),
+            "status": interrupt_data.get("delegated", {}).get("status", turn.response.get("status", "awaiting_user_input")),
             "stage_index": stage_index,
             "stage_name": stage.name,
             "remaining_steps": remaining_after,

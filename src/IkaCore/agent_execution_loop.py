@@ -117,6 +117,15 @@ class AgentTurnLoop:
         started: float,
     ) -> Optional[StageExecutionResult]:
         agent = self.agent
+        if isinstance(runtime, SimpleRuntimeContext) and turn.response.get("interrupted"):
+            agent._last_interrupt = {
+                "status": turn.response.get("interrupt_data", {}).get("delegated", {}).get(
+                    "status", turn.response.get("status", "awaiting_user_input")),
+                "interrupt_data": turn.response.get("interrupt_data", {}),
+                "last_content": turn.last_content,
+                "remaining_steps": max(0, remaining_steps - state.used_steps),
+            }
+            return StageExecutionResult(0, turn.last_content, False, None, state.used_steps)
         if isinstance(runtime, StageRuntimeContext):
             interrupted = agent.preparation._handle_stage_interrupt(
                 runtime.stage, runtime.stage_index, remaining_steps, state.used_steps, turn
@@ -231,7 +240,7 @@ class AgentTurnLoop:
         agent = self.agent
         runtime = agent.preparation._prepare_simple_runtime()
         result = agent.turns._run_execution_loop(runtime, agent.maxsteps)
-        if result.agent_end_called:
+        if result.agent_end_called or agent._last_interrupt:
             return (result.last_content, result.last_content)
         return agent.policy_runtime._finalize_simple_after_max_steps(
             runtime.system_prompt, runtime.current_hierarchy, runtime.cli, None, result.last_content

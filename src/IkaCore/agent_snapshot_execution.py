@@ -34,7 +34,7 @@ def execute_with_snapshots(
                 record_boundary(session, "frame_entry", {})
             check_request_controls()
             result = execute(resume_input=resume_input)
-            if result.get("status") == "awaiting_user_input":
+            if result.get("status") in {"awaiting_user_input", "paused"}:
                 snapshot = record_boundary(session, "human_input", result)
                 session.store.update_frame(str(session.root_frame_id), status="paused")
                 session.store.update_run_status(str(session.run_id), "paused")

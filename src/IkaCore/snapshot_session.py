@@ -33,6 +33,7 @@ class SnapshotSession:
     pending_response: Optional[dict[str, Any]] = None
     skip_boundary: Optional[str] = None
     replaying: bool = False
+    allow_unsafe_replay: bool = False
     loop_state: Optional[ExecutionLoopState] = None
     lock: Any = field(default_factory=threading.RLock)
 

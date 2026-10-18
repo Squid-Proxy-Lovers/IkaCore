@@ -177,6 +177,8 @@ class AgentExecution:
     def _run_simple_final_output(self) -> JsonDict:
         agent = self.agent
         final_message, _ = agent.run_simple()
+        if agent._last_interrupt:
+            return agent.execution_runtime._interrupt_output(agent._last_interrupt)
         current_hierarchy = getattr(agent, "_parent_hierarchy", []) + [agent.name]
         barebone_model = agent.get_barebone(
             agent.system_prompt or agent.description or agent.prompt,
@@ -192,6 +194,14 @@ class AgentExecution:
         agent._last_interrupt = None
         raw_resume_cp = getattr(agent, "_resume_state", None)
         resume_cp = cast(JsonDict, raw_resume_cp) if isinstance(raw_resume_cp, dict) else None
+        if resume_cp and resume_cp.get("interrupt_data", {}).get("delegated"):
+            from .agent_delegation import resume_delegation
+
+            interrupted = resume_delegation(agent, resume_cp, resume_input)
+            if interrupted is not None:
+                agent._last_interrupt = interrupted
+                return agent.execution_runtime._interrupt_output(interrupted)
+            resume_input = None
         if agent.Stages:
             def run() -> JsonDict:
                 return agent.execution_runtime._run_staged_execution(resume_input, resume_cp, last_content)

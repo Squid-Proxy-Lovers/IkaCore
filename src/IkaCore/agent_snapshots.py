@@ -123,6 +123,7 @@ class AgentSnapshots:
             session.replaying = False
             return {**state["completed_output"], "runtime": {
                 "run_id": info["run_id"], "frame_id": info["frame_id"], "last_snapshot_id": snapshot_id}}
+        session.allow_unsafe_replay = allow_unsafe_replay
         session.replaying = True
         return agent.execution(resume_input=resume_input)
 

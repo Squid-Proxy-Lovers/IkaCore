@@ -9,7 +9,7 @@ from IkaCore.agent_runtime_payloads import history_section
 from IkaCore.stages import IkaStage
 from IkaCore.tool_runtime_metadata import runtime_executor
 from IkaCore.tools import IkaTools, ToolExecutor, ToolParameters
-from IkaModel.base import AgentTool, ToolArgs
+from IkaModel.base import AgentTool, HumanInputRequired, ToolArgs
 
 "AgentTools component; owns one execution responsibility."
 ToolExecutorMap = dict[str, ToolExecutor]
@@ -142,6 +142,11 @@ class AgentTools:
         agent = self.agent
         subagent_run = subagent.clone_for_run(prompt=task_input)
         setattr(subagent_run, "_parent_hierarchy", parent_hierarchy or [])
+        if agent._snapshot_runtime is not None:
+            from copy import deepcopy
+
+            session = agent._snapshot_runtime
+            subagent_run.enable_snapshots(session.store.db_path, deepcopy(session.control))
         subagent_run.system_prompt = agent.tool_runtime._subagent_system_prompt(subagent)
         history_section(subagent_run.message_history, "system")["message"] = subagent_run.system_prompt or ""
         history_section(subagent_run.message_history, "first_input")["message"] = task_input
@@ -156,6 +161,9 @@ class AgentTools:
             logger.log_action(f"Calling subagent: {subagent.name}")
         subagent_run = agent.tool_runtime._prepare_subagent_run(subagent, task_input, parent_hierarchy)
         result = subagent_run.execution()
+        from .agent_delegation import raise_delegated_interrupt
+
+        raise_delegated_interrupt(subagent_run, task_input, result)
         final_output = result.get("final_message", "")
         summary = result.get("summary", final_output)
         logger = getattr(agent, "logger", None)
@@ -178,6 +186,8 @@ class AgentTools:
                 return json.dumps({"error": "No input provided for subagent"})
             try:
                 return agent.tool_runtime._run_subagent_tool(subagent, task_input, parent_hierarchy)
+            except HumanInputRequired:
+                raise
             except Exception as e:
                 error_msg = f"Error executing subagent '{subagent.name}': {str(e)}"
                 logger = getattr(agent, "logger", None)

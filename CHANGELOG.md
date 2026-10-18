@@ -7,6 +7,10 @@ V2 intentionally breaks compatibility with v1. See the
 
 ### Fixed (final core review)
 
+- Delegated HITL and checkpoint pauses suspend the parent with the child snapshot identity.
+  Parent replay routes answers to the child before continuing; repeated questions and fresh
+  restores retain that continuation. Without snapshots, pauses explicitly report nonresumability.
+
 - Stage transitions and validation corrections preserve consumed overall step allowances;
   only configured extension/correction grants add steps, including after snapshot restore.
 

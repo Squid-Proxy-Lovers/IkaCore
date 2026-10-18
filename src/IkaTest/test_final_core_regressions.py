@@ -136,3 +136,132 @@ def test_validation_correction_does_not_reset_consumed_budget(make_agent):
     with MockProvider(responder=respond) as mock:
         agent.execution()
     assert len([p for p in mock.requests if p.get("tools")]) == 2
+
+
+@pytest.mark.parametrize("staged", [False, True])
+@pytest.mark.parametrize("use_async", [False, True])
+def test_delegated_hitl_resumes_child_before_parent(make_agent, tmp_path, staged, use_async):
+    def create():
+        child = make_agent("child", "CHILD_TASK", stages=[IkaStage("approve", "Get approval", [], hitl=True)],
+                           policy=ExecutionPolicy.bounded(use_async=use_async))
+        topology = ({"stages": [IkaStage("parent-stage", "Delegate approval", [], subagents=[child])]}
+                    if staged else {"topology": AgentTopology(subagents=(child,))})
+        return make_agent("parent", "PARENT_TASK", policy=ExecutionPolicy.bounded(use_async=use_async), **topology)
+    parent = create()
+    db = str(tmp_path / "delegated.db")
+    store = parent.enable_snapshots(db)
+    actions = iter([("child", {"input": "need approval"}), ("ask_user", {"question": "Approve launch?"}),
+                    end("child approved"), end("parent done")])
+    with MockProvider(responder=lambda u, p: provider_response(u, p, next(actions))) as mock:
+        paused = parent.execution()
+        assert paused.get("status") == "awaiting_user_input"
+        assert len(mock.requests) == 2
+        assert store.get_run(paused["runtime"]["run_id"])["status"] == "paused"
+        identity = paused["interrupt_data"]["delegated"]
+        assert identity["snapshot_id"]
+        other = create()
+        other.enable_snapshots(db)
+        still_paused = other.resume_from_snapshot(paused["snapshot_id"])
+        assert still_paused["status"] == "awaiting_user_input"
+        assert len(mock.requests) == 2
+        result = other.resume_from_snapshot(still_paused["snapshot_id"], resume_input="YES, launch")
+    assert result["final_message"] == "parent done"
+    assert len(mock.requests) == 4
+    assert "YES, launch" in json.dumps(mock.requests[2])
+    assert "child approved" in json.dumps(mock.requests[3])
+    assert all(f["status"] == "completed" for f in store.list_frames(result["runtime"]["run_id"])
+               if f["frame_type"] == "agent")
+
+
+def test_delegated_hitl_without_snapshots_reports_nonresumable_pause(make_agent):
+    child = make_agent("child", stages=[IkaStage("approve", "Get approval", [], hitl=True)])
+    parent = make_agent("parent", topology=AgentTopology(subagents=(child,)))
+    actions = iter([("child", {"input": "need approval"}), ("ask_user", {"question": "Approve?"}),
+                    end("should not finish")])
+    with MockProvider(responder=lambda u, p: provider_response(u, p, next(actions))) as mock:
+        result = parent.execution()
+    assert result["status"] == "awaiting_user_input"
+    assert result["interrupt_data"]["resumable"] is False
+    assert "enable_snapshots" in result["interrupt_data"]["error"]
+    assert len(mock.requests) == 2
+
+
+def test_delegated_repeated_questions_update_pending_child_identity(make_agent, tmp_path):
+    child = make_agent("child", stages=[IkaStage("approve", "Get approval", [], hitl=True)])
+    parent = make_agent("parent", topology=AgentTopology(subagents=(child,)))
+    parent.enable_snapshots(str(tmp_path / "repeat.db"))
+    actions = iter([("child", {"input": "approval"}), ("ask_user", {"question": "First?"}),
+                    ("ask_user", {"question": "Second?"}), end("all approved"), end("parent done")])
+    with MockProvider(responder=lambda u, p: provider_response(u, p, next(actions))) as mock:
+        first = parent.execution()
+        second = parent.resume_from_snapshot(first["snapshot_id"], resume_input="first yes")
+        assert second["status"] == "awaiting_user_input"
+        assert second["interrupt_data"]["question"] == "Second?"
+        assert first["interrupt_data"]["delegated"]["snapshot_id"] != second["interrupt_data"]["delegated"]["snapshot_id"]
+        result = parent.resume_from_snapshot(second["snapshot_id"], resume_input="second yes")
+    assert result["final_message"] == "parent done"
+    assert "all approved" in json.dumps(mock.requests[-1])
+    assert "__ika_interrupt__" not in json.dumps(mock.requests[-1])
+
+
+def test_delegated_control_pause_resumes_saved_child_response(make_agent, tmp_path):
+    child = make_agent("child", "CHILD_TASK")
+    child.enable_snapshots(str(tmp_path / "template.db"))
+    child.request_pause_at("post_model")
+    parent = make_agent("parent", topology=AgentTopology(subagents=(child,)))
+    # Parent control is inherited. Pause only the child using an explicit clone override.
+    native = child.clone_for_run
+    def clone(**kwargs):
+        run = native(**kwargs)
+        original = run.execution
+        def execute():
+            run.request_pause_at("post_model")
+            return original()
+        run.execution = execute
+        return run
+    child.clone_for_run = clone
+    parent.enable_snapshots(str(tmp_path / "pause.db"))
+    actions = iter([("child", {"input": "task"}), end("saved child output"), end("parent done")])
+    with MockProvider(responder=lambda u, p: provider_response(u, p, next(actions))) as mock:
+        paused = parent.execution()
+        assert paused["status"] == "paused"
+        child.clone_for_run = native
+        result = parent.resume_from_snapshot(paused["snapshot_id"])
+    assert result["final_message"] == "parent done"
+    assert len(mock.requests) == 3
+    assert "saved child output" in json.dumps(mock.requests[-1])
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_workflow_resumes_delegated_child_in_parent_instance(make_agent, tmp_path, parallel):
+    child = make_agent("child", stages=[IkaStage("approve", "Get approval", [], hitl=True)])
+    parent = make_agent("parent", topology=AgentTopology(subagents=(child,)))
+    workflow = IkaWorkflow("nested", "review", [WorkflowNode("node", parent)], [], output=OutputConfig(cli=False))
+    workflow.enable_snapshots(str(tmp_path / "workflow.db"))
+    actions = iter([("child", {"input": "approval"}), ("ask_user", {"question": "Approve?"}),
+                    end("approved child"), end("done")])
+    try:
+        with MockProvider(responder=lambda u, p: provider_response(u, p, next(actions))) as mock:
+            workflow.run(parallel=parallel)
+            snapshot = workflow._workflow_snapshot.last_snapshot_id
+            result = workflow.resume_from_snapshot(snapshot, resume_input="YES")
+        assert result["node"].output["final_message"] == "done"
+        assert len(mock.requests) == 4
+        assert "YES" in json.dumps(mock.requests[2])
+    finally:
+        workflow.async_executor.shutdown()
+
+
+def test_fork_preserves_nested_delegated_continuations(make_agent, tmp_path):
+    leaf = make_agent("leaf", stages=[IkaStage("approve", "Get approval", [], hitl=True)])
+    child = make_agent("child", topology=AgentTopology(subagents=(leaf,)))
+    parent = make_agent("parent", topology=AgentTopology(subagents=(child,)))
+    store = parent.enable_snapshots(str(tmp_path / "fork.db"))
+    actions = iter([("child", {"input": "delegate"}), ("leaf", {"input": "approval"}),
+                    ("ask_user", {"question": "Approve?"}), end("approved"), end("child done"), end("parent done")])
+    with MockProvider(responder=lambda u, p: provider_response(u, p, next(actions))):
+        paused = parent.execution()
+        result = parent.fork_from_snapshot(paused["snapshot_id"], resume_input="YES", allow_unsafe_replay=True)
+    assert result["final_message"] == "parent done"
+    assert result["runtime"]["run_id"] != paused["runtime"]["run_id"]
+    assert store.get_run(paused["runtime"]["run_id"])["status"] == "paused"

@@ -103,9 +103,21 @@ def _clone_workflow_interruptions(store: Any, snapshot: dict[str, Any], state: d
         # Current source outputs/status may postdate this historical snapshot.
         store.update_frame(mapping[root], status="paused", outputs={})
         child_state = _remap_state(child["state_json"], mapping, run_id)
+        _clone_delegation(store, child, child_state, mapping, run_id)
         interrupted[key] = store.create_snapshot(run_id, mapping[child["frame_id"]], child["snapshot_kind"],
             child_state, resume_strategy=child["resume_strategy"], branch_origin_snapshot_id=snapshot_id)
 
+
+
+def _clone_delegation(store: Any, snapshot: dict[str, Any], state: dict[str, Any],
+                      mapping: dict[str, str], run_id: str) -> None:
+    pending = state.get("interrupt_data", {}).get("delegated")
+    if not pending:
+        return
+    continuation = {"interrupted_instances": {"child": pending["snapshot_id"]}}
+    _clone_workflow_interruptions(store, snapshot, continuation, mapping, run_id)
+    pending["snapshot_id"] = continuation["interrupted_instances"]["child"]
+    pending["tool_frame_id"] = mapping.get(pending.get("tool_frame_id"))
 
 def _finish_fork(self: Any, snapshot_id: str, snapshot: dict[str, Any], target_frame: dict[str, Any],
                  new_run_id: str, new_root_frame_id: str, frame_id_map: dict[str, str],
@@ -190,6 +202,7 @@ def fork_run_from_snapshot(
         cloned_state = _remap_state(snapshot["state_json"], frame_id_map, new_run_id)
         cloned_state["frame_id"] = frame_id_map[target_frame["frame_id"]]
         _clone_workflow_interruptions(self, snapshot, cloned_state, frame_id_map, new_run_id)
+        _clone_delegation(self, snapshot, cloned_state, frame_id_map, new_run_id)
 
         return _finish_fork(self, snapshot_id, snapshot, target_frame, new_run_id, new_root_frame_id,
                             frame_id_map, cloned_state, replay_assessment, allow_unsafe_replay)
