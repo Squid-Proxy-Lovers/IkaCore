@@ -7,11 +7,12 @@ from __future__ import annotations
 import threading
 import time
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Optional, cast
 
 from IkaModel.execution_hooks import current_tool_frame
 
+from .execution_types import ExecutionLoopState
 from .runtime_control import RuntimeControl, RuntimePauseRequested
 from .snapshot_store import SnapshotStore
 
@@ -32,6 +33,7 @@ class SnapshotSession:
     pending_response: Optional[dict[str, Any]] = None
     skip_boundary: Optional[str] = None
     replaying: bool = False
+    loop_state: Optional[ExecutionLoopState] = None
     lock: Any = field(default_factory=threading.RLock)
 
 
@@ -48,6 +50,8 @@ def capture_state(session: SnapshotSession, label: str, payload: dict[str, Any])
         state["stage_index"] = session.stage_index
     if session.live_messages is not None:
         state["chat_messages"] = deepcopy(session.live_messages)
+    if session.loop_state is not None:
+        state["loop_state"] = asdict(session.loop_state)
     state.update({"runtime_boundary": label, "run_id": session.run_id, "root_frame_id": session.root_frame_id,
                   "frame_id": current_tool_frame() or session.stage_frame_id or session.root_frame_id,
                   "total_usage": deepcopy(session.agent._total_usage), "total_cost": deepcopy(session.agent._total_cost)})

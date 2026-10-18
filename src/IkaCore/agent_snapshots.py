@@ -7,6 +7,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Optional
 
+from .execution_types import ExecutionLoopState
 from .runtime_control import RuntimeControl
 from .snapshot_session import SnapshotSession
 from .snapshot_store import SnapshotStore
@@ -75,6 +76,7 @@ class AgentSnapshotReplayMixin(AgentSnapshotControlMixin):
         if session.skip_boundary == "frame_entry":
             session.skip_boundary = None
         session.pending_response = state.get("pending_response")
+        session.loop_state = ExecutionLoopState(**state["loop_state"]) if state.get("loop_state") else None
         session.live_messages = state.get("chat_messages")
         self._snapshot_resume_messages = deepcopy(session.live_messages)
         session.replaying = True

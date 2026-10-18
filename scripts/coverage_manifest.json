@@ -263,7 +263,11 @@
         "src/IkaTest/test_agent_execution_loop.py::test_loop_preserves_extension_limits_and_forced_finalization",
         "src/IkaTest/test_agent_execution_loop.py::test_stages_advance_and_jump_without_replaying_extra_turns",
         "src/IkaTest/test_agent_execution_loop.py::test_cancel_at_second_step_prevents_another_model_call",
-        "src/IkaTest/test_agent_execution_loop.py::test_empty_turns_keep_existing_mode_policy"
+        "src/IkaTest/test_agent_execution_loop.py::test_empty_turns_keep_existing_mode_policy",
+        "src/IkaTest/test_snapshot_resume_state.py::test_mid_stage_resume_preserves_consumed_steps_limit_and_extensions",
+        "src/IkaTest/test_snapshot_resume_state.py::test_mid_stage_resume_does_not_double_charge_steps_to_following_stage",
+        "src/IkaTest/test_snapshot_resume_state.py::test_loop_budget_survives_resume_in_a_new_agent",
+        "src/IkaTest/test_snapshot_resume_state.py::test_hitl_resume_preserves_the_stage_budget_already_consumed"
       ],
       "known_gap": "Model behavior, task success and downstream application semantics are outside offline unit coverage.",
       "min_lines": 95,

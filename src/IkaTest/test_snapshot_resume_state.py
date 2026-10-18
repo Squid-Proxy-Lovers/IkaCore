@@ -81,3 +81,76 @@ def test_fresh_execution_starts_at_first_stage_after_replay(agent_factory, monke
     assert agent._resume_state is None
     assert agent._snapshot_resume_messages is None
     assert agent._snapshot_runtime.pending_response is None
+
+
+@pytest.mark.parametrize('boundary', ['pre_model', 'post_model', 'step_entry'])
+@pytest.mark.parametrize('extensions', [0, 1])
+def test_mid_stage_resume_preserves_consumed_steps_limit_and_extensions(agent_factory, monkeypatch, boundary, extensions):
+    agent = agent_factory(Stages=[IkaStage('phase', 'work', [], stage_max_step=2)],
+                          max_stage_extensions=extensions, extend_stage_steps_by=2)
+    calls = []
+    trigger = 2 + extensions if boundary == 'post_model' else 1 + 2 * extensions
+    def chat(model, messages, history, **kwargs):
+        calls.append(deepcopy(messages))
+        if len(calls) == trigger:
+            agent.request_pause_at(boundary)
+        return _turn()
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    paused = agent.execution()
+    assert paused['status'] == 'paused'
+    agent.clear_pause_requests()
+    assert agent.resume_from_snapshot(paused['snapshot_id'])['final_message'] == 'forced final'
+    assert len(calls) == 2 + 2 * extensions
+    saved = agent._snapshot_runtime.store.load_snapshot(paused['snapshot_id'])['state_json']['loop_state']
+    assert saved['used_steps'] == (trigger - 1 if boundary == 'post_model' else trigger)
+    assert saved['step_limit'] == 2 + 2 * extensions
+    assert saved['extension_count'] == extensions
+
+
+def test_mid_stage_resume_does_not_double_charge_steps_to_following_stage(agent_factory, monkeypatch):
+    agent = agent_factory(maxsteps=4, Stages=[IkaStage('first', 'work', [], stage_max_step=2),
+                                             IkaStage('second', 'finish', [], stage_max_step=0)])
+    calls = []
+    def chat(model, messages, history, **kwargs):
+        calls.append(kwargs['current_stage_index'])
+        if len(calls) == 1:
+            agent.request_pause_at('pre_model')
+        return _turn()
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    paused = agent.execution()
+    agent.clear_pause_requests()
+    agent.resume_from_snapshot(paused['snapshot_id'])
+    assert calls == [0, 0, 1, 1]
+
+
+@pytest.mark.parametrize('staged', [False, True])
+def test_loop_budget_survives_resume_in_a_new_agent(agent_factory, monkeypatch, staged):
+    options = {'maxsteps': 2, 'max_stage_extensions': 1, 'extend_stage_steps_by': 2,
+               'max_step_extensions': 1, 'extend_steps_by': 2,
+               'Stages': [IkaStage('phase', 'work', [], stage_max_step=2)] if staged else []}
+    agent = agent_factory(**options)
+    calls = []
+    def chat(model, messages, history, **kwargs):
+        calls.append(True)
+        if len(calls) == 3:
+            agent.request_pause_at('pre_model')
+        return _turn()
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    paused = agent.execution()
+    assert len(calls) == 3
+    other = agent_factory(**options)
+    other.enable_snapshots(agent._snapshot_runtime.store.db_path)
+    assert other.resume_from_snapshot(paused['snapshot_id'])['final_message'] == 'forced final'
+    assert len(calls) == 4
+
+
+def test_hitl_resume_preserves_the_stage_budget_already_consumed(agent_factory, monkeypatch):
+    agent = agent_factory(Stages=[IkaStage('phase', 'ask then finish', [], hitl=True, stage_max_step=2)])
+    calls = []
+    def chat(model, messages, history, **kwargs):
+        calls.append(deepcopy(messages))
+        return {**_turn('Approve?'), 'interrupted': True, 'status': 'awaiting_user_input'} if len(calls) == 1 else _turn()
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    first = agent.execution()
+    agent.resume_from_snapshot(first['snapshot_id'], resume_input='Yes')
+    assert len(calls) == 2

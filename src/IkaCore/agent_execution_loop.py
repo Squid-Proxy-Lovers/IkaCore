@@ -17,6 +17,7 @@ from .execution_types import (
     StageExecutionResult,
     StageRuntimeContext,
 )
+from .snapshot_agent_state import restore_loop_state
 
 RuntimeContext = SimpleRuntimeContext | StageRuntimeContext
 
@@ -135,7 +136,9 @@ class AgentExecutionLoopMixin(RuntimePreparationMixin):
 
     def _run_execution_loop(self, runtime: RuntimeContext, remaining_steps: int) -> StageExecutionResult:
         staged = isinstance(runtime, StageRuntimeContext)
-        state = ExecutionLoopState(runtime.step_limit if isinstance(runtime, StageRuntimeContext) else self.maxsteps)
+        state = restore_loop_state(self, runtime.step_limit if isinstance(runtime, StageRuntimeContext) else self.maxsteps,
+                                   remaining_steps)
+        remaining_steps = state.remaining_steps
         while state.used_steps < state.step_limit:
             started = self._start_execution_step(runtime, state, remaining_steps)
             turn = self._run_chat_turn(

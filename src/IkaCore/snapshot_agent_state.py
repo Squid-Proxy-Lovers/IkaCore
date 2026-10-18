@@ -6,6 +6,7 @@ import uuid
 from typing import Any, Optional, cast
 
 from IkaCore.agent_runtime_payloads import JsonDict, history_section
+from IkaCore.execution_types import ExecutionLoopState
 from IkaModel.base import AgentEndException
 from IkaModel.execution_hooks import emit_boundary
 
@@ -13,6 +14,16 @@ from IkaModel.execution_hooks import emit_boundary
 def clear_resume_state(agent: Any) -> None:
     agent._resume_state = None
     agent._snapshot_resume_messages = None
+
+
+def restore_loop_state(agent: Any, step_limit: int, remaining_steps: int) -> ExecutionLoopState:
+    resume = getattr(agent, "_resume_state", None)
+    saved = cast(JsonDict, resume).pop("loop_state", None) if isinstance(resume, dict) else None
+    state = ExecutionLoopState(**saved) if saved is not None else ExecutionLoopState(step_limit, remaining_steps=remaining_steps)
+    session = getattr(agent, "_snapshot_runtime", None)
+    if session is not None:
+        session.loop_state = state
+    return state
 
 
 def resume_pending_response(agent: Any) -> Optional[dict[str, Any]]:

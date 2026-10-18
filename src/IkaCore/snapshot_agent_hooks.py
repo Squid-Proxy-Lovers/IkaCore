@@ -29,6 +29,7 @@ def ensure_session(agent: Any) -> Optional[SnapshotSession]:
             session.run_id, session.root_frame_id, session.stage_frame_id = None, None, None
             session.stage_index, session.last_snapshot_id, session.pending_response = None, None, None
             session.live_messages, session.skip_boundary, session.remaining_steps = None, None, None
+            session.loop_state = None
     if session.run_id is None:
         with session.store.transaction():
             if parent and parent.get("store_path") == session.store.db_path:
@@ -51,6 +52,7 @@ def start_stage(session: SnapshotSession, index: int, payload: dict[str, Any]) -
     if session.stage_index == index and session.stage_frame_id is not None:
         return
     session.stage_index = index
+    session.loop_state = None
     session.stage_frame_id = session.store.create_frame(str(session.run_id), "stage", str(payload.get("name", index)),
         parent_frame_id=session.root_frame_id, caller_frame_id=session.root_frame_id,
         return_to_frame_id=session.root_frame_id, position={"stage_index": index})

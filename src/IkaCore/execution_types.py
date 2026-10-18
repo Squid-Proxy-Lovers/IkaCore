@@ -73,3 +73,4 @@ class ExecutionLoopState:
     used_steps: int = 0
     extension_count: int = 0
     last_content: str = ""
+    remaining_steps: int = 0

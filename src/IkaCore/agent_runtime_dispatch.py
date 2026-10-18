@@ -58,6 +58,8 @@ class StagedResumeMixin(InterruptOutputMixin):
     ) -> None:
         stage_index = resume_cp.get("stage_index", 0)
         remaining_steps = resume_cp.get("remaining_steps", state.remaining_steps)
+        if "loop_state" in resume_cp:
+            remaining_steps = resume_cp["loop_state"]["remaining_steps"]
         state.stage_idx = min(stage_index if isinstance(stage_index, int) else 0, len(self.Stages) - 1)
         state.remaining_steps = max(1, remaining_steps if isinstance(remaining_steps, int) else state.remaining_steps)
         raw_message_history = resume_cp.get("message_history")
@@ -295,8 +297,8 @@ class ExecutionDispatchRuntimeMixin(ValidatedSimpleExecutionMixin):
             raw_message_history = resume_cp.get("message_history")
             if isinstance(raw_message_history, dict):
                 self.message_history = cast(JsonDict, raw_message_history)
-            remaining_steps = resume_cp.get("remaining_steps", self.maxsteps)
-            self.maxsteps = max(1, remaining_steps if isinstance(remaining_steps, int) else self.maxsteps)
+            maxsteps = resume_cp.get("maxsteps", resume_cp.get("remaining_steps", self.maxsteps))
+            self.maxsteps = max(1, maxsteps if isinstance(maxsteps, int) else self.maxsteps)
 
         if not self.final_answer_checks:
             return self._run_simple_final_output()
