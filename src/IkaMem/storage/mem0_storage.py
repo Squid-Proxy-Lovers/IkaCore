@@ -51,7 +51,7 @@ class Mem0InitializationMixin:
         if not _MEM0_AVAILABLE:
             raise ImportError(
                 "Mem0Store requires the optional 'mem0' package. "
-                "Install mem0 or pass a custom storage backend."
+                "Install it with pip install mem0ai or pass a custom storage backend."
             )
         memory_cls = Memory
         memory_client_cls = MemoryClient
@@ -230,13 +230,13 @@ class Mem0Store(Mem0SearchMixin, Storage):
         super().__init__()
         self._validate_type(memory_type)
         self.memory_type = memory_type
-        self.config = config or {}
+        self.config: dict[str, Any] = config or {}
 
-        self.mem0_run_id = self.config.get("run_id")
-        self.includes = self.config.get("includes")
-        self.excludes = self.config.get("excludes")
-        self.custom_categories = self.config.get("custom_categories")
-        self.infer = self.config.get("infer", True)
+        self.mem0_run_id: Any = self.config.get("run_id")
+        self.includes: Any = self.config.get("includes")
+        self.excludes: Any = self.config.get("excludes")
+        self.custom_categories: Any = self.config.get("custom_categories")
+        self.infer: bool = self.config.get("infer", True)
         self.memory: Any = None
 
         self._initialize_memory()

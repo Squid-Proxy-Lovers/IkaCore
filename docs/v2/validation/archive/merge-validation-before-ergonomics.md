@@ -1,3 +1,5 @@
+> Historical development evidence. Counts and API examples apply only to the recorded revision.
+
 # Historical reasoning / dogfood / hardening merge validation
 
 Measured on 2026-10-18 at runtime/test revision **`8efd65803e5d2a55c8039ee67ce18c4f9c4e5464`**,
@@ -118,7 +120,7 @@ No agent configuration, constructor, prompt or validation policy implementation 
 
 ## Documentation and historical evidence
 
-[README.md](README.md) now distinguishes current integration measurements from the
+[README.md](../../README.md) now distinguishes current integration measurements from the
 `179b52e` refactor, `01249f6` reasoning and `dba0e05` hardening results. The changelog
 consolidates provider replay entries and includes hardening/application work without
 claiming unchanged coverage floors. Historical live reasoning and compaction evidence

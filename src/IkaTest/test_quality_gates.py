@@ -233,6 +233,9 @@ def test_quality_runner_is_documented_and_used_by_ci():
     assert "-m py_compile" in commands
     assert "pyright" in commands
     assert "pytest --cov --cov-report=term-missing:skip-covered" in commands
-    assert "pip wheel . --no-deps --no-build-isolation" in commands
+    assert "python -m build --no-isolation (sdist and wheel)" in commands
+    assert "twine check wheel and sdist" in commands
+    assert "installed-wheel public consumer and verifytypes floors" in commands
+    assert "installed-wheel offline docs/examples/apps" in commands
     assert "verify wheel contains required package data" in commands
     assert "verify built wheel imports outside source tree" in commands

@@ -26,11 +26,11 @@ class AgentLifecycle:
 
     def apply_workflow_stage_wiring(self, stage_wiring: Dict[int, Dict[str, List["IkaBaseAgent"]]]) -> None:
         agent = self.agent
-        if not stage_wiring or not agent.Stages:
+        if not stage_wiring or not agent.stages:
             return
         for stage_idx, wiring in stage_wiring.items():
-            if 0 <= stage_idx < len(agent.Stages) and "subagents" in wiring:
-                agent.Stages[stage_idx].subagents = wiring["subagents"]
+            if 0 <= stage_idx < len(agent.stages) and "subagents" in wiring:
+                agent.stages[stage_idx].subagents = wiring["subagents"]
 
     @staticmethod
     def _clone_stage_for_run(stage: IkaStage) -> IkaStage:
@@ -59,7 +59,7 @@ class AgentLifecycle:
             "model_id": agent.model_id,
             "api_key": agent.api_key,
             "tools": list(agent.tools),
-            "stages": [agent.lifecycle._clone_stage_for_run(stage) for stage in agent.Stages],
+            "stages": [agent.lifecycle._clone_stage_for_run(stage) for stage in agent.stages],
             "provider": replace(config.provider, api_url=agent.api_url, max_tokens=agent.max_tokens,
                                 temperature=agent.temperature, use_responses_api=agent.use_responses_api,
                                 reasoning_effort=agent.reasoning_effort,
@@ -71,7 +71,7 @@ class AgentLifecycle:
                               max_tool_rounds=agent.max_tool_rounds, max_tool_calls=agent.max_tool_calls,
                               rate_limit_per_min=agent.rate_limit_per_min,
                               per_tool_rate_limit=agent.per_tool_rate_limit),
-            "policy": replace(config.policy, final_answer_checks=(), use_async=agent.use_async),
+            "policy": replace(config.policy, final_answer_checks=(), async_requests=agent.async_requests),
             "topology": AgentTopology(tuple(agent.subagents), agent.next_agent),
             "output": replace(config.output, cli=False, subscribers=(), logging_level=0, summarize_final=agent.summarize_final),
         }

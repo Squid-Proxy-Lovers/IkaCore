@@ -26,7 +26,7 @@ def wrap_snapshot_instance(workflow: Any, node_name: str, instance: int, agent: 
         return agent
     native_execution = agent.execution
     asynchronous = getattr(agent, "async_execution", None)
-    original = (lambda: run_async(cast(Callable[[], Coroutine[Any, Any, Any]], asynchronous))) if agent.use_async and callable(asynchronous) else agent.execution
+    original = (lambda: run_async(cast(Callable[[], Coroutine[Any, Any, Any]], asynchronous))) if agent.async_requests and callable(asynchronous) else agent.execution
     def wrapped(*args: Any, **kwargs: Any) -> dict[str, Any]:
         key = f"{node_name}:{instance}"
         def resume() -> Any:

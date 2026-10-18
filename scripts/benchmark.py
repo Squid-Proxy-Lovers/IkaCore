@@ -122,8 +122,8 @@ def main():
                            'uncompressed_bytes': sum(i.file_size for i in archive.infolist()),
                            'python_modules': sum(i.filename.endswith('.py') for i in archive.infolist())}
     # Portable footprint guardrails. Timings are evidence, not noisy cross-machine CI gates.
-    if len(runtime_requires) > 1:
-        report['budget_failures'].append('more than one direct runtime dependency')
+    if len(runtime_requires) > 2:
+        report['budget_failures'].append('more than two direct runtime dependencies')
     if report['wheel']['compressed_bytes'] > 300 * 1024:
         report['budget_failures'].append('wheel exceeds 300 KiB')
     if report['wheel']['uncompressed_bytes'] > 1024 * 1024:

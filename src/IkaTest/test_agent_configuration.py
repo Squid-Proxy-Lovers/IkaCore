@@ -65,14 +65,14 @@ def test_clone_preserves_effective_prompt_model_and_async_overrides():
     agent = IkaBaseAgent('a', prompt='task', model_id='gpt-4o', api_key='key',
                          prompts=PromptConfig(system_prompt='original'))
     agent.system_prompt = 'delegated task guard'
-    agent.use_async = True
+    agent.async_requests = True
     agent.api_url = 'https://fixture.invalid'
     agent.max_tokens = 123
     agent.temperature = 0.4
     clone = agent.clone_for_run()
-    assert clone.system_prompt == 'delegated task guard' and clone.use_async
+    assert clone.system_prompt == 'delegated task guard' and clone.async_requests
     assert clone.api_url == 'https://fixture.invalid' and clone.max_tokens == 123 and clone.temperature == 0.4
-    assert agent.config.prompts.system_prompt == 'original' and not agent.config.policy.use_async
+    assert agent.config.prompts.system_prompt == 'original' and not agent.config.policy.async_requests
     assert replace(agent.config.prompts, system_prompt='new').system_prompt == 'new'
     clone.shutdown()
     agent.shutdown()

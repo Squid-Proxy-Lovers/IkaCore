@@ -13,7 +13,7 @@ _BENCHMARK_PROVIDER = ProviderConfig(api_url='https://benchmark.invalid/v1/respo
 _BENCHMARK_OUTPUT = OutputConfig(cli=False, show_usage_level0=False)
 _BENCHMARK_LIMITS = ExecutionLimits(maxsteps=1)
 _BENCHMARK_POLICY = ExecutionPolicy(max_step_extensions=0)
-_BENCHMARK_ASYNC_POLICY = ExecutionPolicy(use_async=True, max_step_extensions=0)
+_BENCHMARK_ASYNC_POLICY = ExecutionPolicy(async_requests=True, max_step_extensions=0)
 
 
 def setup(case: str, directory: Path):
@@ -123,7 +123,7 @@ def tool_case(case):
 
 class FixtureAgent:
     """Pure scheduler fixture; deliberately performs no model/tool/network work."""
-    Stages = ()
+    stages = ()
     use_async = False
 
     def __init__(self, name):

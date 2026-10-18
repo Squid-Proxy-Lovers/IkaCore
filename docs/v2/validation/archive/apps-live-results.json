@@ -99,7 +99,7 @@
     }
   ],
   "installed_identity": [
-    "/private/tmp/ikacore-dedupe/artifacts/installed-runtime/lib/python3.13/site-packages/IkaCore/__init__.py",
+    "<temporary-runtime>",
     "3.13.15"
   ],
   "total_request_attempts": 39,

@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Set
 
 from .config import OutputConfig
-from .events import can_inherit_silent_output, output_scope
+from .events import RuntimeOutput, can_inherit_silent_output, output_scope
 from .output_adapters import make_output
 from .workflow_async import WorkflowExecution
 from .workflow_async_executor import AsyncWorkflowExecutor
@@ -39,14 +39,14 @@ class IkaWorkflow(WorkflowSnapshotMixin, WorkflowExecution):
     ):
         if not nodes:
             raise ValueError("Workflow requires at least one node.")
-        self.events = make_output(output or OutputConfig())
+        self.events: RuntimeOutput = make_output(output or OutputConfig())
         self.name = name
         self.description = description
         self.nodes = nodes
         self.edges = edges
-        self.compress_hook = compress_hook or self._default_compress_hook
-        self.start_node = start_node or nodes[0].name
-        self.async_executor = async_executor or AsyncWorkflowExecutor(max_workers=max_parallel_workers)
+        self.compress_hook: WorkflowCompressionHook = compress_hook or self._default_compress_hook
+        self.start_node: str = start_node or nodes[0].name
+        self.async_executor: AsyncWorkflowExecutor = async_executor or AsyncWorkflowExecutor(max_workers=max_parallel_workers)
         self._owns_executor = async_executor is None
 
         self._node_index: Dict[str, WorkflowNode] = {node.name: node for node in nodes}
@@ -63,12 +63,8 @@ class IkaWorkflow(WorkflowSnapshotMixin, WorkflowExecution):
         self._next_reachable_nodes: Set[str] = self._compute_next_reachable_nodes()
 
     def run(self, initial_context: Optional[str] = None, parallel: bool = False, *,
-            concurrency: int | None = None, use_async: bool | None = None) -> Dict[str, WorkflowResult]:
+            concurrency: int | None = None) -> Dict[str, WorkflowResult]:
         """Block until completion; parallel uses worker threads, bounded by concurrency."""
-        if use_async is not None:
-            if parallel and not use_async:
-                raise ValueError("Conflicting parallel and deprecated use_async values")
-            parallel = use_async
         if concurrency is not None:
             if concurrency < 1:
                 raise ValueError("concurrency must be positive")
@@ -76,7 +72,7 @@ class IkaWorkflow(WorkflowSnapshotMixin, WorkflowExecution):
                 if not self._owns_executor:
                     raise ValueError("concurrency must match the caller-owned executor")
                 self.async_executor.shutdown()
-                self.async_executor = AsyncWorkflowExecutor(max_workers=concurrency)
+                self.async_executor: AsyncWorkflowExecutor = AsyncWorkflowExecutor(max_workers=concurrency)
             parallel = True
         use_async = parallel
         if can_inherit_silent_output(self.events):
@@ -95,7 +91,7 @@ class IkaWorkflow(WorkflowSnapshotMixin, WorkflowExecution):
 def run_workflow(self: IkaWorkflow, initial_context: Optional[str], use_async: bool) -> Dict[str, WorkflowResult]:
     reset_context_cache(self, initial_context)
     if use_async:
-        return self.run_async(initial_context)
+        return self._run_parallel(initial_context)
     from .workflow_sync_dataflow import run_sync_dataflow
     return run_sync_dataflow(self, initial_context)
 

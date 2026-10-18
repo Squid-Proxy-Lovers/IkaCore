@@ -57,25 +57,10 @@ def _verify_wheel() -> None:
                         ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"))
         wheel_dir = Path(temp) / "dist"
         wheel_dir.mkdir()
-        print(
-            "$ pip wheel . --no-deps --no-build-isolation",
-            flush=True,
-        )
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "wheel",
-                ".",
-                "--no-deps",
-                "--no-build-isolation",
-                "-w",
-                str(wheel_dir),
-            ],
-            cwd=source_dir,
-            check=True,
-        )
+        print("$ python -m build --no-isolation (sdist and wheel)", flush=True)
+        subprocess.run([sys.executable, "-m", "build", "--no-isolation", "--outdir", str(wheel_dir)],
+                       cwd=source_dir, check=True)
+        subprocess.run([sys.executable, "-m", "twine", "check", *map(str, wheel_dir.iterdir())], check=True)
         wheels = list(wheel_dir.glob("*.whl"))
         if len(wheels) != 1:
             raise RuntimeError(
@@ -85,7 +70,8 @@ def _verify_wheel() -> None:
         if ARTIFACTS.exists():
             for previous in ARTIFACTS.glob("*.whl"):
                 previous.unlink()
-            shutil.copy2(wheels[0], ARTIFACTS / wheels[0].name)
+            for artifact in wheel_dir.iterdir():
+                shutil.copy2(artifact, ARTIFACTS / artifact.name)
         print("$ verify wheel contains required package data", flush=True)
         with zipfile.ZipFile(wheels[0]) as archive:
             names = set(archive.namelist())
@@ -116,33 +102,26 @@ def _verify_wheel() -> None:
             )
 
         print("$ verify built wheel imports outside source tree", flush=True)
-        install_dir = Path(temp) / "installed"
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "--no-deps",
-                "--target",
-                str(install_dir),
-                str(wheels[0]),
-            ],
-            check=True,
-        )
+        runtime = Path(temp) / "runtime"
+        # Share tool dependencies; the noneditable wheel is installed in this environment's
+        # own site-packages and must win over any development installation.
+        subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(runtime)],
+                       check=True)
+        python = runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        subprocess.run([sys.executable, "-m", "pip", "--python", str(python), "install",
+                        "--ignore-installed", str(wheels[0])], check=True)
         env = dict(os.environ)
-        env["PYTHONPATH"] = str(install_dir)
-        subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "import IkaCore, IkaModel, IkaMem; from importlib.metadata import version; "
-                "assert IkaCore.__version__ == IkaModel.__version__ == IkaMem.__version__ == version('ikacore')",
-            ],
-            cwd=temp,
-            env=env,
-            check=True,
-        )
+        env.pop("PYTHONPATH", None)
+        subprocess.run([str(python), "-c",
+                        "import IkaCore, IkaModel, IkaMem; from importlib.metadata import version; "
+                        "assert 'site-packages' in IkaCore.__file__; "
+                        "assert IkaCore.__version__ == IkaModel.__version__ == IkaMem.__version__ == version('ikacore')"],
+                       cwd=temp, env=env, check=True)
+        subprocess.run([sys.executable, str(ROOT / "scripts/check_public_types.py"),
+                        "--python", str(python), "--output", str(ARTIFACTS / "types")],
+                       cwd=temp, env=env, check=True)
+        subprocess.run([str(python), str(ROOT / "scripts/check_offline_wheel.py")],
+                       cwd=temp, env=env, check=True)
 
 
 def main() -> int:
@@ -154,7 +133,10 @@ def main() -> int:
     )
     args = parser.parse_args()
     labels = [label for label, _ in _commands()] + [
-        "pip wheel . --no-deps --no-build-isolation",
+        "python -m build --no-isolation (sdist and wheel)",
+        "twine check wheel and sdist",
+        "installed-wheel public consumer and verifytypes floors",
+        "installed-wheel offline docs/examples/apps",
         "verify wheel contains required package data",
         "verify built wheel imports outside source tree",
     ]

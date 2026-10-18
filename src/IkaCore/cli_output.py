@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from threading import Lock, local
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Protocol, Tuple, cast
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Protocol, Self, Tuple, cast
 
 from IkaModel.runtime_errors import IkaRequestControlError
 
@@ -246,7 +246,7 @@ class BoxRenderer(BoxFrameMixin, BoxTextMixin):
     DEFAULT_WIDTH: int = 80
     NO_TRUNCATE_TYPES: ClassVar[set[OutputType]] = {OutputType.AGENT_INIT, OutputType.SUMMARIZATION}
 
-    def __init__(self, use_colors: bool = True, width: int = 80):
+    def __init__(self, use_colors: bool = True, width: int = 80) -> None:
         self.use_colors = use_colors
         self.width = width
 
@@ -273,7 +273,7 @@ class BoxRenderer(BoxFrameMixin, BoxTextMixin):
 
 
 class OutputBuffer:
-    def __init__(self, renderer: Optional[BoxRenderer] = None, *, writer: Optional[Callable[[str], None]] = None, sink: Optional[Callable[[OutputContext, str], None]] = None):
+    def __init__(self, renderer: Optional[BoxRenderer] = None, *, writer: Optional[Callable[[str], None]] = None, sink: Optional[Callable[[OutputContext, str], None]] = None) -> None:
         self._writer = writer or _write_stdout
         self._sink = sink or _route_to_sink
         self._lock = Lock()
@@ -281,16 +281,16 @@ class OutputBuffer:
         self._buffering_enabled = False
         self._renderer = renderer or BoxRenderer()
 
-    def set_renderer(self, renderer: BoxRenderer):
+    def set_renderer(self, renderer: BoxRenderer) -> None:
         with self._lock:
             self._renderer = renderer
 
-    def enable_buffering(self):
+    def enable_buffering(self) -> None:
         with self._lock:
             self._buffering_enabled = True
             self._buffers.clear()
 
-    def disable_buffering(self):
+    def disable_buffering(self) -> None:
         with self._lock:
             self._buffering_enabled = False
 
@@ -298,7 +298,7 @@ class OutputBuffer:
         with self._lock:
             return self._buffering_enabled
 
-    def add(self, ctx: OutputContext):
+    def add(self, ctx: OutputContext) -> None:
         with self._lock:
             if self._buffering_enabled:
                 self._buffers[self._buffer_key(ctx)].append(ctx)
@@ -308,7 +308,7 @@ class OutputBuffer:
     def _buffer_key(self, ctx: OutputContext) -> Tuple[str, int]:
         return (ctx.hierarchy_chain[0] if ctx.hierarchy_chain else "unknown", ctx.instance_id)
 
-    def _print_output(self, ctx: OutputContext):
+    def _print_output(self, ctx: OutputContext) -> None:
         rendered = self._renderer.render(ctx) + "\n"
         self._sink(ctx, rendered)
         self._writer(rendered)
@@ -327,7 +327,7 @@ class OutputBuffer:
             self._sink(ctx, rendered + "\n")
         return rendered_outputs
 
-    def flush(self):
+    def flush(self) -> None:
         with self._lock:
             if not self._buffers:
                 self._buffering_enabled = False
@@ -341,7 +341,7 @@ class OutputBuffer:
 
 
 class CLIOutputSingletonMixin:
-    def __new__(cls):
+    def __new__(cls) -> Self:
         cls_any = cast(Any, cls)
         with cls_any._instance_lock:
             if cls_any._instance is None:
@@ -355,7 +355,7 @@ class CLIOutputStepMixin:
         with self._lock:
             return self._step_counters.get(agent_name, 0)
 
-    def set_step(self: _CLIOutputStepState, agent_name: str, step: int):
+    def set_step(self: _CLIOutputStepState, agent_name: str, step: int) -> None:
         with self._lock:
             self._step_counters[agent_name] = step
             if step == 1 and agent_name not in self._agent_start_times:
@@ -367,21 +367,21 @@ class CLIOutputStepMixin:
             self._step_counters[agent_name] = current + 1
             return current + 1
 
-    def reset_steps(self: _CLIOutputStepState):
+    def reset_steps(self: _CLIOutputStepState) -> None:
         with self._lock:
             self._step_counters.clear()
             self._agent_start_times.clear()
 
 
 class CLIOutputEmitMixin:
-    def configure(self: _CLIOutputEmitState, use_colors: bool = True, width: int = 80):
+    def configure(self: _CLIOutputEmitState, use_colors: bool = True, width: int = 80) -> None:
         self._renderer = BoxRenderer(use_colors=use_colors, width=width)
         self._buffer.set_renderer(self._renderer)
 
-    def start_parallel(self: _CLIOutputEmitState):
+    def start_parallel(self: _CLIOutputEmitState) -> None:
         self._buffer.enable_buffering()
 
-    def end_parallel(self: _CLIOutputEmitState):
+    def end_parallel(self: _CLIOutputEmitState) -> None:
         self._buffer.flush()
 
     def is_buffering(self: _CLIOutputEmitState) -> bool:
@@ -393,10 +393,10 @@ class CLIOutputEmitMixin:
     def _get_instance_id(self: _CLIOutputEmitState) -> int:
         return getattr(self._thread_local, "instance_id", 0)
 
-    def set_instance_id(self: _CLIOutputEmitState, instance_id: int):
+    def set_instance_id(self: _CLIOutputEmitState, instance_id: int) -> None:
         self._thread_local.instance_id = instance_id
 
-    def emit(self: _CLIOutputEmitState, output_type: OutputType, content: str, hierarchy: List[str], step: Optional[int] = None, instance_id: Optional[int] = None):
+    def emit(self: _CLIOutputEmitState, output_type: OutputType, content: str, hierarchy: List[str], step: Optional[int] = None, instance_id: Optional[int] = None) -> None:
         agent_name = hierarchy[0] if hierarchy else "unknown"
         step_number = step if step is not None else self.get_step(agent_name)
         elapsed = self._elapsed_for_agent(agent_name)
@@ -421,7 +421,7 @@ class CLIOutputEmitMixin:
 
 
 class CLIOutputAgentEventsMixin:
-    def agent_init(self: _CLIOutputEventsState, agent_name: str, hierarchy: List[str], step: int = 0, description: str = "", **kwargs):
+    def agent_init(self: _CLIOutputEventsState, agent_name: str, hierarchy: List[str], step: int = 0, description: str = "", **kwargs: Any) -> None:
         content_parts = [f"Initializing agent: {agent_name}"]
         if description:
             content_parts.append(f"Description: {description}")
@@ -429,17 +429,17 @@ class CLIOutputAgentEventsMixin:
             content_parts.append(f"Config: {self._format_config(kwargs)}")
         self.emit(OutputType.AGENT_INIT, "\n".join(content_parts), hierarchy, step)
 
-    def agent_response(self: _CLIOutputEventsState, agent_name: str, response: str, hierarchy: List[str], step: int, is_final: bool = False):
+    def agent_response(self: _CLIOutputEventsState, agent_name: str, response: str, hierarchy: List[str], step: int, is_final: bool = False) -> None:
         status = " (Final)" if is_final else ""
         content = f"Agent: {agent_name}{status}\nResponse:\n{response}"
         self.emit(OutputType.AGENT_RESPONSE, content, hierarchy, step)
 
-    def summarization(self: _CLIOutputEventsState, agent_name: str, summary: str, hierarchy: Optional[List[str]] = None, step: int = 0):
+    def summarization(self: _CLIOutputEventsState, agent_name: str, summary: str, hierarchy: Optional[List[str]] = None, step: int = 0) -> None:
         effective_hierarchy = hierarchy if hierarchy is not None else [agent_name]
         content = f"Summary for {agent_name}:\n{summary}"
         self.emit(OutputType.SUMMARIZATION, content, effective_hierarchy, step)
 
-    def workflow_status(self: _CLIOutputEventsState, workflow_name: str, message: str, step: int = 0):
+    def workflow_status(self: _CLIOutputEventsState, workflow_name: str, message: str, step: int = 0) -> None:
         content = f"Workflow: {workflow_name}\n{message}"
         self.emit(OutputType.AGENT_INIT, content, [workflow_name], step)
 
@@ -448,7 +448,7 @@ class CLIOutputAgentEventsMixin:
 
 
 class CLIOutputToolEventsMixin:
-    def tool_call(self: _CLIOutputEventsState, tool_name: str, args: Dict[str, Any], hierarchy: List[str], step: int):
+    def tool_call(self: _CLIOutputEventsState, tool_name: str, args: Dict[str, Any], hierarchy: List[str], step: int) -> None:
         content = f"Calling tool: {tool_name}\nArguments:\n{self._format_tool_args(args)}"
         self.emit(OutputType.TOOL_CALL, content, hierarchy, step)
 
@@ -460,7 +460,7 @@ class CLIOutputToolEventsMixin:
         step: int,
         is_error: bool = False,
         is_timeout: bool = False,
-    ):
+    ) -> None:
         content = f"Tool: {tool_name}\n{self._tool_result_prefix(is_error, is_timeout)}:\n{result}"
         self.emit(OutputType.TOOL_RESULT, content, hierarchy, step)
 
@@ -496,7 +496,7 @@ class CLIOutput(
         instance._buffer = OutputBuffer(instance._renderer, writer=write_stdout, sink=lambda ctx, rendered: None)
         return instance
 
-    def __init__(self):
+    def __init__(self) -> None:
         if getattr(self, "_initialized", False):
             return
 

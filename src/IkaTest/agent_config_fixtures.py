@@ -20,7 +20,7 @@ def agent_kwargs(values):
     group = {key: values.pop(key) for key in ('maxsteps', 'step_timeout', 'max_tool_rounds', 'max_tool_calls', 'rate_limit_per_min', 'per_tool_rate_limit') if key in values}
     if group:
         values["limits"] = ExecutionLimits(**group)
-    group = {key: values.pop(key) for key in ('final_answer_check', 'max_step_extensions', 'extend_steps_by', 'max_stage_extensions', 'extend_stage_steps_by', 'use_async') if key in values}
+    group = {key: values.pop(key) for key in ('final_answer_check', 'max_step_extensions', 'extend_steps_by', 'max_stage_extensions', 'extend_stage_steps_by', 'async_requests') if key in values}
     if "final_answer_check" in group:
         group["final_answer_checks"] = tuple(group.pop("final_answer_check") or ())
     if group:

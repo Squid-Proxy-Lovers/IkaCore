@@ -1,3 +1,5 @@
+> Historical development evidence. Counts and API examples apply only to the recorded revision.
+
 # Integrated v2 ergonomics / reasoning / hardening validation
 
 Validated runtime/test source revision: **`f8c6c1a2105efc6bb2972b075b4fc4bc51829e1c`**.
@@ -19,7 +21,7 @@ that field is the parent revision, not the integrated runtime identity.
 Historical results remain labeled separately:
 [pre-ergonomics merge at 8efd658](merge-validation-before-ergonomics.md),
 [hardening at dba0e05](hardening-validation.md),
-[reasoning branch](REASONING_REPLAY.md), and
+[reasoning branch](reasoning-replay.md), and
 [ergonomics-only at ed55da5](ergonomics-handoff.md).
 
 ## Final sequential gates
@@ -61,7 +63,7 @@ access. No tests, replay-safety checks or coverage floors were disabled.
 - **97.1816% branches**: **2,655 / 2,732 arcs**;
   **77** uncovered arcs.
 - **99.3842% combined** statement/branch coverage.
-- **129 runtime modules / 16 areas**, **149 required area/scenario checks**
+- **129 runtime modules / 16 areas**, **148 required area/scenario checks (146 unique)**
   (**146 unique selectors**), **zero gate failures**.
 - Global floors remain **99% lines / 95% branches / 99% combined**.
   Every per-area hardening floor was compared with `7c410f3` and preserved exactly.
@@ -168,7 +170,7 @@ being promoted to a perfect-retention claim.
 Runtime fingerprint matches the six-app wheel. The reasoning case skipped because the
 backend exposed no reasoning item; this live run does not establish native reasoning replay.
 Seven-route signed/encrypted replay is verified offline, and older high-effort live evidence
-remains explicitly historical in [REASONING_REPLAY.md](REASONING_REPLAY.md).
+remains explicitly historical in [REASONING_REPLAY.md](reasoning-replay.md).
 
 | Case | Result | Reason | Seconds |
 | --- | --- | --- | ---: |
@@ -195,7 +197,7 @@ reported token totals are not billing records. Only Codex was exercised live.
 ## Documentation and retained evidence
 
 One coherent CHANGELOG 2.0.0 entry, the migration table, README/USAGE, generated API reference,
-dogfood/handoff history and [application results](../../examples/apps/LIVE_RESULTS.md) now
+dogfood/handoff history and [application results](apps-live-results.md) now
 describe the same public contracts. API completeness is checked by the full pytest suite.
 Historical measurements retain their own revisions rather than being relabeled.
 

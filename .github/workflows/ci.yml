@@ -25,6 +25,8 @@ jobs:
           - {python-version: "3.12", httpx: current}
           - {python-version: "3.13", httpx: current}
           - {python-version: "3.11", httpx: "0.27.0"}
+          - {python-version: "3.12", httpx: "0.27.0"}
+          - {python-version: "3.13", httpx: "0.27.0"}
     env:
       IKACORE_LIVE_PROVIDER_TESTS: "0"
     steps:

@@ -31,7 +31,7 @@ from .snapshot_schema import connect, decode_frame_row, init_schema, transaction
 
 class SnapshotStore:
     def __init__(self, db_path: str = "runtime-data/snapshots.db") -> None:
-        self.db_path = str(db_path)
+        self.db_path: str = str(db_path)
         self._connections = threading.local()
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(self.db_path, os.O_CREAT | os.O_WRONLY, 0o600)

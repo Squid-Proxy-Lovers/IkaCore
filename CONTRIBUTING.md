@@ -140,8 +140,8 @@ Select providers with repeated `--provider`, or helper option `--providers codex
 | `workflow_hitl` | All; two dependent nodes, ask_user pause, resume_input, random value propagation through a named synthetic context field |
 
 Unsupported cases are explicit skips, not compatibility claims. The current runtime has
-no SSE path outside Codex and no Anthropic extended-thinking configuration or signed
-thinking-block replay. Gemini/OpenRouter reasoning is not exercised by this harness.
+no SSE path outside Codex. Anthropic manual/adaptive thinking and signed replay are
+implemented; provider-specific restrictions are documented in [reasoning guidance](docs/providers/reasoning.md). Gemini/OpenRouter reasoning is not exercised by this harness.
 If a reasoning model exposes no tool-turn reasoning, `reasoning_tools` records
 `reasoning_not_exposed`; preservation remains unverified. Use a reasoning model for
 that case (for example, DeepSeek's reasoner rather than chat model).
@@ -181,23 +181,15 @@ and `models` (JSON mapping) inputs. Configure the credential variables above as 
 input. It has read-only repository permissions, pinned actions, a bounded job timeout,
 and uploads only sanitized reports. It never runs on PRs or a schedule.
 
-The latest installed-wheel matrix recorded **14 passed, 0 failed, 1 skipped** with
-`gpt-5.6-sol` and local login on **2026-10-18 UTC**, runtime/test revision `179b52e`.
-`reasoning_tools` skipped because the service exposed no tool-turn reasoning. Each
-case was bounded to 60 seconds. See [the merged validation report](docs/v2/merged-validation.md)
-for results and revision labels; the earlier `21184cc` harness run used the pre-refactor API.
+Current release evidence is collected in [release validation](docs/v2/validation/release-2.0.0.md).
+The earlier integrated run at f8c6c1a and older matrix at 179b52e are historical;
+see the [integrated report](docs/v2/validation/archive/merge-validation.md).
 
-Offline repro `python scripts/live_replay_repro.py` shows that Codex and OpenAI
-Responses parse synthetic tool-turn reasoning but omit it from the next request, and
-Anthropic neither enables extended thinking nor preserves its signed thinking blocks.
-Z.AI is a positive replay control. These are existing runtime gaps, left unchanged by
-the live harness work; a live reasoning skip does not validate those paths.
+The offline seven-route replay probe verifies OpenAI Responses/Codex native reasoning,
+Anthropic signed thinking, Gemini signatures, OpenRouter details, DeepSeek and Z.AI
+reasoning. Run python scripts/live_replay_repro.py. Offline contracts do not establish
+live provider/model coverage; reasoning_not_exposed remains an explicit live skip.
 
-The historical **Codex 8/8** result on 2026-10-17 used `gpt-5.6-sol`, local Codex login,
-and the installed 2.0.0 wheel at runtime revision `1f2bab0`; `dc9efbd` retains that
-validated runtime baseline. An earlier 8/8 run at `183ce24` predates review fixes.
-These results establish that model/endpoint/account combination only. Other providers
-remain unverified until their keys and models are configured and their matrix passes.
 
 ## Project Conventions
 
@@ -231,8 +223,8 @@ and wheel tooling, so the no-isolation packaging check also works in fresh Pytho
 against the actual Ruff configuration. Keep functions within 70 lines and modules within
 600; large cohesive classes are allowed.
 
-Coverage requires at least 91% combined coverage, **94% executable-line coverage**, and
-**85% branch coverage**, plus independent floors for each of the 16 subsystems in
+Coverage requires at least 99% combined coverage, **99% executable-line coverage**, and
+**95% branch coverage**, plus independent floors for each of the 16 subsystems in
 `scripts/coverage_manifest.json`. Every runtime module must belong to exactly one area.
 Required scenarios must appear and pass in JUnit; skipped/missing scenarios fail the gate.
 Generated reports include observed test contexts, exact missing line/branch locations,
@@ -240,12 +232,21 @@ excluded-line counts, and known gaps. Line/branch coverage does not measure mode
 
 Reports are written to `artifacts/quality/coverage-matrix.md`, `coverage-matrix.json`,
 `coverage.json`, and `tests.xml`. They are uploaded from CI on Python 3.11, 3.12 and 3.13
-on Ubuntu, plus Python 3.11 with the minimum HTTPX 0.27.0 dependency. Live-provider tests remain opt-in; the offline CI records their skips.
+on Ubuntu, each with minimum HTTPX 0.27.0 and current supported HTTPX (six cells), all using httpcore 1.0.9. Live-provider tests remain opt-in; the offline CI records their skips.
 
 The policy deliberately exempts constant `getattr`/`setattr` adapters, public async
 `timeout` arguments, and typed dataclass-factory lambdas from style-oriented lint rules.
 Mutable defaults, lost tasks, missing exception causes, blocking async calls, blind
 exception assertions, and overly complex functions remain checked.
+
+## Installed-wheel release checks
+
+The quality command builds sdist and wheel, checks both with twine, runs external
+strict-Pyright consumer snippets, and enforces 100% owned type completeness for IkaCore,
+IkaModel, IkaMem and IkaCore.testing with --ignoreexternal. Unknown HTTPX internals do not
+lower this floor. Documentation links, runnable adoption snippets, seven examples and
+six applications (plus cancellation) are checked offline against the installed wheel.
+Mem0 documentation uses an in-memory substitute for the optional client boundary.
 
 ## Reproducing the offline benchmarks
 
@@ -271,7 +272,7 @@ averages, not individual request latency. RSS includes the interpreter/measureme
 sizes, RSS, wall times, and two phases of repeated-run allocation measurements. The report
 records revision/dirty state and wheel/harness hashes, and verifies that measured runtime files match the wheel. `benchmark.md` is the readable table.
 CI runs a smaller benchmark sample and uploads the evidence. Portable gates limit the
-wheel to 300 KiB, unpacked wheel content to 1 MiB, and direct runtime requirements to one.
+wheel to 300 KiB, unpacked wheel content to 1 MiB, and direct runtime requirements to two (httpx>=0.27,<0.29 and httpcore==1.0.9).
 Timing results are reported rather than enforcing noisy cross-machine latency thresholds.
 
 

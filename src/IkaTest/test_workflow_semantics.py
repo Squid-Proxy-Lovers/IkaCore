@@ -120,7 +120,7 @@ class TestWorkflowChildEdges:
         assert "follower" in results
         assert "child" not in results
         assert child.execution.call_count == 0
-        assert parent._test_clones[0].Stages[0].subagents == [child]
+        assert parent._test_clones[0].stages[0].subagents == [child]
 
     def test_async_workflow_ignores_child_only_nodes(self):
         parent_stage = IkaStage("ParentStage", "Do parent work", [])
@@ -463,7 +463,7 @@ class TestWorkflowAsyncSemantics:
         sync_agent.execution = MagicMock(return_value={"final_message": "sync done"})
 
         async_agent = _agent("async")
-        async_agent.use_async = True
+        async_agent.async_requests = True
 
         async def async_execution():
             return {"final_message": "async done"}

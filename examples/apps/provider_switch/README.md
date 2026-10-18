@@ -13,4 +13,4 @@ Every route returns READY and resumes its saved turn. --live defaults to all rou
 
 Offline mode runs real agent/tool/workflow/snapshot code against scripted provider-native HTTP response envelopes. It blocks accidental HTTP transport access and needs no credentials. Live mode opts in to the local Codex CLI login (or CODEX_BEARER); prompts and files are synthetic. Request scopes allow one attempt and expire after 90 seconds; per-request agent timeouts are at most 45 seconds. Each subprocess session owns its own scope. The apps print only check results, never model answers or credentials.
 
-See [live outcomes](../LIVE_RESULTS.md) and [friction and findings](../../../docs/v2/dogfood-report.md).
+See [live outcomes](../../../docs/v2/validation/archive/apps-live-results.md) and [usage guide](../../../docs/USAGE.md).

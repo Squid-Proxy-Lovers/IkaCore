@@ -1,3 +1,5 @@
+> Historical development evidence. Counts and API examples apply only to the recorded revision.
+
 # Final v2 core review fixes
 
 Implemented on `v2-fix-core` from `1ad479b`, exclusively in the assigned worktree.

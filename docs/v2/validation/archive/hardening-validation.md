@@ -1,3 +1,5 @@
+> Historical development evidence. Counts and API examples apply only to the recorded revision.
+
 # v2 hardening validation
 
 Historical measurements for `v2-hardening` through `dba0e05`, before its merge with

@@ -18,7 +18,7 @@ INTERRUPTED_STATUSES = {"paused", "awaiting_user_input"}
 
 def graph_fingerprint(workflow: Any) -> str:
     nodes = [(n.name, n.instances, n.instance_inputs, n.agent.model_id, n.agent.prompt,
-              n.agent.system_prompt, n.agent.description, [(s.name, s.prompt) for s in cast(list[Any], n.agent.Stages or [])])
+              n.agent.system_prompt, n.agent.description, [(s.name, s.prompt) for s in cast(list[Any], n.agent.stages or [])])
              for n in workflow.nodes]
     edges = [(e.source, e.target, e.edge_type, e.stage_index) for e in workflow.edges]
     return hashlib.sha256(json.dumps([nodes, edges, workflow.start_node], sort_keys=True).encode()).hexdigest()

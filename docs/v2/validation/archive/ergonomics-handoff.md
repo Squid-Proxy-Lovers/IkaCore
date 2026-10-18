@@ -1,3 +1,5 @@
+> Historical development evidence. Counts and API examples apply only to the recorded revision.
+
 # V2 application ergonomics handoff
 
 Worktree: `/private/tmp/ikacore-w-ergonomics`. Branch: `v2-ergonomics`, based on
@@ -124,8 +126,8 @@ calls; no extensions; one validation correction with two extra steps. A whole-op
 
 ## Intentional changes and compatibility decisions
 
-Every item is documented in [CHANGELOG.md 2.0.0](../../CHANGELOG.md) and the
-[v2 migration table](README.md#breaking-changes-and-migration):
+Every item is documented in [CHANGELOG.md 2.0.0](../../../../CHANGELOG.md) and the
+[v2 migration table](../../README.md#breaking-changes-and-migration):
 
 1. No constructor validator execution or docstring/annotation requirement; non-bool returns
    fail at execution. Staged results validate. Correction uses only `agent_end` and existing
@@ -171,7 +173,7 @@ billing records; one pipeline probe expired before dispatch, so live model HTTP 
 are at most 43. No failed attempts were discarded. Historical 74-boundary dogfood evidence
 is preserved separately; differing live turn counts prevent a performance comparison.
 Full reproducible commands and sanitized JSON are in
-[LIVE_RESULTS.md](../../examples/apps/LIVE_RESULTS.md).
+[LIVE_RESULTS.md](apps-live-results.md).
 
 ## Historical ergonomics-only verification (`ed55da5`)
 

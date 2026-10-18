@@ -1,3 +1,5 @@
+> Historical development evidence. Counts and API examples apply only to the recorded revision.
+
 # Provider reasoning replay (v2.0.0 unreleased)
 
 ## OpenAI Responses

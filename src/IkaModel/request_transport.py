@@ -123,7 +123,7 @@ class _SyncRequestAbort:
 
 
 class _RequestTransport(httpx.BaseTransport):
-    """Clone HTTPX/httpcore 1.x configuration, never live pool state.
+    """Clone HTTPX 0.27–0.28/httpcore 1.0.9 configuration, never live pool state.
 
     HTTPX has no public clone API. Both supported HTTPX versions use httpcore
     1.x, whose pools keep mutable request/connection state in these three fields.
@@ -137,7 +137,14 @@ class _RequestTransport(httpx.BaseTransport):
         self.owned = type(source) is httpx.HTTPTransport
         self.transport = copy.copy(source) if self.owned else source
         if self.owned:
-            pool = copy.copy(getattr(source, "_pool"))
+            source_pool = getattr(source, "_pool", None)
+            required = ("_connections", "_requests", "_optional_thread_lock", "_max_keepalive_connections")
+            if source_pool is None or any(not hasattr(source_pool, name) for name in required):
+                raise RuntimeError(
+                    "Controlled requests require HTTPX >=0.27,<0.29 and httpcore==1.0.9; "
+                    "required httpcore pool internals are missing. Reinstall the supported dependencies."
+                )
+            pool = copy.copy(source_pool)
             pool._connections = []
             pool._requests = []
             pool._optional_thread_lock = type(pool._optional_thread_lock)()

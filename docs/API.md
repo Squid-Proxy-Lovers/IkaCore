@@ -33,11 +33,11 @@ Declared fields: `kind`, `data`, `instance_id`.
 Import: `from IkaCore import RuntimeOutput`.
 
 ```python
-RuntimeOutput(subscribers: 'tuple[EventSubscriber, ...]' = (), *, cli_adapter: 'Any' = None)
+RuntimeOutput(subscribers: 'tuple[EventSubscriber, ...]' = (), *, cli_adapter: 'Any' = None) -> 'None'
 ```
 
-- `RuntimeOutput.agent_init(self, agent_name: 'str', hierarchy: 'List[str]', step: 'int' = 0, description: 'str' = '', **kwargs)`
-- `RuntimeOutput.agent_response(self, agent_name: 'str', response: 'str', hierarchy: 'List[str]', step: 'int', is_final: 'bool' = False)`
+- `RuntimeOutput.agent_init(self, agent_name: 'str', hierarchy: 'List[str]', step: 'int' = 0, description: 'str' = '', **kwargs: 'Any') -> 'None'`
+- `RuntimeOutput.agent_response(self, agent_name: 'str', response: 'str', hierarchy: 'List[str]', step: 'int', is_final: 'bool' = False) -> 'None'`
 - `RuntimeOutput.compute_cost(model_id: 'str', usage: 'dict[str, Any]') -> 'dict[str, float]'`
 - `RuntimeOutput.emit(self, output_type: 'OutputType', content: 'str', hierarchy: 'list[str]', step: 'int | None' = None, instance_id: 'int | None' = None) -> 'None'`
 - `RuntimeOutput.end_parallel(self) -> 'None'`
@@ -49,22 +49,22 @@ RuntimeOutput(subscribers: 'tuple[EventSubscriber, ...]' = (), *, cli_adapter: '
 - `RuntimeOutput.log_hitl_input(self, stage_name: 'str', user_text: 'str') -> 'None'`
 - `RuntimeOutput.log_hitl_prompt(self, stage_name: 'str') -> 'None'`
 - `RuntimeOutput.log_hitl_question(self, stage_name: 'str', question: 'str') -> 'None'`
-- `RuntimeOutput.log_input(self, messages: 'List[dict]') -> 'None'`
-- `RuntimeOutput.log_output(self, content: 'str', usage: 'Optional[Dict[str, Any]]' = None, cost: 'Optional[Dict[str, float]]' = None, message_history: 'Optional[dict]' = None) -> 'None'`
+- `RuntimeOutput.log_input(self, messages: 'List[dict[str, Any]]') -> 'None'`
+- `RuntimeOutput.log_output(self, content: 'str', usage: 'Optional[Dict[str, Any]]' = None, cost: 'Optional[Dict[str, float]]' = None, message_history: 'Optional[dict[str, Any]]' = None) -> 'None'`
 - `RuntimeOutput.log_stage_end(self, stage_name: 'str', used_steps: 'int') -> 'None'`
 - `RuntimeOutput.log_stage_start(self, stage_name: 'str', hitl: 'bool', remaining_steps: 'int', step_limit: 'int') -> 'None'`
-- `RuntimeOutput.log_step(self, stage_name: 'str', step_idx: 'int', output: 'str', tool_calls: 'list', usage: 'dict', cost: 'dict', elapsed: 'float') -> 'None'`
+- `RuntimeOutput.log_step(self, stage_name: 'str', step_idx: 'int', output: 'str', tool_calls: 'list[dict[str, Any]]', usage: 'dict[str, Any]', cost: 'dict[str, float]', elapsed: 'float') -> 'None'`
 - `RuntimeOutput.log_summary(self, summary: 'str') -> 'None'`
-- `RuntimeOutput.log_tool_results(self, tool_calls: 'List[dict]', tool_results: 'List[str]') -> 'None'`
+- `RuntimeOutput.log_tool_results(self, tool_calls: 'List[dict[str, Any]]', tool_results: 'List[str]') -> 'None'`
 - `RuntimeOutput.publish(self, kind: 'str', data: 'dict[str, Any]') -> 'None'`
 - `RuntimeOutput.set_instance_id(self, instance_id: 'int') -> 'None'`
 - `RuntimeOutput.set_step(self, agent_name: 'str', step: 'int') -> 'None'`
 - `RuntimeOutput.shutdown(self) -> 'None'`
 - `RuntimeOutput.start_parallel(self) -> 'None'`
-- `RuntimeOutput.summarization(self, agent_name: 'str', summary: 'str', hierarchy: 'Optional[List[str]]' = None, step: 'int' = 0)`
-- `RuntimeOutput.tool_call(self, tool_name: 'str', args: 'Dict[str, Any]', hierarchy: 'List[str]', step: 'int')`
-- `RuntimeOutput.tool_result(self, tool_name: 'str', result: 'str', hierarchy: 'List[str]', step: 'int', is_error: 'bool' = False, is_timeout: 'bool' = False)`
-- `RuntimeOutput.workflow_status(self, workflow_name: 'str', message: 'str', step: 'int' = 0)`
+- `RuntimeOutput.summarization(self, agent_name: 'str', summary: 'str', hierarchy: 'Optional[List[str]]' = None, step: 'int' = 0) -> 'None'`
+- `RuntimeOutput.tool_call(self, tool_name: 'str', args: 'Dict[str, Any]', hierarchy: 'List[str]', step: 'int') -> 'None'`
+- `RuntimeOutput.tool_result(self, tool_name: 'str', result: 'str', hierarchy: 'List[str]', step: 'int', is_error: 'bool' = False, is_timeout: 'bool' = False) -> 'None'`
+- `RuntimeOutput.workflow_status(self, workflow_name: 'str', message: 'str', step: 'int' = 0) -> 'None'`
 
 ### `IkaCore.output_scope`
 
@@ -79,10 +79,10 @@ output_scope(output: 'RuntimeOutput', *, share_cli: 'bool' = False) -> 'Iterator
 Import: `from IkaCore import AgentConfig`.
 
 ```python
-AgentConfig(name: 'str', description: 'str', prompt: 'str', model_id: 'str', api_key: 'str', tools: 'tuple[IkaTools, ...]' = (), stages: 'tuple[IkaStage, ...]' = (), provider: 'ProviderConfig' = ProviderConfig(api_url=None, max_tokens=50000, temperature=0.0, use_responses_api=True, reasoning_effort=None, thinking_budget_tokens=None), prompts: 'PromptConfig' = PromptConfig(system_prompt=None, start_prompt=None, end_prompt=None), limits: 'ExecutionLimits' = <factory>, policy: 'ExecutionPolicy' = ExecutionPolicy(final_answer_checks=(), max_step_extensions=2, extend_steps_by=3, max_stage_extensions=2, extend_stage_steps_by=3, validation_retries=3, validation_extra_steps=10, fail_closed=False, use_async=False), topology: 'AgentTopology' = AgentTopology(subagents=(), next_agent=None), output: 'OutputConfig' = OutputConfig(cli=True, subscribers=(), logging_level=0, logging_file='logs.txt', show_usage_level0=True, summarize_final=False)) -> None
+AgentConfig(name: 'str', description: 'str', prompt: 'str', model_id: 'str', api_key: 'str', tools: 'tuple[IkaTools, ...]' = (), stages: 'tuple[IkaStage, ...]' = (), provider: 'ProviderConfig' = ProviderConfig(api_url=None, max_tokens=50000, temperature=0.0, use_responses_api=True, reasoning_effort=None, thinking_budget_tokens=None), prompts: 'PromptConfig' = PromptConfig(system_prompt=None, start_prompt=None, end_prompt=None), limits: 'ExecutionLimits' = <factory>, policy: 'ExecutionPolicy' = ExecutionPolicy(final_answer_checks=(), max_step_extensions=2, extend_steps_by=3, max_stage_extensions=2, extend_stage_steps_by=3, validation_retries=3, validation_extra_steps=10, fail_closed=False, async_requests=False), topology: 'AgentTopology' = AgentTopology(subagents=(), next_agent=None), output: 'OutputConfig' = OutputConfig(cli=True, subscribers=(), logging_level=0, logging_file='logs.txt', show_usage_level0=True, summarize_final=False)) -> None
 ```
 
-AgentConfig(name: 'str', description: 'str', prompt: 'str', model_id: 'str', api_key: 'str', tools: 'tuple[IkaTools, ...]' = (), stages: 'tuple[IkaStage, ...]' = (), provider: 'ProviderConfig' = ProviderConfig(api_url=None, max_tokens=50000, temperature=0.0, use_responses_api=True, reasoning_effort=None, thinking_budget_tokens=None), prompts: 'PromptConfig' = PromptConfig(system_prompt=None, start_prompt=None, end_prompt=None), limits: 'ExecutionLimits' = <factory>, policy: 'ExecutionPolicy' = ExecutionPolicy(final_answer_checks=(), max_step_extensions=2, extend_steps_by=3, max_stage_extensions=2, extend_stage_steps_by=3, validation_retries=3, validation_extra_steps=10, fail_closed=False, use_async=False), topology: 'AgentTopology' = AgentTopology(subagents=(), next_agent=None), output: 'OutputConfig' = OutputConfig(cli=True, subscribers=(), logging_level=0, logging_file='logs.txt', show_usage_level0=True, summarize_final=False))
+AgentConfig(name: 'str', description: 'str', prompt: 'str', model_id: 'str', api_key: 'str', tools: 'tuple[IkaTools, ...]' = (), stages: 'tuple[IkaStage, ...]' = (), provider: 'ProviderConfig' = ProviderConfig(api_url=None, max_tokens=50000, temperature=0.0, use_responses_api=True, reasoning_effort=None, thinking_budget_tokens=None), prompts: 'PromptConfig' = PromptConfig(system_prompt=None, start_prompt=None, end_prompt=None), limits: 'ExecutionLimits' = <factory>, policy: 'ExecutionPolicy' = ExecutionPolicy(final_answer_checks=(), max_step_extensions=2, extend_steps_by=3, max_stage_extensions=2, extend_stage_steps_by=3, validation_retries=3, validation_extra_steps=10, fail_closed=False, async_requests=False), topology: 'AgentTopology' = AgentTopology(subagents=(), next_agent=None), output: 'OutputConfig' = OutputConfig(cli=True, subscribers=(), logging_level=0, logging_file='logs.txt', show_usage_level0=True, summarize_final=False))
 
 Declared fields: `name`, `description`, `prompt`, `model_id`, `api_key`, `tools`, `stages`, `provider`, `prompts`, `limits`, `policy`, `topology`, `output`.
 
@@ -119,10 +119,10 @@ Declared fields: `system_prompt`, `start_prompt`, `end_prompt`.
 Import: `from IkaCore import ExecutionLimits`.
 
 ```python
-ExecutionLimits(maxsteps: 'int' = 100, step_timeout: 'int' = 900, max_tool_rounds: 'int' = 5, max_tool_calls: 'int | None' = None, rate_limit_per_min: 'float | None' = None, context_budget: 'int | None' = None, per_tool_rate_limit: 'Mapping[str, float]' = <factory>) -> None
+ExecutionLimits(maxsteps: 'int' = 100, step_timeout: 'float' = 900, max_tool_rounds: 'int' = 5, max_tool_calls: 'int | None' = None, rate_limit_per_min: 'float | None' = None, context_budget: 'int | None' = None, per_tool_rate_limit: 'Mapping[str, float]' = <factory>) -> None
 ```
 
-ExecutionLimits(maxsteps: 'int' = 100, step_timeout: 'int' = 900, max_tool_rounds: 'int' = 5, max_tool_calls: 'int | None' = None, rate_limit_per_min: 'float | None' = None, context_budget: 'int | None' = None, per_tool_rate_limit: 'Mapping[str, float]' = <factory>)
+ExecutionLimits(maxsteps: 'int' = 100, step_timeout: 'float' = 900, max_tool_rounds: 'int' = 5, max_tool_calls: 'int | None' = None, rate_limit_per_min: 'float | None' = None, context_budget: 'int | None' = None, per_tool_rate_limit: 'Mapping[str, float]' = <factory>)
 
 Declared fields: `maxsteps`, `step_timeout`, `max_tool_rounds`, `max_tool_calls`, `rate_limit_per_min`, `context_budget`, `per_tool_rate_limit`.
 
@@ -133,12 +133,12 @@ Declared fields: `maxsteps`, `step_timeout`, `max_tool_rounds`, `max_tool_calls`
 Import: `from IkaCore import ExecutionPolicy`.
 
 ```python
-ExecutionPolicy(final_answer_checks: 'tuple[Callable[[AgentResult], bool], ...]' = (), max_step_extensions: 'int' = 2, extend_steps_by: 'int' = 3, max_stage_extensions: 'int' = 2, extend_stage_steps_by: 'int' = 3, validation_retries: 'int' = 3, validation_extra_steps: 'int' = 10, fail_closed: 'bool' = False, use_async: 'bool' = False) -> None
+ExecutionPolicy(final_answer_checks: 'tuple[Callable[[AgentResult], bool], ...]' = (), max_step_extensions: 'int' = 2, extend_steps_by: 'int' = 3, max_stage_extensions: 'int' = 2, extend_stage_steps_by: 'int' = 3, validation_retries: 'int' = 3, validation_extra_steps: 'int' = 10, fail_closed: 'bool' = False, async_requests: 'bool' = False) -> None
 ```
 
 Checks and bounded automatic continuations, with the established v2 defaults.
 
-Declared fields: `final_answer_checks`, `max_step_extensions`, `extend_steps_by`, `max_stage_extensions`, `extend_stage_steps_by`, `validation_retries`, `validation_extra_steps`, `fail_closed`, `use_async`.
+Declared fields: `final_answer_checks`, `max_step_extensions`, `extend_steps_by`, `max_stage_extensions`, `extend_stage_steps_by`, `validation_retries`, `validation_extra_steps`, `fail_closed`, `async_requests`.
 
 - `ExecutionPolicy.bounded(**overrides: 'Any') -> 'ExecutionPolicy'`
 
@@ -240,12 +240,12 @@ Value type: `str`.
 Import: `from IkaCore import IkaBaseAgent`.
 
 ```python
-IkaBaseAgent(name: 'str', description: 'str | None' = None, prompt: 'str' = '', *, model_id: 'str' = '', api_key: 'str' = '', tools: 'list[IkaTools] | None' = None, stages: 'list[IkaStage] | None' = None, Stages: 'list[IkaStage] | None' = None, provider: 'ProviderConfig | None' = None, prompts: 'PromptConfig | None' = None, limits: 'ExecutionLimits | None' = None, policy: 'ExecutionPolicy | None' = None, topology: 'AgentTopology | None' = None, output: 'OutputConfig | None' = None)
+IkaBaseAgent(name: 'str', description: 'str | None' = None, prompt: 'str' = '', *, model_id: 'str' = '', api_key: 'str' = '', tools: 'list[IkaTools] | None' = None, stages: 'list[IkaStage] | None' = None, provider: 'ProviderConfig | None' = None, prompts: 'PromptConfig | None' = None, limits: 'ExecutionLimits | None' = None, policy: 'ExecutionPolicy | None' = None, topology: 'AgentTopology | None' = None, output: 'OutputConfig | None' = None) -> 'None'
 ```
 
-Declared fields: `events`, `context_budget`, `reasoning_effort`, `max_tool_calls`, `final_answer_checks`, `max_tool_rounds`, `use_async`, `summarize_final`, `per_tool_rate_limit`, `rate_limit_per_min`, `logger`, `logging_file`, `logging_level`, `step_timeout`, `next_agent`, `subagents`, `Stages`, `temperature`, `max_tokens`, `api_url`, `api_key`, `model_id`, `use_responses_api`, `tools`, `end_prompt`, `start_prompt`, `system_prompt`, `description`, `name`, `state`.
+Declared fields: `events`, `context_budget`, `reasoning_effort`, `max_tool_calls`, `final_answer_checks`, `max_tool_rounds`, `async_requests`, `summarize_final`, `per_tool_rate_limit`, `rate_limit_per_min`, `logger`, `logging_file`, `logging_level`, `step_timeout`, `next_agent`, `subagents`, `stages`, `temperature`, `max_tokens`, `api_url`, `api_key`, `model_id`, `use_responses_api`, `tools`, `end_prompt`, `start_prompt`, `system_prompt`, `description`, `name`, `state`.
 
-Properties: `client`, `compaction_count`, `maxsteps`, `message_history`, `prompt`, `stages`, `transcript`.
+Properties: `client`, `compaction_count`, `maxsteps`, `message_history`, `prompt`, `transcript`.
 
 - `IkaBaseAgent.apply_workflow_stage_wiring(self, stage_wiring: "Dict[int, Dict[str, List['IkaBaseAgent']]]") -> 'None'`
 - `IkaBaseAgent.build_simple_tools(self) -> 'List[AgentTool]'`
@@ -301,8 +301,7 @@ IkaWorkflow(name: 'str', description: 'str', nodes: 'List[WorkflowNode]', edges:
 - `IkaWorkflow.enable_snapshots(self: Any, db_path: str = 'runtime-data/snapshots.db', control: Optional[IkaCore.runtime_control.RuntimeControl] = None) -> IkaCore.snapshot_store.SnapshotStore`
 - `IkaWorkflow.fork_from_snapshot(self: Any, snapshot_id: str, *, allow_unsafe_replay: bool = False, resume_input: str | dict[str, str] | None = None) -> Any`
 - `IkaWorkflow.resume_from_snapshot(self: Any, snapshot_id: str, *, allow_unsafe_replay: bool = False, resume_input: str | dict[str, str] | None = None) -> Any`
-- `IkaWorkflow.run(self, initial_context: 'Optional[str]' = None, parallel: 'bool' = False, *, concurrency: 'int | None' = None, use_async: 'bool | None' = None) -> 'Dict[str, WorkflowResult]'`
-- `IkaWorkflow.run_async(self: 'WorkflowStateProtocol', initial_context: 'Optional[str]' = None) -> 'Dict[str, WorkflowResult]'`
+- `IkaWorkflow.run(self, initial_context: 'Optional[str]' = None, parallel: 'bool' = False, *, concurrency: 'int | None' = None) -> 'Dict[str, WorkflowResult]'`
 - `IkaWorkflow.snapshot_runtime_info(self: Any) -> dict[str, typing.Any]`
 
 ### `IkaCore.WorkflowEdge`
@@ -342,8 +341,6 @@ WorkflowResult(name: 'str', final: 'str', summary: 'str', output: 'dict[str, Any
 Stored result for a completed workflow node.
 
 Declared fields: `name`, `final`, `summary`, `output`, `transcript`, `instance_outputs`, `instance_transcripts`, `child_summaries`.
-
-Properties: `history`.
 
 
 ### `IkaCore.SnapshotStore`
@@ -410,22 +407,22 @@ Value type: `str`.
 Import: `from IkaModel import AgentTool`.
 
 ```python
-AgentTool(id: 'str', name: 'str', description: 'str', args: 'ToolArgs', required: 'bool' = False, parallel: 'bool' = False, limit_calls: 'int' = 0)
+AgentTool(id: 'str', name: 'str', description: 'str', args: 'ToolArgs', required: 'bool' = False, parallel: 'bool' = False, limit_calls: 'int' = 0) -> 'None'
 ```
 
-AgentTool(id: 'str', name: 'str', description: 'str', args: 'ToolArgs', required: 'bool' = False, parallel: 'bool' = False, limit_calls: 'int' = 0)
+AgentTool(id: 'str', name: 'str', description: 'str', args: 'ToolArgs', required: 'bool' = False, parallel: 'bool' = False, limit_calls: 'int' = 0) -> 'None'
 
-- `AgentTool.validate(name: 'str')`
+- `AgentTool.validate(name: 'str') -> 'None'`
 
 ### `IkaModel.BareBoneModel`
 
 Import: `from IkaModel import BareBoneModel`.
 
 ```python
-BareBoneModel(model_id: 'str', api_key: 'str', api_url: 'str', system_prompt='Answer the assigned task clearly and concisely. When finished, call agent_end(input=...) with your complete answer.', content_prompt: 'str' = '', max_tokens: 'int' = 20000, temperature: 'float' = 0, parallel_tool_calls: 'bool' = False, agent_name: 'Optional[str]' = None, agent_hierarchy: 'Optional[List[str]]' = None, suppress_init_output: 'bool' = True, reasoning_effort: 'Optional[str]' = None, use_responses_api: 'bool' = True, force_control_tool_on_max_tool_calls: 'bool' = True, thinking_budget_tokens: 'Optional[int]' = None)
+BareBoneModel(model_id: 'str', api_key: 'str', api_url: 'str', system_prompt: 'str' = 'Answer the assigned task clearly and concisely. When finished, call agent_end(input=...) with your complete answer.', content_prompt: 'str' = '', max_tokens: 'int' = 20000, temperature: 'float' = 0, parallel_tool_calls: 'bool' = False, agent_name: 'Optional[str]' = None, agent_hierarchy: 'Optional[List[str]]' = None, suppress_init_output: 'bool' = True, reasoning_effort: 'Optional[str]' = None, use_responses_api: 'bool' = True, force_control_tool_on_max_tool_calls: 'bool' = True, thinking_budget_tokens: 'Optional[int]' = None) -> 'None'
 ```
 
-BareBoneModel(model_id: 'str', api_key: 'str', api_url: 'str', system_prompt='Answer the assigned task clearly and concisely. When finished, call agent_end(input=...) with your complete answer.', content_prompt: 'str' = '', max_tokens: 'int' = 20000, temperature: 'float' = 0, parallel_tool_calls: 'bool' = False, agent_name: 'Optional[str]' = None, agent_hierarchy: 'Optional[List[str]]' = None, suppress_init_output: 'bool' = True, reasoning_effort: 'Optional[str]' = None, use_responses_api: 'bool' = True, force_control_tool_on_max_tool_calls: 'bool' = True, thinking_budget_tokens: 'Optional[int]' = None)
+BareBoneModel(model_id: 'str', api_key: 'str', api_url: 'str', system_prompt: 'str' = 'Answer the assigned task clearly and concisely. When finished, call agent_end(input=...) with your complete answer.', content_prompt: 'str' = '', max_tokens: 'int' = 20000, temperature: 'float' = 0, parallel_tool_calls: 'bool' = False, agent_name: 'Optional[str]' = None, agent_hierarchy: 'Optional[List[str]]' = None, suppress_init_output: 'bool' = True, reasoning_effort: 'Optional[str]' = None, use_responses_api: 'bool' = True, force_control_tool_on_max_tool_calls: 'bool' = True, thinking_budget_tokens: 'Optional[int]' = None) -> 'None'
 
 Declared fields: `context_budget`.
 
@@ -435,10 +432,10 @@ Declared fields: `context_budget`.
 Import: `from IkaModel import ToolArgs`.
 
 ```python
-ToolArgs(type: 'str', description: 'str', agent: 'Optional[str]' = None, data: 'Optional[Any]' = None, metadata: 'Optional[dict[str, Any]]' = None, properties: 'Optional[dict[str, Any]]' = None, *, required: 'Optional[list[str]]' = None)
+ToolArgs(type: 'str', description: 'str', agent: 'Optional[str]' = None, data: 'Optional[Any]' = None, metadata: 'Optional[dict[str, Any]]' = None, properties: 'Optional[dict[str, Any]]' = None, *, required: 'Optional[list[str]]' = None) -> 'None'
 ```
 
-ToolArgs(type: 'str', description: 'str', agent: 'Optional[str]' = None, data: 'Optional[Any]' = None, metadata: 'Optional[dict[str, Any]]' = None, properties: 'Optional[dict[str, Any]]' = None, *, required: 'Optional[list[str]]' = None)
+ToolArgs(type: 'str', description: 'str', agent: 'Optional[str]' = None, data: 'Optional[Any]' = None, metadata: 'Optional[dict[str, Any]]' = None, properties: 'Optional[dict[str, Any]]' = None, *, required: 'Optional[list[str]]' = None) -> 'None'
 
 Declared fields: `type`, `description`, `agent`, `data`, `metadata`, `properties`.
 
@@ -716,7 +713,7 @@ emit_tool_checkpoint(label: 'str', payload: 'Optional[dict[str, Any]]' = None) -
 Import: `from IkaCore.output_adapters import UsageAdapter`.
 
 ```python
-UsageAdapter(writer: 'Any' = None)
+UsageAdapter(writer: 'Any' = None) -> 'None'
 ```
 
 Optional per-step usage display; subscribe explicitly to avoid extra default output.
@@ -733,9 +730,9 @@ AsyncWorkflowExecutor(max_workers: 'int' = 30)
 ```
 
 - `AsyncWorkflowExecutor.drain(self) -> 'None'`
-- `AsyncWorkflowExecutor.schedule_node(self, node_name: 'str', agent: 'IkaBaseAgent', context: 'str' = '', instance_id: 'int' = 0) -> 'concurrent.futures.Future'`
+- `AsyncWorkflowExecutor.schedule_node(self, node_name: 'str', agent: 'IkaBaseAgent', context: 'str' = '', instance_id: 'int' = 0) -> 'concurrent.futures.Future[dict[str, Any]]'`
 - `AsyncWorkflowExecutor.shutdown(self, wait: 'bool' = True) -> 'None'`
-- `AsyncWorkflowExecutor.wait_for_completion(self, futures: 'List[concurrent.futures.Future]', timeout: 'Optional[float]' = None) -> 'List[Any]'`
+- `AsyncWorkflowExecutor.wait_for_completion(self, futures: 'List[concurrent.futures.Future[dict[str, Any]]]', timeout: 'Optional[float]' = None) -> 'List[Any]'`
 
 ## IkaMem.agent_tools
 

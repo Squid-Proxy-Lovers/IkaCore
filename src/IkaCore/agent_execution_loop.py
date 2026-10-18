@@ -216,7 +216,7 @@ class AgentTurnLoop:
                 runtime.messages,
                 runtime.tool_executors,
                 current_stage_index=runtime.stage_index if isinstance(runtime, StageRuntimeContext) else None,
-                total_stages=len(agent.Stages) if staged else 0,
+                total_stages=len(agent.stages) if staged else 0,
                 context_label="execute_stage" if staged else "run_simple",
             )
             state.used_steps += 1

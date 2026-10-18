@@ -55,12 +55,12 @@ def _assign_identity_and_model_config(
 def _assign_agent_topology(
     self: Any, stages: list[IkaStage], subagents: list["IkaBaseAgent"], next_agent: Optional["IkaBaseAgent"]
 ) -> None:
-    self.Stages = stages
+    self.stages = stages
     self.subagents = subagents
     self.next_agent = next_agent
-    if self.Stages and (self.subagents or self.next_agent):
+    if self.stages and (self.subagents or self.next_agent):
         raise ValueError("Subagents or next_agent are not allowed when stages are defined.")
-    if not self.Stages and self.subagents and self.next_agent:
+    if not self.stages and self.subagents and self.next_agent:
         raise ValueError("Only one of subagents or next_agent may be set when no stages are provided.")
 
 
@@ -98,7 +98,7 @@ def _assign_runtime_state(
     per_tool_rate_limit: Optional[dict[str, float]],
     final_answer_check: Optional[list[RawFinalAnswerCheck]],
     summarize_final: bool,
-    use_async: bool,
+    async_requests: bool,
 ) -> None:
     self.message_history = initial_message_history(getattr(self, "system_prompt", None))
     self.rate_limit_per_min = rate_limit_per_min
@@ -107,7 +107,7 @@ def _assign_runtime_state(
     self._resume_state = None
     self._last_interrupt = None
     self.summarize_final = summarize_final
-    self.use_async = use_async
+    self.async_requests = async_requests
     self.final_answer_checks = validate_final_answer_checks_for_history(self.message_history, final_answer_check)
     self._tool_call_counts = {}
     self._total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "input_cached_tokens": 0}
@@ -182,5 +182,5 @@ def initialize_agent(agent: Any) -> None:
         dict(c.limits.per_tool_rate_limit),
         list(c.policy.final_answer_checks) or None,
         c.output.summarize_final,
-        c.policy.use_async,
+        c.policy.async_requests,
     )

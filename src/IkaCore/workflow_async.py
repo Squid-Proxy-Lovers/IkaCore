@@ -127,7 +127,7 @@ class WorkflowExecution(WorkflowCore):
                 ready_nodes.add(node_name)
                 pending_nodes.discard(node_name)
 
-    def run_async(self: WorkflowStateProtocol, initial_context: Optional[str] = None) -> Dict[str, WorkflowResult]:
+    def _run_parallel(self: WorkflowStateProtocol, initial_context: Optional[str] = None) -> Dict[str, WorkflowResult]:
         self._validate_execution_graph()
         from .workflow_context_cache import reset_context_cache
         reset_context_cache(self, initial_context)

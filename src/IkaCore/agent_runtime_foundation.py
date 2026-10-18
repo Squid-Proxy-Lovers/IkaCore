@@ -16,7 +16,7 @@ from IkaModel.chat_interface.chat_interface import run_summarization as _run_sum
 "AgentPreparation component; owns one execution responsibility."
 ToolExecutor = Callable[..., Any]
 RunSummarization = Callable[..., str]
-run_summarization = cast(RunSummarization, _run_summarization_untyped)
+run_summarization: RunSummarization = cast(RunSummarization, _run_summarization_untyped)
 if TYPE_CHECKING:
     from .agents import IkaBaseAgent
 
@@ -152,14 +152,14 @@ class AgentPreparation:
     ) -> StageRuntimeContext:
         agent = self.agent
         message_history = agent.message_history
-        stage = agent.Stages[stage_index]
+        stage = agent.stages[stage_index]
         agent.state.turn_message = None
         agent.state.turn_message_consumed = True
         system_prompt = agent.preparation._stage_system_prompt(stage)
         history_section(message_history, "system")["message"] = system_prompt
         agent_tools = agent.build_stage(stage)
         current_hierarchy = agent.preparation._stage_current_hierarchy(stage, stage_index)
-        content_prompt = build_stage_content_prompt(agent.prompt, agent.Stages, stage, stage_index)
+        content_prompt = build_stage_content_prompt(agent.prompt, agent.stages, stage, stage_index)
         from .workflow_prompt_context import stage_context
 
         content_prompt = stage_context(agent, content_prompt)

@@ -171,9 +171,9 @@ class _CodexResponseShim:
     ) -> None:
         self._data = data
         self.status_code = status_code
-        self.headers = httpx.Headers(headers or {})
-        self.text = text_fallback or json.dumps(data)
-        self.content = self.text.encode("utf-8", "replace")
+        self.headers: httpx.Headers = httpx.Headers(headers or {})
+        self.text: str = text_fallback or json.dumps(data)
+        self.content: bytes = self.text.encode("utf-8", "replace")
 
     def json(self) -> JsonDict:
         return self._data

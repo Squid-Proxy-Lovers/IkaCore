@@ -127,7 +127,7 @@ and compaction/workflow context compression can add more. Token limits are per r
 not a total spending cap. Wrap the entire operation in `request_controls(timeout=...,
 max_retries=1)` for a shared wall-clock bound. Arbitrary tools must cooperate with cancellation.
 
-`policy.use_async` selects the agent async request bridge; it is independent of workflow
+`policy.async_requests` selects the agent async request bridge; it is independent of workflow
 thread scheduling. Configuration is retained in `agent.config`; transcripts, counters,
 usage and the current budget live in `agent.state`. The [API reference](API.md) lists
 all grouped fields, defaults, public signatures and import locations.
@@ -511,8 +511,7 @@ same worker count); it may issue summary requests concurrently with instances. S
 `runtime_options(parallel_context_preparation=False)` for one context-preparation worker.
 All instances of a node must complete successfully before a dependent starts. Each node
 gets one prepared context; all upstream instance summaries reach fan-in. Completion order
-between independent branches is unspecified. `use_async=True` is a deprecated workflow
-alias for `parallel=True`; `run_async()` is also a blocking legacy entry point.
+between independent branches is unspecified. Workflow `use_async` and `run_async()` are removed; use `run(parallel=True)`.
 A borrowed synchronous HTTPX client can be shared across threads. An `AsyncClient` must
 remain on its owning event loop; do not lend one to independent sync-bridge loops.
 
@@ -520,7 +519,7 @@ remain on its owning event loop; do not lend one to independent sync-bridge loop
 `.transcript` is the actual replayable agent history, including any compaction summary.
 `.instance_outputs` and `.instance_transcripts` retain every fan-out instance by integer
 ID; `.output`/`.transcript` identify the first recorded instance. `.summary` aggregates all
-instance summaries. `.history` remains a deprecated alias for `.output`.
+instance summaries. Use `.output`; the `.history` alias is removed.
 Node failures raise `IkaCore.WorkflowError` with `.errors` (structured `WorkflowNodeError`
 records: `node_name`, `instance_id`, `error_type`, `message`) and `.partial_results`.
 Dependents of a failed node do not run. Request cancellation/deadline exceptions retain
@@ -644,8 +643,9 @@ independent of CLI output. The default model prompt requests concise answers; ov
 `PromptConfig(system_prompt="...")` for a different style.
 
 Control tools use these exact argument names: `agent_end(input="final answer")`,
-`stage_end(input="stage outcome")`, `ask_user(question="Approve?")`, and, where allowed,
-`change_stage(stage_index=0, reason="Recheck evidence")`. These are model tool calls,
+`stage_end(reason="stage outcome")`, `ask_user(question="Approve?")`, and, where allowed,
+`change_stage(stage_index=0, reason="Recheck evidence")`. The stage_end reason describes completion of a stage; it is not the final answer.
+These are model tool calls,
 not Python methods on the agent. `ask_user` is available only for HITL stages.
 
 Useful options:
@@ -696,3 +696,24 @@ at level zero. Legacy `cli_output.set_stdout_enabled` / `set_output_sink` affect
 only direct legacy CLI users; runtime presentation uses explicit configuration.
 For standalone BareBoneModel/chat/tool calls use `with output_scope(RuntimeOutput(...))`.
 An empty `RuntimeOutput()` emits no presentation and skips event allocation.
+
+## Configuration domains
+
+Configuration dataclasses validate types and domains immediately and raise a field-specific
+ValueError. Boolean values are not numeric budgets. Output token caps and context budgets
+are positive integers; timeouts and configured request/tool rates are finite and positive.
+Use None to disable an optional rate limit. Temperature is finite and between 0 and 1.
+Manual thinking budgets are integers of at least 1,024 and less than max_tokens; provider
+model restrictions are checked when building a request.
+
+Zero is intentional for maxsteps, max_tool_rounds and max_tool_calls: no ordinary steps,
+no additional tool rounds, and no application tool calls respectively. Extension/retry
+counts and their extra-step allowances accept zero to disable those grants. Framework
+finalization can still issue a control-only request; scope the operation with request_controls
+to enforce an overall deadline. Temperature zero and logging_level zero are also supported.
+logging_level accepts 0 through 3. Agent request bridging uses
+ExecutionPolicy(async_requests=True); workflow threads use run(parallel=True).
+
+The runtime has two direct dependencies: httpx>=0.27,<0.29 and httpcore==1.0.9.
+Controlled synchronous requests use their private pool contract; missing internals produce
+an actionable RuntimeError. Upgrade these bounds only after transport compatibility testing.

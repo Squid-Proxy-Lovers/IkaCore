@@ -1,80 +1,14 @@
-# IkaCore v2: runtime and migration
+# IkaCore 2.0 migration
 
-V2 allows breaking changes. Its goal is a smaller, consistent runtime with explicit
-execution controls. Backward compatibility with v1 is no longer a release requirement.
-This branch remains a draft; applications should migrate deliberately before adopting it.
-See the [application ergonomics handoff](ergonomics-handoff.md), [usage guide](../USAGE.md),
-and generated/tested [API reference](../API.md).
+IkaCore 2.0.0 is unreleased and intentionally breaks v1 compatibility. New applications
+should start with the [usage guide](../USAGE.md) and [API reference](../API.md).
+Existing applications can use the migration table below to adopt explicit configuration,
+conversation turns and durable workflows.
 
-## First simplification pass
-
-The initial consolidation carried two generations of behavior at once. This pass:
-
-- Removes the 104 copied proposal files and their inventory from the working tree
-  (about 39,000 lines). They were never installed runtime code; their removal reduces
-  repository and review bulk. Earlier commits in this PR retain the source material.
-- Uses one implementation each for Anthropic, DeepSeek, and Gemini payload building.
-  Exact live/history deduplication, stage ordering, blank-text cleanup, and completion
-  tool-choice behavior are now standard.
-- Uses dependency-aware workflow scheduling in both synchronous and asynchronous runs.
-  Removes the old recursive/wave schedulers and their unused helper interfaces.
-- Preserves an agent's own task when injecting upstream context. Prepares context once
-  per node and memoizes identical default summary requests within a run.
-- Uses one transient-error retry policy, with provider hints and capped jittered backoff.
-  Permanent HTTP failures and programming errors fail promptly. Context-limit failures
-  still reach summarization recovery.
-- Removes persistent per-thread async runners and their thread-local lifecycle/task-cleanup
-  machinery. The sync bridge uses an owned `asyncio.run()` loop and rejects nested-loop
-  use before constructing a coroutine.
-- Reduces `RuntimeOptions` from 12 fields to 6. Removes v1 import aliases and deprecated
-  mutation-based tool-filter helpers, and stops fixing error classes to their old pickle path.
-- Removes the v1 API snapshot contract. Tests now assert the intended v2 behavior.
-- Builds verification wheels from fresh source and checks their module inventory, preventing
-  stale build artifacts from reintroducing deleted modules.
-- Replaces chat dependency-copying with direct calls to the owning request/summary modules.
-  Removes private response/tool-loop/agent aggregate facades and the runtime helper lookup fallback.
-- Collapses the workflow mixin/type-contract chains. Function and module size checks remain;
-  whole-class line limits that encouraged tiny inheritance layers are removed.
-
-The latest merged validation is recorded in [merge-validation.md](merge-validation.md)
-for the integrated reasoning, dogfood, hardening and ergonomics changes.
-The earlier merge's exact measurements remain in [the historical report](merge-validation-before-ergonomics.md).
-Earlier validation and benchmarks below retain their original revision labels.
-Version 2.0.0 is unreleased.
-
-## Persistence and provider optimization
-
-- Removes the legacy checkpoint table/API and duplicate agent/stage writes. Snapshots
-  are the sole persistence backend; persistence remains opt-in.
-- Commits each boundary's snapshot, event and requested pause status atomically on one
-  scoped connection. Nested transactions use savepoints. Tool-frame metadata and run
-  setup/completion are batched without holding database locks across model/tool calls.
-  Snapshot reads join lineage once instead of querying once per row; SQLite durability
-  defaults remain unchanged. Existing database files are left intact.
-- Bounds both tool-schema caches, including repeated fresh-list cache hits. Cache eviction
-  also retires object-ID fingerprints before releasing their retained tool definitions.
-- Avoids eager message-to-string conversion and speeds up the common OpenAI dictionary
-  path. All seven routes retain identical payloads in the 21 benchmark fixtures.
-- Codex uses supplied sync/async HTTPX clients. Async SSE collection runs natively on
-  the event loop, shares the sync parser, and closes its response on cancellation while
-  preserving caller-owned clients. Retry responses close before backoff; HTTP retry hints
-  use the same policy in both transports. No new runtime dependency is added.
-
-## Shared execution loop
-
-Simple agents and stages now run through one turn loop. Control-call parsing,
-completion fallback, progress logging, rate-limit entry, and extension bookkeeping
-share one implementation. Stage transitions, human-input pauses, and each mode's
-existing extension and empty-turn policies are preserved.
-
-The preparation mixin chain is collapsed into one component, and dispatch uses the
-shared history helper. Two loop modules become `agent_execution_loop.py`; this pass
-removes 301 runtime Python lines and one module, without changing the public execution
-entry points or adding dependencies.
-
-A local before/after comparison against `78047e7` matched all 42 synthetic scenarios:
-returned results, model-call sequences, usage, step limits, and snapshot boundaries.
-The permanent suite also checks these behaviors across both execution modes.
+The runtime uses one execution loop, frozen configuration and mutable run state.
+Snapshots provide pause, resume, fork and human approval; memory is supplied through
+ordinary tools. See [provider reasoning](../providers/reasoning.md) and the concise
+[release validation](validation/release-2.0.0.md) for supported contracts and limits.
 
 ## Breaking changes and migration
 
@@ -89,12 +23,12 @@ The permanent suite also checks these behaviors across both execution modes.
 | Completed-snapshot restore returns before loading conversation; ignores an answer | Restores transcript/usage/counters and returns saved output without a request. Use `send()` next. `resume_input` on completed agent snapshots now raises `ValueError`. |
 | Agent fork has no answer argument; workflow fork requires two calls | `agent.fork_from_snapshot(id, resume_input=...)` and `workflow.fork_from_snapshot(id, resume_input=...)` fork and continue independently. |
 | `agent.context_budget = N` is outside grouped config | Prefer `limits=ExecutionLimits(context_budget=N)` in tokens; `compaction_count` and `compaction` events are observable and snapshot-persisted. The direct attribute still works. |
-| `workflow.run(use_async=True)` means threads | Prefer blocking `run(parallel=True, concurrency=N)`. `use_async` remains a deprecated alias. Context preparation uses a separate bounded pool. Default instance workers decrease from 30 to 4. |
+| `workflow.run(use_async=True)` means threads | Use blocking `run(parallel=True, concurrency=N)`. Workflow `use_async` and `run_async()` are removed. Context preparation uses a separate bounded pool. Default instance workers decrease from 30 to 4. |
 | `.client = caller_client` is closed on shutdown; workflow clones discard it | Direct assignment and `ProviderConfig(client=...)` now borrow clients, preserve them across clones, and never close them. `client_factory` and internally created clients are owned; each clone gets its own. |
-| `WorkflowResult.history` misleadingly means output | Use `.output` for the execution result and `.transcript` for history; `.instance_outputs`/`.instance_transcripts` retain fan-out results. `.history` remains a deprecated output alias. |
+| `WorkflowResult.history` misleadingly means output | Use `.output` for the execution result and `.transcript` for history; `.instance_outputs`/`.instance_transcripts` retain fan-out results. The `.history` alias is removed. |
 | Worker errors yield missing results and downstream KeyError | `WorkflowError.errors` identifies nodes/instances and `.partial_results` preserves completed nodes. Dependents are blocked; cancellation/deadline types remain unchanged. |
 | Global logging configuration and fallback stderr warnings | Named library loggers have NullHandler and never configure the root logger. `cli=False` silences presentation; configure Python logging explicitly for diagnostics. |
-| Verbose default model prompt; `Stages=` spelling | Default prompt is concise. Use `PromptConfig` for style and canonical `stages=`/`.stages`; `Stages=`/`.Stages` remain compatibility aliases. |
+| Verbose default model prompt; `Stages=` spelling | Default prompt is concise. Use `PromptConfig` for style and canonical `stages=`/`.stages`; `Stages=`/`.Stages` are removed. |
 | Small apps must override many unrestricted defaults; mocks patch internals | Use `ProviderConfig.bounded()`, `ExecutionLimits.bounded()`, `ExecutionPolicy.bounded()`, plus `request_controls(timeout=...)`. Use public `IkaCore.testing.MockProvider` for native fixtures. |
 | Agent `memory`, `memory_access`, backend fields/helpers and `MemoryConfig` | Construct `IkaMem.agent_tools.MemoryTools(name, short_term=..., long_term=...)`; pass `.tools(access=...)` using ordinary agent/stage `tools`. |
 | Stage `memory_access`, `long_term_filter` | Select `.tools(access=..., long_term_filter=...)` for that stage. |
@@ -106,7 +40,7 @@ The permanent suite also checks these behaviors across both execution modes.
 | Flat `api_url`, `max_tokens`, `temperature`, `use_responses_api`, `reasoning_effort` | `provider=ProviderConfig(...)` |
 | Flat `system_prompt`, `start_prompt`, `end_prompt` | `prompts=PromptConfig(...)` |
 | Flat `maxsteps`, `step_timeout`, tool budgets and rate limits | `limits=ExecutionLimits(...)` |
-| Flat `final_answer_check`, extension settings and `use_async`, and agent extension attributes | `policy=ExecutionPolicy(final_answer_checks=(check,), ...)`; validation retries and extra steps are explicit; inspect extension settings in `agent.config.policy`. |
+| Flat `final_answer_check`, extension settings and `use_async`, and agent extension attributes | `policy=ExecutionPolicy(final_answer_checks=(check,), async_requests=True, ...)`; the old `use_async` name is removed. Validation retries and extra steps are explicit; inspect extension settings in `agent.config.policy`. |
 | Flat `subagents`, `next_agent` | `topology=AgentTopology(subagents=(child,), next_agent=...)` |
 | Flat logging/usage/summary settings | `output=OutputConfig(...)` |
 | Configuration mixed with live counters/history | `agent.config` is frozen; `agent.state` stores the current run's budgets, transcript, usage and replay state. |
@@ -168,8 +102,8 @@ forcibly stop those operations: their daemon worker and resources remain until
 they return. Code that prevents Python thread scheduling, such as a C extension
 holding the GIL, can also delay observation. Custom transports are borrowed, never closed or inspected
 for sockets; response cleanup is attempted separately and must cooperate to reclaim
-resources promptly. The pool adapter uses HTTPX/httpcore 1.x internals and is tested
-with HTTPX 0.27.0 and the current supported version.
+resources promptly. The pool adapter uses HTTPX/httpcore internals. Supported dependencies are `httpx>=0.27,<0.29` and
+`httpcore==1.0.9`; missing pool internals raise an actionable error before transport use.
 
 The remaining runtime settings are `shared_ssl_context`, `reuse_connections`,
 `parallel_context_preparation`, `recover_truncated_control_calls`, `compact_at_fraction`,
@@ -219,209 +153,3 @@ interrupted instances invalidate downstream cached results.
 Nested and unfinished tool effects are checked before replay. Snapshot JSON filters
 known credential patterns and redacted state is refused for replay by default. Filtering
 cannot identify all private content, so keep runtime databases private.
-
-## Completed simplification candidates
-
-The configuration, memory, presentation, mixin, and validation candidates are implemented:
-
-- Frozen responsibility-specific configuration groups retain the flat common fields.
-  `AgentRunState` holds live transcript, usage, budget and replay state.
-- The public facade composes explicit preparation, turn loop, execution, policy, tools,
-  controls, chat, lifecycle and snapshot owners; aggregate agent mixins are removed.
-- Runtime emits structured scoped events. CLI, usage and file presentation are optional
-  subscribers, with no process-global sink in the runtime path. Empty publishers skip
-  event allocation. Legacy direct CLI APIs remain separate presentation utilities.
-- IkaMem remains shipped as an explicit `MemoryTools` integration using ordinary agent
-  or stage tools; no core/model dependency on IkaMem internals or global backend remains.
-- `ExecutionPolicy` expresses final checks, validation retries and automatic extensions.
-  Defaults preserve downstream final-answer checks and step-extension behavior.
-
-The downstream sample contained nine directly identifiable constructor calls across
-three projects. Dynamic calls/subclasses were not fully captured; common calls remain
-one-liners, and this sample was not used to justify feature removal. IkaGeneral remains
-outside the active runtime scope. Snapshots from `dc9efbd` are covered by a real saved
-post-model fixture: resume consumes its response with no network or duplicate usage.
-
-Historical revision `179b52e` passed **973 tests** (one opt-in live smoke test skipped), all coverage
-floors and **42/42 fresh execution-parity traces** against `dc9efbd`. See the
-[historical merged validation report](merged-validation.md) for those checks and the
-[refactor report](refactor-validation.md) for its constructor migration and benchmarks.
-
-## Checks
-
-```bash
-pip install -e ".[test,dev]"
-IKACORE_LIVE_PROVIDER_TESTS=0 python scripts/quality.py
-```
-
-The suite covers request/tool controls, provider payloads, retries and context recovery,
-workflow dependency/instance behavior, persistence, and replay. Live providers and
-application workflows are separate release checks. Historical credential cleanup is
-also separate: removing source copies or branches does not purge Git objects, PR refs,
-caches, forks, or other clones.
-
-## Current integrated validation
-
-Validated runtime/test source revision: **`f8c6c1a2105efc6bb2972b075b4fc4bc51829e1c`**.
-
-[merge-validation.md](merge-validation.md) records the final sequential pytest, quality,
-execution-parity, installed-wheel app and Codex matrix results for the ergonomics merge.
-The three original dogfood reproductions pass without xfail. Hardening's raised global
-floors remain **99% lines / 95% branches / 99% combined**, with every per-area floor retained;
-the implementation targets 100% lines.
-
-The integrated runtime preserves signed/encrypted reasoning, crash-safe completed-snapshot
-accounting and metadata, multi-turn conversations, bounded validation corrections, client
-ownership, output scopes, and structured workflow errors. New regressions check those
-contracts together. Historical benchmark, soak and live-provider evidence below retains
-its original revision labels.
-
-## Live validation status
-
-The historical Codex matrix, recorded on **2026-10-18 UTC**, used the installed 2.0.0 wheel
-at runtime revision `179b52e` with `gpt-5.6-sol`: **14 passed, 0 failed, 1 skipped**.
-It covers sync/async text and tools, simple/two-stage agents, fresh-process resume,
-cancellation, SSE, usage, expired deadlines, synthetic retries, compaction and workflow
-HITL. Resume used no network and preserved usage; cancellation closed the response while
-keeping the caller's client open. `reasoning_tools` skipped with `reasoning_not_exposed`;
-that run did not verify reasoning replay. Every case was bounded to 60 seconds. The historical
-8/8 results at `1f2bab0` and `183ce24` used the narrower original harness.
-
-A later bounded high-effort Codex probe on the reasoning branch replayed encrypted
-reasoning exactly and received the correct answer: **596 input + 186 output = 782 tokens**.
-That direct runtime probe is described in [REASONING_REPLAY.md](REASONING_REPLAY.md);
-it was separate from the installed-wheel matrix. Hardening also recorded **19/20**
-strict follow-up facts in four live compaction fixtures, with one constraint miss
-([hardening-validation.md](hardening-validation.md)). Neither live experiment was rerun
-for `8efd658`.
-
-These results cover one model and account. OpenAI API Chat/Responses, Anthropic,
-DeepSeek, Gemini, OpenRouter and Z.AI remain unverified live in this review. Existing
-offline coverage does not establish live compatibility. Reproduce the Codex run with
-[the live-check command](../../CONTRIBUTING.md#live-provider-validation).
-
-## Historical quality and footprint (`179b52e`)
-
-Historical runtime/test revision `179b52e` on CPython 3.13.15 / HTTPX 0.28.1 passed
-**973 tests**, with **one opt-in live smoke test skipped**: **96.39% line coverage**,
-**88.20% branch coverage**, and **94.62% combined coverage**. Ruff, Pyright
-(zero errors), compilation, fresh-wheel inventory and isolated imports also pass.
-The coverage matrix assigns all **122 runtime modules** to **16 areas** and passes
-**119 required area/scenario checks** (117 unique selectors), with zero gate failures.
-That run excluded 194 lines and retained the pre-hardening floors. Current floors and
-measurements are in [merge-validation.md](merge-validation.md).
-
-The historical `ikacore-2.0.0-py3-none-any.whl` contained the README and runtime at
-`179b52e`: **212.85 KiB** compressed (217,960 bytes), **689.76 KiB** unpacked
-(706,313 bytes). The runtime retains **six settings**, one direct dependency (`httpx`)
-and 17,291 physical Python lines across the three packages (including comments/blanks).
-The 60-case HTTP/HTTPS deadline/ownership suite passed ten consecutive rounds
-(600 checks). All six Python 3.11.16 / 3.12.14 / 3.13.15 × HTTPX 0.27.0 / 0.28.1 cells
-passed 967 tests with seven skips each: six dev-only lint fixtures plus the opt-in live
-smoke entry point. All runtime tests ran; the main dev environment exercised the lint
-fixtures. Commands, exact revisions and live results are in [merged-validation.md](merged-validation.md).
-
-The following historical benchmark results at `183ce24` have not been remeasured after
-the merged fixes. They use an installed runtime-only wheel on macOS arm64 / CPython
-3.11.16, with HTTPX 0.28.1. The wheel hash and raw samples are recorded in the generated
-benchmark artifact; development dependencies are excluded.
-
-| Measurement | Result |
-| --- | ---: |
-| Wheel download | 202.8 KiB |
-| Unpacked wheel content | 661.3 KiB |
-| Installed runtime + dependencies + bytecode | 5.37 MiB |
-| Direct runtime dependency | 1 (`httpx`); 7 dependency distributions total |
-| Public imports / full runtime import | 3.39 / 33.16 ms |
-| Runtime / Python-worker / HTTPX-only peak RSS | 32.50 / 19.36 / 27.16 MiB |
-| Agent construction and shutdown | 0.0042 ms |
-| One-step agent, sync / async bridge | 0.250 / 0.679 ms |
-| Same agent with SQLite snapshots | 7.53 ms (before persistence consolidation: 11.81 ms) |
-| 4 KiB snapshot append | 0.477 ms |
-| Pure four-node workflow, sequential / parallel | 0.008 / 0.254 ms |
-
-Medians use nine fresh-process samples and 100 warm operations per sample. The snapshot
-fixture is about 36% faster than the measurement before persistence consolidation on this machine.
-Imports have a warmed filesystem cache; RSS includes Python and the measurement worker.
-The installed-size figure counts the complete runtime-only site-packages directory,
-including compiled bytecode that some installers omit from distribution RECORD files.
-Real provider/model latency is excluded. The first 1,000 repeated runs retained about
-1.08 MiB of traced allocations; the next 1,000 changed retained allocations by
--46 KiB. This short soak does not establish leak freedom for every workload.
-
-For the execution-loop refactor (`78047e7` → `183ce24`) specifically, seven alternating before/after batches
-of 1,000 operations measured sync **0.2193 → 0.2194 ms** and async bridge
-**0.6582 → 0.6564 ms**. This longer paired run reduces ordering noise in the short
-samples above and supports treating execution latency as unchanged for this fixture.
-
-### Provider optimization comparison (`2a1ccaf` → `78047e7`)
-
-Payload construction for the 1,000-message / ten-tool synthetic fixture, in microseconds:
-
-| Provider route | Before | After |
-| --- | ---: | ---: |
-| openai | 168.7 | 126.6 |
-| openai_responses | 136.9 | 142.8 |
-| anthropic | 124.5 | 127.2 |
-| deepseek | 33.1 | 33.3 |
-| gemini | 441.3 | 186.4 |
-| openrouter | 172.9 | 128.8 |
-| codex | 287.2 | 294.4 |
-
-Seven batches of 300 warmed builds were timed separately from JSON encoding. All 21
-payload checksums match the pre-optimization runtime. Gemini improves about 58%; OpenAI
-Chat/OpenRouter about 25%. Other routes are roughly unchanged (up to 4% slower in this
-run); these small differences are not evidence of a speedup. Codex's client reuse and
-native async streaming are covered by transport tests rather than these builder timings.
-Network/TLS latency, billing, live model behavior and summary quality remain unmeasured.
-
-CI publishes package/runtime and all-provider reports. See the
-[reproduction commands](../../CONTRIBUTING.md#reproducing-the-offline-benchmarks).
-Persistence still dominates this trivial local agent fixture, and the runtime retains
-architectural complexity. Further removal should follow observed use and product needs.
-
-### Local coverage snapshot (`179b52e`)
-
-| Area | Modules | Lines | Branches | Floors L/B | Tests observed | Excluded lines |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Public API / package imports | 4 | 97.89% | 90.00% | 95/90% | 301 | 20 |
-| Request controls / cancellation | 6 | 99.63% | 93.75% | 95/90% | 369 | 0 |
-| HTTP ownership / TLS / connection reuse | 5 | 97.76% | 95.00% | 95/90% | 285 | 2 |
-| Retries / request errors | 2 | 87.66% | 78.57% | 85/75% | 221 | 0 |
-| Tools / schemas / output bounds | 11 | 96.13% | 90.83% | 95/85% | 311 | 4 |
-| Snapshot storage / privacy / replay rules | 8 | 94.89% | 91.13% | 90/90% | 109 | 0 |
-| Agent snapshots / human resume | 6 | 99.46% | 94.23% | 95/90% | 132 | 2 |
-| Workflow snapshots / selective replay | 3 | 98.65% | 92.19% | 95/85% | 57 | 0 |
-| Workflows / fan-in / instance isolation | 9 | 98.28% | 93.33% | 95/90% | 109 | 66 |
-| Memory integration | 10 | 93.75% | 76.67% | 90/75% | 27 | 10 |
-| Logging / CLI | 5 | 97.86% | 88.75% | 95/85% | 424 | 71 |
-| Agent runtime / stages | 16 | 98.18% | 87.22% | 95/80% | 463 | 19 |
-| Summarization / compaction | 1 | 97.81% | 86.54% | 95/80% | 35 | 0 |
-| Codex auth / streaming / payloads | 7 | 95.69% | 90.87% | 90/80% | 153 | 0 |
-| Provider payloads / metadata / history | 19 | 94.75% | 84.98% | 90/80% | 190 | 0 |
-| Chat loop / accounting / human interruption | 10 | 95.99% | 86.32% | 90/80% | 98 | 0 |
-
-The generated matrix includes required scenario outcomes, exact uncovered locations,
-and known gaps. CI artifacts describe each checked revision.
-
-### Historical hardening validation (`dba0e05`, local, unreleased)
-
-The `v2-hardening` work from `aca8c53` through `dba0e05` passed **1,211 tests** (two opt-in skips),
-Ruff, Pyright and the complete quality/wheel gate. Measured coverage rises from
-**96.39% to 100% lines** and **88.20% to 96.86% branches**. That work raised global floors to
-**99% lines / 95% branches**, with a **99% combined** pytest-cov floor and raised
-area floors. All 9,305 measured statements are exercised; the 194 existing excluded
-lines are unchanged. The historical remaining branch arcs are listed in the separate report.
-
-Validation includes **46 real process-kill/concurrent-writer cases** across DELETE
-and WAL, a resumed **2,200-completed-turn** offline soak with 440 compactions, and
-four bounded installed-wheel Codex compaction fixtures. Strict live follow-up
-retention scored **19/20**; one constraint answer missed the scorer. The results
-do not establish perfect retention or power-loss durability.
-
-Fixes restore completed-snapshot accounting after a crash, propagate cancellation
-through forced completion, wrap malformed provider response errors, and preserve
-required history/tool/reasoning structure while bounding the live compaction
-buffer. The [hardening report](hardening-validation.md) records reproductions,
-coverage by area, exact limitations, evidence and local commits. These measurements
-are separate from the historical merged/refactor results above; nothing was pushed.

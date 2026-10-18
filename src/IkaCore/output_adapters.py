@@ -11,9 +11,9 @@ if TYPE_CHECKING:
 
 
 class CLIAdapter:
-    def __init__(self):
+    def __init__(self) -> None:
         from .cli_output import CLIOutput
-        self.cli = CLIOutput.owned()
+        self.cli: CLIOutput = CLIOutput.owned()
 
     def __call__(self, event: RuntimeEvent) -> None:
         shared = _shared_cli.get()
@@ -34,9 +34,9 @@ class CLIAdapter:
 
 
 class FileLogAdapter:
-    def __init__(self, config: OutputConfig):
+    def __init__(self, config: OutputConfig) -> None:
         from .logging_utils import IkaLogger
-        self.logger = IkaLogger(config.logging_level, config.logging_file,
+        self.logger: IkaLogger = IkaLogger(config.logging_level, config.logging_file,
                                 show_usage_level0=config.show_usage_level0)
 
     def __call__(self, event: RuntimeEvent) -> None:
@@ -68,8 +68,8 @@ def make_output(config: OutputConfig) -> RuntimeOutput:
 
 class UsageAdapter:
     """Optional per-step usage display; subscribe explicitly to avoid extra default output."""
-    def __init__(self, writer: Any = None):
-        self.writer = writer or write_stdout
+    def __init__(self, writer: Any = None) -> None:
+        self.writer: Any = writer or write_stdout
 
     def __call__(self, event: RuntimeEvent) -> None:
         if event.kind == 'step' and event.data.get('usage'):

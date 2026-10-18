@@ -98,15 +98,15 @@ def test_deadline_returns_without_closing_borrowed_client_or_late_cleanup():
         assert not caller.is_closed
 
 
-def test_stage_alias_assignment_and_constructor_conflict():
+def test_lowercase_stages_and_removed_alias():
     stage = IkaStage("answer", "answer", [])
-    a = agent(Stages=[stage])
+    a = agent(stages=[stage])
     try:
-        assert a.stages == a.Stages == [stage]
+        assert a.stages == [stage] and not hasattr(a, "Stages")
         a.stages = []
-        assert a.Stages == []
-        with pytest.raises(ValueError, match="deprecated Stages"):
-            agent(stages=[], Stages=[])
+        assert a.stages == []
+        with pytest.raises(TypeError, match="Stages"):
+            agent(Stages=[])
     finally:
         a.shutdown()
 
@@ -250,14 +250,16 @@ def test_worker_cancellation_preserves_type_and_cancels_other_inflight_work(para
         a.shutdown()
 
 
-def test_deprecated_workflow_alias_preserves_blocking_result_contract():
+def test_parallel_workflow_and_removed_aliases():
     a = agent()
     wf = IkaWorkflow("alias", "test", [WorkflowNode("node", a)], [], output=OutputConfig(cli=False))
     try:
         with MockProvider(responder=lambda url, payload: provider_response(url, payload, end("answer"))):
-            result = wf.run(use_async=True)["node"]
+            result = wf.run(parallel=True)["node"]
         assert result.output["final_message"] == "answer"
-        assert result.history is result.output
+        assert not hasattr(result, "history") and not hasattr(wf, "run_async")
+        with pytest.raises(TypeError, match="use_async"):
+            wf.run(use_async=True)
     finally:
         wf.async_executor.shutdown()
         a.shutdown()

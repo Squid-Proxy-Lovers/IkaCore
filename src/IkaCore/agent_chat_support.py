@@ -112,7 +112,7 @@ class AgentChat:
             "current_stage_index": current_stage_index,
             "total_stages": total_stages,
         }
-        if agent.use_async:
+        if agent.async_requests:
             return run_async(lambda: async_chat(barebone_model, messages, message_history, **kwargs))
         return chat(barebone_model, messages, message_history, **kwargs)
 
@@ -228,7 +228,7 @@ class AgentChat:
 
     def _get_chat_client(self) -> Optional[Any]:
         agent = self.agent
-        if agent.use_async:
+        if agent.async_requests:
             return agent.client
         if agent.client is None:
             from IkaModel.request_transport import new_sync_client

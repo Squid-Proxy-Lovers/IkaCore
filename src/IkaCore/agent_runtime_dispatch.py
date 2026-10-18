@@ -13,7 +13,7 @@ from .agent_runtime_payloads import history_section
 "AgentExecution component; owns one execution responsibility."
 JsonDict = dict[str, Any]
 SummariseMessageHistory = Callable[..., str]
-summarise_message_history = cast(SummariseMessageHistory, _summarise_message_history_untyped)
+summarise_message_history: SummariseMessageHistory = cast(SummariseMessageHistory, _summarise_message_history_untyped)
 if TYPE_CHECKING:
     from .agents import IkaBaseAgent
 
@@ -52,7 +52,7 @@ class AgentExecution:
         remaining_steps = resume_cp.get("remaining_steps", state.remaining_steps)
         if "loop_state" in resume_cp:
             remaining_steps = resume_cp["loop_state"]["remaining_steps"]
-        state.stage_idx = min(stage_index if isinstance(stage_index, int) else 0, len(agent.Stages) - 1)
+        state.stage_idx = min(stage_index if isinstance(stage_index, int) else 0, len(agent.stages) - 1)
         state.remaining_steps = max(0, remaining_steps if isinstance(remaining_steps, int) else state.remaining_steps)
         raw_message_history = resume_cp.get("message_history")
         if isinstance(raw_message_history, dict):
@@ -65,7 +65,7 @@ class AgentExecution:
         return {
             "status": resume_cp.get("interrupt_status", "awaiting_user_input"),
             "stage_index": state.stage_idx,
-            "stage_name": agent.Stages[state.stage_idx].name if 0 <= state.stage_idx < len(agent.Stages) else "unknown",
+            "stage_name": agent.stages[state.stage_idx].name if 0 <= state.stage_idx < len(agent.stages) else "unknown",
             "remaining_steps": state.remaining_steps,
             "interrupt_data": deepcopy(resume_cp.get("interrupt_data", {})),
             "message_history": deepcopy(agent.message_history),
@@ -138,7 +138,7 @@ class AgentExecution:
         if interrupt_payload:
             agent._last_interrupt = interrupt_payload
             return agent.execution_runtime._interrupt_output(interrupt_payload)
-        while 0 <= state.stage_idx < len(agent.Stages):
+        while 0 <= state.stage_idx < len(agent.stages):
             current_resume_input = agent.execution_runtime._current_stage_resume_input(state)
             stage_result = agent.execute_stage(
                 state.stage_idx, state.remaining_steps, resume_input=current_resume_input
@@ -202,7 +202,7 @@ class AgentExecution:
                 agent._last_interrupt = interrupted
                 return agent.execution_runtime._interrupt_output(interrupted)
             resume_input = None
-        if agent.Stages:
+        if agent.stages:
             def run() -> JsonDict:
                 return agent.execution_runtime._run_staged_execution(resume_input, resume_cp, last_content)
             return agent.policy_runtime.run_validated(run) if agent.final_answer_checks else run()

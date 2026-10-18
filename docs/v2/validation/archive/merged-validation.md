@@ -1,3 +1,5 @@
+> Historical development evidence. Counts and API examples apply only to the recorded revision.
+
 # Merged v2 implementation validation
 
 The final runtime and tests are at `179b52e4076815dc74033c6622116f2d993cb9ce`,
@@ -131,7 +133,7 @@ python scripts/live_matrix.py --provider codex --use-local-login --model gpt-5.6
   --case-timeout 60 --output-dir artifacts/merge-validation/live
 ```
 
-Use the separate-venv instructions in [CONTRIBUTING](../../CONTRIBUTING.md#compatibility-and-deadline-checks)
+Use the separate-venv instructions in [CONTRIBUTING](../../../../CONTRIBUTING.md#compatibility-and-deadline-checks)
 for each compatibility cell. All heavy checks in this report ran sequentially.
 The live run used a private temporary copy of the existing login so refreshes could
 stay inside ignored artifacts; that copy is removed after the command.

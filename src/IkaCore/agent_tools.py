@@ -261,7 +261,7 @@ class AgentTools:
         agent = self.agent
         stage_tools = agent.tool_runtime._convert_tools_to_agent_tools(stage.tools)
         subagent_tools = agent.tool_runtime._convert_subagents_to_tools(getattr(stage, "subagents", None))
-        if stage == agent.Stages[-1]:
+        if stage == agent.stages[-1]:
             stage_tools.append(agent.tool_runtime._stage_agent_end_tool())
             stage_end_index = next((i for i, t in enumerate(stage_tools) if t.name == "stage_end"), None)
             if stage_end_index is not None:

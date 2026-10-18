@@ -140,14 +140,14 @@ def test_validation_correction_does_not_reset_consumed_budget(make_agent):
 
 
 @pytest.mark.parametrize("staged", [False, True])
-@pytest.mark.parametrize("use_async", [False, True])
-def test_delegated_hitl_resumes_child_before_parent(make_agent, tmp_path, staged, use_async):
+@pytest.mark.parametrize("async_requests", [False, True])
+def test_delegated_hitl_resumes_child_before_parent(make_agent, tmp_path, staged, async_requests):
     def create():
         child = make_agent("child", "CHILD_TASK", stages=[IkaStage("approve", "Get approval", [], hitl=True)],
-                           policy=ExecutionPolicy.bounded(use_async=use_async))
+                           policy=ExecutionPolicy.bounded(async_requests=async_requests))
         topology = ({"stages": [IkaStage("parent-stage", "Delegate approval", [], subagents=[child])]}
                     if staged else {"topology": AgentTopology(subagents=(child,))})
-        return make_agent("parent", "PARENT_TASK", policy=ExecutionPolicy.bounded(use_async=use_async), **topology)
+        return make_agent("parent", "PARENT_TASK", policy=ExecutionPolicy.bounded(async_requests=async_requests), **topology)
     parent = create()
     db = str(tmp_path / "delegated.db")
     store = parent.enable_snapshots(db)
@@ -269,11 +269,11 @@ def test_fork_preserves_nested_delegated_continuations(make_agent, tmp_path):
 
 
 @pytest.mark.parametrize("error_type", [IkaRequestCancelled, IkaRequestDeadlineExceeded])
-@pytest.mark.parametrize("use_async", [False, True])
-def test_delegated_request_controls_propagate(make_agent, tmp_path, error_type, use_async):
-    child = make_agent("child", "CHILD_TASK", policy=ExecutionPolicy.bounded(use_async=use_async))
+@pytest.mark.parametrize("async_requests", [False, True])
+def test_delegated_request_controls_propagate(make_agent, tmp_path, error_type, async_requests):
+    child = make_agent("child", "CHILD_TASK", policy=ExecutionPolicy.bounded(async_requests=async_requests))
     parent = make_agent("parent", topology=AgentTopology(subagents=(child,)),
-                        policy=ExecutionPolicy.bounded(use_async=use_async))
+                        policy=ExecutionPolicy.bounded(async_requests=async_requests))
     store = parent.enable_snapshots(str(tmp_path / "cancel.db"))
     calls = []
     def respond(url, payload):
@@ -360,18 +360,18 @@ def test_fresh_restore_preserves_pending_later_chat_turn(make_agent, tmp_path, b
 
 @pytest.mark.parametrize("outcome", ["success", "error", "cancel", "pause"])
 @pytest.mark.parametrize("borrowed", [False, True])
-@pytest.mark.parametrize("use_async", [False, True])
-def test_delegated_clones_close_only_owned_clients(make_agent, tmp_path, outcome, borrowed, use_async):
+@pytest.mark.parametrize("async_requests", [False, True])
+def test_delegated_clones_close_only_owned_clients(make_agent, tmp_path, outcome, borrowed, async_requests):
     from IkaModel.base import HumanInputRequired
 
     clients = []
     def factory():
-        client = httpx.AsyncClient() if use_async else httpx.Client()
+        client = httpx.AsyncClient() if async_requests else httpx.Client()
         clients.append(client)
         return client
     caller = factory() if borrowed else None
     provider = ProviderConfig.bounded(client=caller) if borrowed else ProviderConfig.bounded(client_factory=factory)
-    child = make_agent("child", provider=provider, policy=ExecutionPolicy.bounded(use_async=use_async),
+    child = make_agent("child", provider=provider, policy=ExecutionPolicy.bounded(async_requests=async_requests),
                        stages=[IkaStage("approval", "Get approval", [], hitl=True)] if outcome == "pause" else [])
     parent = make_agent("parent", topology=AgentTopology(subagents=(child,)))
     parent.enable_snapshots(str(tmp_path / "clients.db"))
@@ -399,7 +399,7 @@ def test_delegated_clones_close_only_owned_clients(make_agent, tmp_path, outcome
         child.shutdown()
         assert clients[0].is_closed is not borrowed
     finally:
-        if use_async:
+        if async_requests:
             from IkaModel.async_runner import run_async
             for client in clients:
                 run_async(client.aclose)

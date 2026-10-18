@@ -87,7 +87,7 @@ class IkaStage(StageHitlToolMixin):
         self.tools: List[IkaTools | AgentTool] = list(tools)
         self.stage_max_step = stage_max_step
         self.subagents: list[Any] = subagents or []
-        self.allowed_back_to = allowed_back_to or []
+        self.allowed_back_to: List[int] = allowed_back_to or []
         self.hitl = hitl
         self.model_id = model_id
         self.api_key = api_key

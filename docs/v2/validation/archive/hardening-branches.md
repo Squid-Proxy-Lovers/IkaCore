@@ -1,3 +1,5 @@
+> Historical development evidence. Counts and API examples apply only to the recorded revision.
+
 # Remaining hardening branch coverage
 
 Historical inventory at `dba0e05`, before reasoning/dogfood integration. For current

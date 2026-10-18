@@ -1,3 +1,5 @@
+> Historical development evidence. Counts and API examples apply only to the recorded revision.
+
 # Remaining simplifications: implementation and validation
 
 This is the historical `v2-refactor` branch report. The [merged validation report](merged-validation.md)
@@ -57,8 +59,8 @@ are preserved by cloning without changing the original configuration.
 
 ## Documented breaking changes
 
-Every API change appears in [CHANGELOG 2.0.0](../../CHANGELOG.md) and the
-[v2 migration table](README.md#breaking-changes-and-migration):
+Every API change appears in [CHANGELOG 2.0.0](../../../../CHANGELOG.md) and the
+[v2 migration table](../../README.md#breaking-changes-and-migration):
 
 1. Flat advanced constructor keywords move to frozen configuration groups.
 2. Final checks, retry limits and automatic extensions move to `ExecutionPolicy`.

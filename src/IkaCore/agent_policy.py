@@ -19,7 +19,7 @@ def _string_attr(obj: object, attr: str, default: str = "unknown") -> str:
 "AgentPolicy component; owns one execution responsibility."
 ToolExecutor = Callable[..., Any]
 RunSummarization = Callable[..., str]
-run_summarization = cast(RunSummarization, _run_summarization_untyped)
+run_summarization: RunSummarization = cast(RunSummarization, _run_summarization_untyped)
 if TYPE_CHECKING:
     from .agents import IkaBaseAgent
 

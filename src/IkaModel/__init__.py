@@ -1,7 +1,28 @@
 import logging
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from IkaModel.base import AgentTool as AgentTool
+    from IkaModel.base import BareBoneModel as BareBoneModel
+    from IkaModel.base import ToolArgs as ToolArgs
+    from IkaModel.chat_interface.chat_interface import async_api_request_retry as async_api_request_retry
+    from IkaModel.chat_interface.chat_interface import async_chat as async_chat
+    from IkaModel.chat_interface.chat_interface import async_execute_tool as async_execute_tool
+    from IkaModel.chat_interface.chat_interface import async_execute_tool_calls as async_execute_tool_calls
+    from IkaModel.chat_interface.chat_interface import (
+        async_summarise_message_history as async_summarise_message_history,
+    )
+    from IkaModel.chat_interface.chat_interface import chat as chat
+    from IkaModel.chat_interface.chat_interface import execute_tool_calls as execute_tool_calls
+    from IkaModel.chat_interface.chat_interface import get_provider as get_provider
+    from IkaModel.chat_interface.chat_interface import summarise_message_history as summarise_message_history
+    from IkaModel.request_control import request_controls as request_controls
+    from IkaModel.runtime_errors import IkaRequestCancelled as IkaRequestCancelled
+    from IkaModel.runtime_errors import IkaRequestDeadlineExceeded as IkaRequestDeadlineExceeded
+    from IkaModel.runtime_policy import RuntimeOptions as RuntimeOptions
+    from IkaModel.runtime_policy import runtime_options as runtime_options
 
 try:
     __version__ = version("ikacore")

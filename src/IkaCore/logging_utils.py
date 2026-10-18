@@ -33,7 +33,7 @@ class IkaLogger(
         log_input_enabled: bool = False,
     ) -> None:
         self.level = level
-        self.log_file = Path(log_file)
+        self.log_file: Path = Path(log_file)
         self.use_colors = use_colors
         self.show_usage_level0 = show_usage_level0
         self.log_input_enabled = log_input_enabled

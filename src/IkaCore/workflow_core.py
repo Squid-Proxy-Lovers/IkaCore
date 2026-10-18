@@ -23,8 +23,8 @@ class WorkflowCore:
         ]
         for node in self.nodes:
             agent_info = f"{node.agent.name} ({node.agent.__class__.__name__})"
-            if node.agent.Stages:
-                agent_info += f" [{len(node.agent.Stages)} stages]"
+            if node.agent.stages:
+                agent_info += f" [{len(node.agent.stages)} stages]"
             lines.append(f"  - {node.name}: {agent_info}")
             if node.stage_wiring:
                 lines.append(f"    Stage Wiring: {list(node.stage_wiring.keys())}")
@@ -66,7 +66,7 @@ class WorkflowCore:
 
         for node in self.nodes:
             agent = node.agent
-            if getattr(agent, "Stages", None):
+            if getattr(agent, "stages", None):
                 if agent.subagents or agent.next_agent:
                     raise ValueError(
                         f"Agent '{agent.name}' has stages and cannot declare subagents or next_agent directly."

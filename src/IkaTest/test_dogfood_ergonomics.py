@@ -276,9 +276,9 @@ def test_bounded_presets_and_context_budget_units():
     assert ExecutionLimits.bounded().maxsteps == 6
     assert ExecutionPolicy.bounded().max_step_extensions == ExecutionPolicy.bounded().max_stage_extensions == 0
     assert ExecutionPolicy.bounded().validation_retries == 1
-    with pytest.raises(ValueError, match="positive token"):
+    with pytest.raises(ValueError, match="context_budget"):
         ExecutionLimits(context_budget=0)
-    with pytest.raises(ValueError, match="nonnegative"):
+    with pytest.raises(ValueError, match="validation_retries"):
         ExecutionPolicy(validation_retries=-1)
     with request_controls(timeout=0), MockProvider():
         from IkaModel import IkaRequestDeadlineExceeded
@@ -362,9 +362,9 @@ def test_workflow_concurrency_bounds_active_instances_and_validates_aliases():
         for _ in range(2):
             result = wf.run(concurrency=2)["node"]
             assert len(result.instance_outputs) == 3
-            assert result.history is result.output  # Deprecated output alias remains usable.
+            assert not hasattr(result, "history")
         assert peak == 2
-        with pytest.raises(ValueError, match="Conflicting"):
+        with pytest.raises(TypeError, match="use_async"):
             wf.run(parallel=True, use_async=False)
         with pytest.raises(ValueError, match="positive"):
             wf.run(concurrency=0)

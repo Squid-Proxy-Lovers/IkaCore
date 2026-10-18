@@ -59,12 +59,6 @@ class WorkflowResult:
     child_summaries: dict[str, str] = field(default_factory=lambda: {})
 
 
-    @property
-    def history(self) -> dict[str, Any]:
-        """Deprecated alias for output. Use transcript for replayable conversation."""
-        return self.output
-
-
 @dataclass(frozen=True)
 class WorkflowNodeError:
     node_name: str
@@ -75,8 +69,8 @@ class WorkflowNodeError:
 
 class WorkflowError(RuntimeError):
     def __init__(self, errors: list[WorkflowNodeError], partial_results: dict[str, WorkflowResult]):
-        self.errors = tuple(errors)
-        self.partial_results = dict(partial_results)
+        self.errors: tuple[WorkflowNodeError, ...] = tuple(errors)
+        self.partial_results: dict[str, WorkflowResult] = dict(partial_results)
         super().__init__("; ".join(f"Node {e.node_name!r} instance {e.instance_id}: {e.error_type}: {e.message}"
                                   for e in errors))
 

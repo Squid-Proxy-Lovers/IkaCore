@@ -1,3 +1,5 @@
+from IkaCore import IkaTools
+
 """
 Tests for IkaBaseAgent helper mixin: validation, memory access, message history,
 final_prompt, parse_control_calls, _fallback_final_content, _build_final_output.
@@ -133,7 +135,7 @@ class TestFinalPrompt:
         )
         agent = _minimal_agent(stages=[stage0, stage1])
 
-        prompt = build_stage_content_prompt(agent.prompt, agent.Stages, stage1, 1)
+        prompt = build_stage_content_prompt(agent.prompt, agent.stages, stage1, 1)
         overrides = resolve_stage_model_overrides(agent, stage1)
 
         assert "Stage 0 (S0)" in prompt
@@ -184,8 +186,8 @@ class TestFinalPrompt:
         assert clone._base_prompt == "base"
         assert clone._parent_hierarchy == ["Parent"]
         assert clone.execution is a.execution
-        assert clone.Stages[0] is not stage
-        assert clone.Stages[0].tools == stage.tools
+        assert clone.stages[0] is not stage
+        assert clone.stages[0].tools == stage.tools
 
     def test_execute_stage_refreshes_first_input_for_each_stage(self):
         stage0 = IkaStage("S0", "Stage 0 prompt", [])
@@ -850,7 +852,7 @@ class TestExecutionRuntimeHelpers:
         assert validated.execution() == {"final_message": "validated"}
 
     def test_simple_end_instruction_requires_submit_tool_first(self):
-        a = _minimal_agent(tools=[SimpleNamespace(name="submit_discovery")])
+        a = _minimal_agent(tools=[IkaTools("submit_discovery", "submit", {"type": "object"}, execute_function=lambda _: None)])
 
         instruction = a.policy_runtime._simple_end_instruction()
 
@@ -884,7 +886,7 @@ class TestRuntimeHelpers:
 
     def test_get_chat_client_returns_async_client_without_constructing_httpx(self):
         client = object()
-        a = _minimal_agent(policy=ExecutionPolicy(use_async=True))
+        a = _minimal_agent(policy=ExecutionPolicy(async_requests=True))
         a.client = client
 
         assert a.chat._get_chat_client() is client
@@ -1139,7 +1141,7 @@ class TestChatWrapper:
         assert a._total_cost["total_cost"] == 1.1
 
     def test_run_chat_round_uses_async_chat_when_enabled(self):
-        a = _minimal_agent(policy=ExecutionPolicy(use_async=True))
+        a = _minimal_agent(policy=ExecutionPolicy(async_requests=True))
         response = {"usage": {}, "cost": {}}
         calls = []
 

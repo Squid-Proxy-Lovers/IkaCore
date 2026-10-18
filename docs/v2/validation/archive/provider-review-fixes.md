@@ -1,3 +1,5 @@
+> Historical development evidence. Counts and API examples apply only to the recorded revision.
+
 # Provider review fixes — v2.0.0 unreleased
 
 Worktree: `/private/tmp/ikacore-w-fix-providers`; branch: `v2-fix-providers`;

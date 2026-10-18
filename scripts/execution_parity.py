@@ -55,7 +55,7 @@ def make_agent(staged, maxsteps, extensions, hitl):
                    'policy': IkaCore.ExecutionPolicy(max_step_extensions=extensions, max_stage_extensions=extensions,
                                                      extend_steps_by=2, extend_stage_steps_by=2),
                    'output': IkaCore.OutputConfig(cli=False)}
-    return IkaBaseAgent('fixture', 'description', 'task', model_id='gpt-4o', api_key='fixture', **{"stages" if GROUPED else "Stages": stages}, **options)
+    return IkaBaseAgent('fixture', 'description', 'task', model_id='gpt-4o', api_key='fixture', **{"stages" if GROUPED else "stages": stages}, **options)
 
 
 def run_case(directory, staged, name, maxsteps, extensions, pause):

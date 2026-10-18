@@ -49,9 +49,9 @@ def compute_cost(model_id: str, usage: dict[str, Any]) -> dict[str, float]:
 
 
 class RuntimeOutput:
-    def __init__(self, subscribers: tuple[EventSubscriber, ...] = (), *, cli_adapter: Any = None):
-        self.subscribers = subscribers
-        self.cli_adapter = cli_adapter
+    def __init__(self, subscribers: tuple[EventSubscriber, ...] = (), *, cli_adapter: Any = None) -> None:
+        self.subscribers: tuple[EventSubscriber, ...] = subscribers
+        self.cli_adapter: Any = cli_adapter
         self._steps: dict[str, int] = {}
         self._lock = Lock()
 
@@ -82,7 +82,9 @@ class RuntimeOutput:
     def is_buffering(self) -> bool:
         return self.cli_adapter is not None and self.cli_adapter.is_buffering()
 
-    compute_cost = staticmethod(compute_cost)
+    @staticmethod
+    def compute_cost(model_id: str, usage: dict[str, Any]) -> dict[str, float]:
+        return compute_cost(model_id, usage)
 
     def shutdown(self) -> None:
         for subscriber in self.subscribers:
@@ -97,13 +99,13 @@ class RuntimeOutput:
                 flush()
 
 
-    def log_input(self, messages: List[dict]) -> None:
+    def log_input(self, messages: List[dict[str, Any]]) -> None:
         self.publish('input', {'messages': messages})
 
-    def log_tool_results(self, tool_calls: List[dict], tool_results: List[str]) -> None:
+    def log_tool_results(self, tool_calls: List[dict[str, Any]], tool_results: List[str]) -> None:
         self.publish('tool_results', {'tool_calls': tool_calls, 'tool_results': tool_results})
 
-    def log_output(self, content: str, usage: Optional[Dict[str, Any]]=None, cost: Optional[Dict[str, float]]=None, message_history: Optional[dict]=None) -> None:
+    def log_output(self, content: str, usage: Optional[Dict[str, Any]]=None, cost: Optional[Dict[str, float]]=None, message_history: Optional[dict[str, Any]]=None) -> None:
         self.publish('output', {'content': content, 'usage': usage, 'cost': cost, 'message_history': message_history})
 
     def log_summary(self, summary: str) -> None:
@@ -118,7 +120,7 @@ class RuntimeOutput:
     def log_stage_end(self, stage_name: str, used_steps: int) -> None:
         self.publish('stage_end', {'stage_name': stage_name, 'used_steps': used_steps})
 
-    def log_step(self, stage_name: str, step_idx: int, output: str, tool_calls: list, usage: dict, cost: dict, elapsed: float) -> None:
+    def log_step(self, stage_name: str, step_idx: int, output: str, tool_calls: list[dict[str, Any]], usage: dict[str, Any], cost: dict[str, float], elapsed: float) -> None:
         self.publish('step', {'stage_name': stage_name, 'step_idx': step_idx, 'output': output, 'tool_calls': tool_calls, 'usage': usage, 'cost': cost, 'elapsed': elapsed})
 
     def log_hitl_prompt(self, stage_name: str) -> None:
@@ -133,22 +135,22 @@ class RuntimeOutput:
     def log_hitl_answer(self, stage_name: str, user_text: str) -> None:
         self.publish('hitl_answer', {'stage_name': stage_name, 'user_text': user_text})
 
-    def agent_init(self, agent_name: str, hierarchy: List[str], step: int=0, description: str='', **kwargs):
+    def agent_init(self, agent_name: str, hierarchy: List[str], step: int=0, description: str='', **kwargs: Any) -> None:
         self.publish('agent_init', {'agent_name': agent_name, 'hierarchy': hierarchy, 'step': step, 'description': description, **kwargs})
 
-    def agent_response(self, agent_name: str, response: str, hierarchy: List[str], step: int, is_final: bool=False):
+    def agent_response(self, agent_name: str, response: str, hierarchy: List[str], step: int, is_final: bool=False) -> None:
         self.publish('agent_response', {'agent_name': agent_name, 'response': response, 'hierarchy': hierarchy, 'step': step, 'is_final': is_final})
 
-    def summarization(self, agent_name: str, summary: str, hierarchy: Optional[List[str]]=None, step: int=0):
+    def summarization(self, agent_name: str, summary: str, hierarchy: Optional[List[str]]=None, step: int=0) -> None:
         self.publish('summarization', {'agent_name': agent_name, 'summary': summary, 'hierarchy': hierarchy, 'step': step})
 
-    def workflow_status(self, workflow_name: str, message: str, step: int=0):
+    def workflow_status(self, workflow_name: str, message: str, step: int=0) -> None:
         self.publish('workflow_status', {'workflow_name': workflow_name, 'message': message, 'step': step})
 
-    def tool_call(self, tool_name: str, args: Dict[str, Any], hierarchy: List[str], step: int):
+    def tool_call(self, tool_name: str, args: Dict[str, Any], hierarchy: List[str], step: int) -> None:
         self.publish('tool_call', {'tool_name': tool_name, 'args': args, 'hierarchy': hierarchy, 'step': step})
 
-    def tool_result(self, tool_name: str, result: str, hierarchy: List[str], step: int, is_error: bool=False, is_timeout: bool=False):
+    def tool_result(self, tool_name: str, result: str, hierarchy: List[str], step: int, is_error: bool=False, is_timeout: bool=False) -> None:
         self.publish('tool_result', {'tool_name': tool_name, 'result': result, 'hierarchy': hierarchy, 'step': step, 'is_error': is_error, 'is_timeout': is_timeout})
 
     def emit(self, output_type: OutputType, content: str, hierarchy: list[str], step: int | None = None,

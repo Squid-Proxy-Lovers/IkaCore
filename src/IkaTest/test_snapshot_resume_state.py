@@ -127,7 +127,7 @@ def test_mid_stage_resume_does_not_double_charge_steps_to_following_stage(agent_
 def test_loop_budget_survives_resume_in_a_new_agent(agent_factory, monkeypatch, staged):
     options = {'maxsteps': 2, 'max_stage_extensions': 1, 'extend_stage_steps_by': 2,
                'max_step_extensions': 1, 'extend_steps_by': 2,
-               'Stages': [IkaStage('phase', 'work', [], stage_max_step=2)] if staged else []}
+               'stages': [IkaStage('phase', 'work', [], stage_max_step=2)] if staged else []}
     agent = agent_factory(**options)
     calls = []
     def chat(model, messages, history, **kwargs):
@@ -156,13 +156,13 @@ def test_hitl_resume_preserves_the_stage_budget_already_consumed(agent_factory, 
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize('use_async', [False, True])
+@pytest.mark.parametrize('async_requests', [False, True])
 @pytest.mark.parametrize('extensions', [0, 1])
 def test_exhausted_hitl_resume_extends_or_finalizes_before_stage_completion(
-    agent_factory, monkeypatch, use_async, extensions,
+    agent_factory, monkeypatch, async_requests, extensions,
 ):
     agent = agent_factory(stages=[IkaStage('approval', 'ask approval', [], hitl=True, stage_max_step=1)],
-                          max_stage_extensions=extensions, extend_stage_steps_by=2, use_async=use_async)
+                          max_stage_extensions=extensions, extend_stage_steps_by=2, async_requests=async_requests)
     calls, summaries = [], []
     def chat(model, messages, history, **kwargs):
         calls.append(deepcopy(messages))
@@ -188,10 +188,10 @@ def test_exhausted_hitl_resume_extends_or_finalizes_before_stage_completion(
 
 
 @pytest.mark.parametrize('staged', [False, True])
-@pytest.mark.parametrize('use_async', [False, True])
-def test_snapshot_without_loop_state_uses_only_remaining_budget(agent_factory, monkeypatch, staged, use_async):
-    options = {'maxsteps': 6 if staged else 3, 'use_async': use_async,
-               'Stages': [IkaStage('phase', 'work', [], stage_max_step=3)] if staged else []}
+@pytest.mark.parametrize('async_requests', [False, True])
+def test_snapshot_without_loop_state_uses_only_remaining_budget(agent_factory, monkeypatch, staged, async_requests):
+    options = {'maxsteps': 6 if staged else 3, 'async_requests': async_requests,
+               'stages': [IkaStage('phase', 'work', [], stage_max_step=3)] if staged else []}
     agent = agent_factory(**options)
     calls = []
     def chat(*args, **kwargs):
@@ -237,10 +237,10 @@ def test_snapshot_without_loop_state_subtracts_only_current_stage_steps(agent_fa
 
 
 @pytest.mark.parametrize('staged', [False, True])
-@pytest.mark.parametrize('use_async', [False, True])
-def test_exhausted_legacy_budget_does_not_regain_a_turn(agent_factory, monkeypatch, staged, use_async):
-    options = {'maxsteps': 1, 'use_async': use_async,
-               'Stages': [IkaStage('ask', 'approval', [], hitl=True, stage_max_step=1)] if staged else []}
+@pytest.mark.parametrize('async_requests', [False, True])
+def test_exhausted_legacy_budget_does_not_regain_a_turn(agent_factory, monkeypatch, staged, async_requests):
+    options = {'maxsteps': 1, 'async_requests': async_requests,
+               'stages': [IkaStage('ask', 'approval', [], hitl=True, stage_max_step=1)] if staged else []}
     calls = []
     def chat(*args, **kwargs):
         calls.append(True)

@@ -152,8 +152,8 @@ def test_silent_workflow_scopes_preserve_silent_and_observed_callers(capsys):
 
     class Fixture:
         name = 'fixture'
-        Stages = ()
-        use_async = False
+        stages = ()
+        async_requests = False
         def clone_for_run(self):
             return Fixture()
         def execution(self):

@@ -142,7 +142,7 @@ def build_async_workflow(api_key: str, model_id: str) -> IkaWorkflow:
 
     return IkaWorkflow(
         name="async_advanced",
-        description="instances + instance_inputs + run_async",
+        description="instances + instance_inputs + parallel",
         nodes=nodes,
         edges=edges,
         start_node="brainstorm",
@@ -170,7 +170,7 @@ def run_sync() -> None:
         print("Final (synthesizer):", (r.final or ""))
 
 
-def run_async() -> None:
+def run_parallel() -> None:
     api_key = os.getenv("API_KEY")
     model_id = os.getenv("MODEL_ID", "deepseek-chat")
     if not api_key:
@@ -196,7 +196,7 @@ def run_async() -> None:
 
 def main() -> None:
     # run_sync()
-    run_async()
+    run_parallel()
 
 
 if __name__ == "__main__":

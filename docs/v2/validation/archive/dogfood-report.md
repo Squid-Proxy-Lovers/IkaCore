@@ -1,3 +1,5 @@
+> Historical development evidence. Counts and API examples apply only to the recorded revision.
+
 # New-user application dogfood report
 
 Current status: all findings are addressed in the [Resolution section](#resolution--ergonomics-implementation).
@@ -8,11 +10,11 @@ Date: 2026-10-18. Runtime: unreleased IkaCore 2.0.0, wheel built from
 Worktree: `/private/tmp/ikacore-w-dogfood`, branch `v2-dogfood`.
 No runtime files were changed. No push or external comment was made.
 
-The six applications live under [examples/apps](../../examples/apps/README.md).
+The six applications live under [examples/apps](../../../../examples/apps/README.md).
 They run actual agents, tools, workflows, memory and persistence against offline
 provider envelopes, then opt into Codex using `--live --use-local-login --model gpt-5.6-sol`.
 They use an installed wheel, not editable imports. The wheel fingerprint, request counts,
-per-app live outcomes and limitations are in [LIVE_RESULTS.md](../../examples/apps/LIVE_RESULTS.md).
+per-app live outcomes and limitations are in [LIVE_RESULTS.md](apps-live-results.md).
 
 ## Bugs for runtime owners
 
@@ -152,7 +154,7 @@ cannot be embedded in the file it commits.
 The observations and 980-test/74-call evidence above describe the original dogfood
 revision. The following resolutions supersede its API limitations. Implementation starts
 from `49dbeb3` on `v2-ergonomics`; current verification and rerun evidence are recorded in
-[the application results](../../examples/apps/LIVE_RESULTS.md). No original regression
+[the application results](apps-live-results.md). No original regression
 assertion was weakened. All three strict xfail markers were removed; their HTTPX fixtures
 now carry request metadata so `raise_for_status()` reaches the runtime assertions.
 
@@ -210,5 +212,5 @@ Validated runtime/test source revision: **`f8c6c1a2105efc6bb2972b075b4fc4bc51829
 The ergonomics merge reruns these assertions alongside reasoning replay, crash durability,
 soak, generative tests and the raised hardening floors. Current numbers and revision labels
 are in [merge-validation.md](merge-validation.md); installed-wheel app outcomes are in
-[LIVE_RESULTS.md](../../examples/apps/LIVE_RESULTS.md). The three reproductions are ordinary
+[LIVE_RESULTS.md](apps-live-results.md). The three reproductions are ordinary
 passing tests; there are no dogfood xfail markers.

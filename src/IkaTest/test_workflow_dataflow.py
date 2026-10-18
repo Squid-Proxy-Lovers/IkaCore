@@ -123,12 +123,12 @@ def test_initial_context_reaches_start_node_verbatim_without_summarising():
         calls.append(list(contexts))
         return "SUMMARY(" + " | ".join(contexts) + ")"
 
-    for use_async in (False, True):
+    for async_requests in (False, True):
         calls.clear()
-        workflow = _chain_workflow(compress, AsyncWorkflowExecutor(max_workers=2) if use_async else None)
+        workflow = _chain_workflow(compress, AsyncWorkflowExecutor(max_workers=2) if async_requests else None)
         with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-            workflow.run(initial_context="the user's own brief", parallel=use_async)
-        assert calls == [["root summary"]], (use_async, calls)  # only the real edge is summarised, once
+            workflow.run(initial_context="the user's own brief", parallel=async_requests)
+        assert calls == [["root summary"]], (async_requests, calls)  # only the real edge is summarised, once
 
 
 def test_sync_edges_are_summarised_once_at_the_consumer():

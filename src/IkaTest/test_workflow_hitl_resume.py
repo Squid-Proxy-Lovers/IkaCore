@@ -14,14 +14,14 @@ from IkaTest.test_snapshot_resume_state import _turn
 @pytest.fixture
 def approval_workflow(tmp_path, monkeypatch):
     workflows, agents, calls = [], [], []
-    def create(*, parallel=False, use_async=False, tool=None, version_root=False):
+    def create(*, parallel=False, async_requests=False, tool=None, version_root=False):
         names = ('root', 'left', 'right', 'join') if parallel else ('approval', 'final')
         approvals = {'left', 'right'} if parallel else {'approval'}
         nodes = []
         for name in names:
             stages = [IkaStage('approve', 'ask approval', [tool] if tool else [], hitl=True)] if name in approvals else []
             agent = IkaBaseAgent(name, 'test', 'task', model_id='gpt-4o', api_key='test', stages=stages,
-                                limits=ExecutionLimits(maxsteps=6), policy=ExecutionPolicy(max_stage_extensions=0, use_async=use_async), output=OutputConfig(show_usage_level0=False))
+                                limits=ExecutionLimits(maxsteps=6), policy=ExecutionPolicy(max_stage_extensions=0, async_requests=async_requests), output=OutputConfig(show_usage_level0=False))
             agent._test_version_root = version_root
             agents.append(agent)
             nodes.append(WorkflowNode(name, agent))
@@ -58,7 +58,7 @@ def approval_workflow(tmp_path, monkeypatch):
 @pytest.mark.parametrize('asynchronous', [False, True])
 @pytest.mark.parametrize('answer_child', [False, True])
 def test_workflow_resume_answers_saved_instance_and_continues_dependents(approval_workflow, asynchronous, answer_child):
-    workflow, store, calls = approval_workflow(use_async=asynchronous)
+    workflow, store, calls = approval_workflow(async_requests=asynchronous)
     assert workflow.run(parallel=asynchronous) == {}
     info = workflow.snapshot_runtime_info()
     interrupted = info['interrupted_instances']
@@ -66,7 +66,7 @@ def test_workflow_resume_answers_saved_instance_and_continues_dependents(approva
     saved = store.load_snapshot(info['last_snapshot_id'])['state_json']
     assert saved['interrupted_instances'] == interrupted
     # Opening the database in another workflow must retain the interrupted mapping.
-    other, _, _ = approval_workflow(use_async=asynchronous)
+    other, _, _ = approval_workflow(async_requests=asynchronous)
     if answer_child:
         child = workflow.nodes[0].agent.clone_for_run()
         child.enable_snapshots(store.db_path)
@@ -118,10 +118,10 @@ def test_workflow_resume_preserves_effects_before_child_interruption(approval_wo
 
 
 @pytest.mark.parametrize('parallel', [False, True])
-@pytest.mark.parametrize('use_async', [False, True])
+@pytest.mark.parametrize('async_requests', [False, True])
 @pytest.mark.parametrize('source_completed', [False, True])
-def test_workflow_fork_does_not_mutate_source_child(approval_workflow, parallel, use_async, source_completed):
-    workflow, store, _ = approval_workflow(use_async=use_async)
+def test_workflow_fork_does_not_mutate_source_child(approval_workflow, parallel, async_requests, source_completed):
+    workflow, store, _ = approval_workflow(async_requests=async_requests)
     workflow.run(parallel=parallel)
     info = workflow.snapshot_runtime_info()
     child_id = info['interrupted_instances']['approval:0']

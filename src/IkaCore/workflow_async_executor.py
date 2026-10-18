@@ -28,7 +28,7 @@ def _run_async_workflow_agent(
             agent.inject_workflow_context(context)
 
         async_execution = getattr(agent, "async_execution", None)
-        if (getattr(agent, "use_async", False) and callable(async_execution)
+        if (getattr(agent, "async_requests", False) and callable(async_execution)
                 and not getattr(agent, "_workflow_snapshot_instance", False)):
             result = run_async(cast(Callable[[], Coroutine[Any, Any, Any]], async_execution))
         else:
@@ -62,10 +62,10 @@ def _run_async_workflow_agent(
 class AsyncWorkflowExecutor:
     def __init__(self, max_workers: int = 30):
         self.max_workers = max_workers
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
-        self.pending_tasks: Dict[str, concurrent.futures.Future] = {}
+        self.executor: concurrent.futures.ThreadPoolExecutor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+        self.pending_tasks: Dict[str, concurrent.futures.Future[dict[str, Any]]] = {}
         self.completed_results: Dict[str, Any] = {}
-        self.lock = threading.Lock()
+        self.lock: threading.Lock = threading.Lock()
 
     def schedule_node(
         self,
@@ -73,7 +73,7 @@ class AsyncWorkflowExecutor:
         agent: IkaBaseAgent,
         context: str = "",
         instance_id: int = 0,
-    ) -> concurrent.futures.Future:
+    ) -> concurrent.futures.Future[dict[str, Any]]:
         task_id = f"{node_name}_{instance_id}"
         future = submit_with_controls(self.executor, _run_async_workflow_agent, node_name, agent, context, instance_id)
 
@@ -84,7 +84,7 @@ class AsyncWorkflowExecutor:
 
     def wait_for_completion(
         self,
-        futures: List[concurrent.futures.Future],
+        futures: List[concurrent.futures.Future[dict[str, Any]]],
         timeout: Optional[float] = None,
     ) -> List[Any]:
         results = []

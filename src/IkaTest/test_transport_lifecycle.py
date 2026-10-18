@@ -384,8 +384,8 @@ def test_controlled_client_retains_mounts_auth_cookies_redirects_and_hooks():
         assert client._transport._pool is original_pool and not client.is_closed
 
 
-@pytest.mark.parametrize('use_async', [False, True])
-def test_retry_sleep_never_schedules_past_the_execution_deadline(use_async):
+@pytest.mark.parametrize('async_requests', [False, True])
+def test_retry_sleep_never_schedules_past_the_execution_deadline(async_requests):
     from IkaModel.request_lifecycle import sleep_with_controls
     intervals = []
     def sleep(delay):
@@ -396,7 +396,7 @@ def test_retry_sleep_never_schedules_past_the_execution_deadline(use_async):
     async def run():
         await async_sleep_with_controls(10, async_sleep)
     with request_controls(timeout=.03), pytest.raises(ValueError, match='stop before sleeping'):
-        if use_async:
+        if async_requests:
             asyncio.run(run())
         else:
             sleep_with_controls(10, sleep)

@@ -9,8 +9,8 @@ python -m examples.apps.approval_workflow.main --offline
 python -m examples.apps.approval_workflow.main --live --use-local-login --model gpt-5.6-sol
 ```
 
-The dependent remains blocked at the question; a new process resumes to READY; the alternative fork produces HOLD. Completed upstream work is reused. SnapshotStore.fork_run_from_snapshot is used because the agent convenience fork does not accept resume_input.
+The dependent remains blocked at the question; a new process resumes to READY; the alternative fork produces HOLD. Completed upstream work is reused. The alternative calls workflow.fork_from_snapshot(snapshot_id, resume_input="NO").
 
 Offline mode runs real agent/tool/workflow/snapshot code against scripted provider-native HTTP response envelopes. It blocks accidental HTTP transport access and needs no credentials. Live mode opts in to the local Codex CLI login (or CODEX_BEARER); prompts and files are synthetic. Request scopes allow one attempt and expire after 90 seconds; per-request agent timeouts are at most 45 seconds. Each subprocess session owns its own scope. The apps print only check results, never model answers or credentials.
 
-See [live outcomes](../LIVE_RESULTS.md) and [friction and findings](../../../docs/v2/dogfood-report.md).
+See [live outcomes](../../../docs/v2/validation/archive/apps-live-results.md) and [usage guide](../../../docs/USAGE.md).

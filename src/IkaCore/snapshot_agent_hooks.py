@@ -41,7 +41,7 @@ def ensure_session(agent: Any) -> Optional[SnapshotSession]:
             session.run_id = run_id
             session.root_frame_id = session.store.create_frame(run_id, "agent", agent.name,
                 parent_frame_id=parent_frame, caller_frame_id=parent_frame, return_to_frame_id=parent_frame,
-                resolved_config={"model_id": agent.model_id, "maxsteps": agent.maxsteps, "use_async": agent.use_async})
+                resolved_config={"model_id": agent.model_id, "maxsteps": agent.maxsteps, "use_async": agent.async_requests})
             run = session.store.get_run(run_id)
             if run is not None and not run.get("root_frame_id"):
                 session.store.set_run_root_frame(run_id, session.root_frame_id)

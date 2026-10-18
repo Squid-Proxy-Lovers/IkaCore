@@ -35,7 +35,7 @@ class TestIkaBaseAgentInit:
         assert a.api_key == "test-key"
         assert a.api_url is not None
         assert a.tools == []
-        assert a.Stages == []
+        assert a.stages == []
         assert a.subagents == []
         assert a.next_agent is None
         assert a.maxsteps == 100
@@ -116,7 +116,7 @@ class TestIkaBaseAgentInit:
             async def aclose(self):
                 self.closed = True
 
-        a = _minimal_agent(policy=ExecutionPolicy(use_async=True))
+        a = _minimal_agent(policy=ExecutionPolicy(async_requests=True))
         client = AsyncClient()
         a.client = client
         a.logger = MagicMock()

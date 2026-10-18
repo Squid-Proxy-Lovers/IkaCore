@@ -11,7 +11,7 @@ The current runtime supports:
 - snapshot/resume and interruptible HITL flows
 - optional memory integration through ordinary tools
 
-Version 2.0.0 is unreleased and intentionally breaks compatibility with v1. See the [migration guide](docs/v2/README.md) before adopting it.
+Version 2.0.0 is unreleased and intentionally breaks compatibility with v1. Start with the [usage guide](docs/USAGE.md) and [API reference](docs/API.md); use the [migration guide](docs/v2/README.md) when moving from v1.
 
 ## Install
 
@@ -26,8 +26,8 @@ python -m pip install dist/ikacore-2.0.0-py3-none-any.whl
 python -m examples.apps.research_assistant.main --offline
 ```
 
-See [six runnable applications](examples/apps/README.md), their [live results](examples/apps/LIVE_RESULTS.md),
-and the [new-user findings](docs/v2/dogfood-report.md).
+See [six runnable applications](examples/apps/README.md) and the
+[release validation summary](docs/v2/validation/release-2.0.0.md).
 
 For development:
 
@@ -121,10 +121,12 @@ caller-owned HTTPX clients remain usable. See the [request control limits](docs/
 
 ## Documentation
 
-- [Changelog](CHANGELOG.md)
 - [Usage Guide](docs/USAGE.md)
+- [API Reference](docs/API.md)
+- [Migration Guide](docs/v2/README.md)
+- [Changelog](CHANGELOG.md)
 - [Architecture Notes](docs/indepth.md)
-- [IkaCore v2 draft: simplification and migration](docs/v2/README.md)
+- [IkaCore 2.0 migration](docs/v2/README.md)
 - [Memory Notes](src/IkaMem/docs/README.md)
 
 Codex support is documented in the [Provider Selection](docs/USAGE.md#provider-selection) section. IkaCore treats Codex auth as opt-in: pass a bearer token as `api_key`, or explicitly import `get_bearer` with `from IkaModel.codex.auth import get_bearer` and call `get_bearer()` to read and refresh the Codex CLI token from `~/.codex/auth.json`.

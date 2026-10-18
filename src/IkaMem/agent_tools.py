@@ -54,7 +54,7 @@ class MemoryTools:
     def __init__(self, name: str, *, short_term: STMemory | None = None,
                  long_term: LTMemory | None = None,
                  before_call: Callable[[str], None] | None = None):
-        self.operations = MemoryOperations(name, short_term, long_term)
+        self.operations: MemoryOperations = MemoryOperations(name, short_term, long_term)
         self.before_call: Callable[[str], None] = before_call or (lambda name: None)
 
     def tools(self, *, access: Mapping[str, bool] | None = None,

@@ -1,3 +1,5 @@
+> Historical application evidence. These measurements apply only to the recorded revision.
+
 # Codex application usage results
 
 Validated runtime/test source revision: **`f8c6c1a2105efc6bb2972b075b4fc4bc51829e1c`**.
@@ -11,7 +13,7 @@ editable imports or PYTHONPATH.
 
 Wheel SHA-256: `afd623a0087f6fd2b86a4b9841a6f3523c3d7b4101f72354a7b7b62070c767fb`.
 Runtime Python-content SHA-256: `72a19681dbe20599ee4d96d945fc697cfa36c6215196a231acc687d975256759`.
-[Sanitized JSON evidence](live-results.json) retains every app attempt and the earlier
+[Sanitized JSON evidence](apps-live-results.json) retains every app attempt and the earlier
 ergonomics-only and original dogfood runs. No credentials, raw responses or model answers
 are stored in that report. Nothing was pushed or posted.
 
@@ -64,7 +66,7 @@ is not a model call. Only Codex ran live; the other six provider-switch routes s
   Global 99% line / 95% branch / 99% combined floors and every per-area floor are unchanged.
 - All three original DOGFOOD reproductions are assertive passing tests.
 - All 42 execution-parity traces and seven offline provider reasoning probes pass.
-  Current detailed evidence is in [merge-validation.md](../../docs/v2/merge-validation.md).
+  Current detailed evidence is in [merge-validation.md](merge-validation.md).
 
 ## Codex matrix
 
@@ -75,7 +77,7 @@ covered offline. Each case has a 60-second limit.
 
 ## Reproduce
 
-Use the [clean installed-wheel setup](README.md). The measured app environment was
+Use the [clean installed-wheel setup](../../../../examples/apps/README.md). The measured app environment was
 `artifacts/installed-runtime`; invoke its Python for these commands:
 
 ```bash
@@ -104,6 +106,6 @@ dogfood run at `aca8c53` included workarounds and an initial failed chat attempt
 74 boundaries. Both histories remain in the JSON. Model choices and call sequences vary;
 these runs are not a performance benchmark.
 
-This is one provider/model/account sample. See the [resolution table](../../docs/v2/dogfood-report.md#resolution--ergonomics-implementation),
-[migration guide](../../docs/v2/README.md#breaking-changes-and-migration) and
-[API reference](../../docs/API.md) for the final supported contracts.
+This is one provider/model/account sample. See the [resolution table](dogfood-report.md#resolution--ergonomics-implementation),
+[migration guide](../../README.md#breaking-changes-and-migration) and
+[API reference](../../../API.md) for the final supported contracts.

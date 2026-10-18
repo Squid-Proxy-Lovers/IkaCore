@@ -31,7 +31,7 @@ def restore_loop_state(agent: Any, step_limit: int, remaining_steps: int) -> Exe
         entry: JsonDict = next((s["state_json"] for s in entries if s["snapshot_kind"] == "frame_entry"), dict[str, Any]())
         initial = entry.get("remaining_steps", remaining_steps)
         consumed = max(0, initial - remaining_steps)
-        stage = agent.Stages[resume.get("stage_index", 0)]
+        stage = agent.stages[resume.get("stage_index", 0)]
         step_limit = max(0, stage_step_limit(stage, initial) - consumed)
     state = ExecutionLoopState(**saved) if saved is not None else ExecutionLoopState(step_limit, remaining_steps=remaining_steps)
     agent._resume_state = None
@@ -158,7 +158,7 @@ def resume_delegation(agent: Any, state: dict[str, Any], answer: str | None) -> 
         return {"status": "awaiting_user_input", "interrupt_data": data,
                 "last_content": state.get("last_content", "")}
     session = agent._snapshot_runtime
-    sources = agent.Stages[state["stage_index"]].subagents if agent.Stages else agent.subagents
+    sources = agent.stages[state["stage_index"]].subagents if agent.stages else agent.subagents
     template = next((child for child in sources if child.name == pending["agent_name"]), None)
     if template is None:
         raise ValueError("The interrupted delegated agent is no longer configured")
@@ -179,6 +179,6 @@ def resume_delegation(agent: Any, state: dict[str, Any], answer: str | None) -> 
     _update_parent_result(agent, state, pending["snapshot_id"], output)
     if pending.get("tool_frame_id"):
         session.store.update_frame(pending["tool_frame_id"], status="completed", outputs={"result": output})
-    state["scope"] = "stage" if agent.Stages else "agent"
+    state["scope"] = "stage" if agent.stages else "agent"
     state.pop("interrupt_data", None)
     return None

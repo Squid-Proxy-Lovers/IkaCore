@@ -96,7 +96,7 @@ def test_stages_advance_and_jump_without_replaying_extra_turns(scenario):
     agent, calls, summaries = scenario(True, [_response('first', [_call('stage_end')]),
         _response('back', [{'function': {'name': 'change_stage', 'arguments': '{"stage_index":0}'}}]),
         _response('finished', [_call('agent_end')])])
-    agent.Stages.append(IkaStage('second', 'second stage task', [], allowed_back_to=[0]))
+    agent.stages.append(IkaStage('second', 'second stage task', [], allowed_back_to=[0]))
     result = agent.execution()
     assert result['final_message'] == 'done' and len(calls) == 3
     assert 'second stage task' in calls[1][0]['content']

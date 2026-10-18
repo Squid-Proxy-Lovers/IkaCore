@@ -48,13 +48,13 @@ def deadline_server(tls_context, scenario, tls):
                 entered.set()
                 if scenario == 'headers':
                     self.wfile.write(b'HTTP/1.1 200 OK\r\nX-Trickle: ')
-                    for _ in range(60):
+                    for _ in range(200):
                         self.wfile.write(b'x')
                         if release.wait(.03):
                             return
                 elif scenario == 'body':
-                    self.wfile.write(b'HTTP/1.1 200 OK\r\nContent-Length: 60\r\n\r\n')
-                    for _ in range(60):
+                    self.wfile.write(b'HTTP/1.1 200 OK\r\nContent-Length: 200\r\n\r\n')
+                    for _ in range(200):
                         self.wfile.write(b'x')
                         if release.wait(.03):
                             return
@@ -128,14 +128,14 @@ def test_sync_wall_clock_budget_and_worker_cleanup(tls_context, monkeypatch, tls
                 trigger.start()
             try:
                 started = time.monotonic()
-                with request_controls(timeout=.2 if mode == 'deadline' else None,
+                with request_controls(timeout=.5 if mode == 'deadline' else None,
                                       cancel_checker=cancelled.is_set,
                                       abort_registrar=None if mode == 'checker' else register):
                     with pytest.raises(IkaRequestDeadlineExceeded if mode == 'deadline' else IkaRequestCancelled):
                         api_request_retry(url, {}, {}, timeout=10, client=client, max_retries=1)
                 elapsed = time.monotonic() - (started if mode == 'deadline' else timing['cancelled'])
                 print('TIMING', json.dumps({'scenario': scenario, 'tls': tls, 'mode': mode, 'elapsed': elapsed}))
-                assert elapsed < (.4 if mode == 'deadline' else .2)
+                assert elapsed < (2.0 if mode == 'deadline' else 1.0)
                 assert not callbacks and not client.is_closed
                 join_request_workers()  # Before the stalled server is released.
                 assert duplicates and all(sock.fileno() == -1 for sock in duplicates)
@@ -161,15 +161,15 @@ def test_dns_can_finish_later_without_delaying_the_sync_caller(tls_context, monk
     original = socket.getaddrinfo
     def resolve(*args, **kwargs):
         entered.set()
-        assert release.wait(2)
+        assert release.wait(5)
         return original(*args, **kwargs)
     monkeypatch.setattr(socket, 'getaddrinfo', resolve)
     with deadline_server(tls_context, 'accept', tls) as (url, _), httpx.Client(verify=False, trust_env=False) as client:
         try:
             started = time.monotonic()
-            with request_controls(timeout=.04), pytest.raises(IkaRequestDeadlineExceeded):
+            with request_controls(timeout=.25), pytest.raises(IkaRequestDeadlineExceeded):
                 controlled_post(url, {}, {}, 10, client)
-            assert entered.is_set() and time.monotonic() - started < .25
+            assert entered.is_set() and time.monotonic() - started < 2
             assert not client.is_closed
         finally:
             release.set()

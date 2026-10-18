@@ -112,12 +112,12 @@ class DataflowRun(_DataflowNodePhases):
         self.initial_context = initial_context
         self.cli = cli
         self.inflight: Dict[concurrent.futures.Future[Any], tuple[int, str, str]] = {}
-        self.instance_results = {}
-        self.remaining = {}
+        self.instance_results: Dict[str, List[Dict[str, Any]]] = {}
+        self.remaining: Dict[str, int] = {}
         self._sequence = itertools.count()
         workers = (max(1, int(getattr(workflow.async_executor, "max_workers", 1) or 1))
                    if current_runtime_options().parallel_context_preparation else 1)
-        self.context_pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="wf-context")
+        self.context_pool: concurrent.futures.ThreadPoolExecutor = concurrent.futures.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="wf-context")
 
     def run(self) -> None:
         try:

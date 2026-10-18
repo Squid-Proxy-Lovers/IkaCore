@@ -64,7 +64,7 @@ class IkaBaseAgent:
     _owns_events: bool
     final_answer_checks: list[FinalAnswerCheck]
     max_tool_rounds: int
-    use_async: bool
+    async_requests: bool
     summarize_final: bool
     per_tool_rate_limit: dict[str, float]
     rate_limit_per_min: Optional[float]
@@ -74,7 +74,7 @@ class IkaBaseAgent:
     step_timeout: int
     next_agent: Optional["IkaBaseAgent"]
     subagents: list["IkaBaseAgent"]
-    Stages: list[IkaStage]
+    stages: list[IkaStage]
     temperature: float
     max_tokens: int
     api_url: Optional[str]
@@ -99,24 +99,21 @@ class IkaBaseAgent:
         api_key: str = "",
         tools: list[IkaTools] | None = None,
         stages: list[IkaStage] | None = None,
-        Stages: list[IkaStage] | None = None,
         provider: ProviderConfig | None = None,
         prompts: PromptConfig | None = None,
         limits: ExecutionLimits | None = None,
         policy: ExecutionPolicy | None = None,
         topology: AgentTopology | None = None,
         output: OutputConfig | None = None,
-    ):
-        if stages is not None and Stages is not None:
-            raise ValueError("Use stages, or the deprecated Stages alias, not both")
-        self.config = AgentConfig(
+    ) -> None:
+        self.config: AgentConfig = AgentConfig(
             name,
             name if description is None else description,
             prompt,
             model_id,
             api_key,
             tuple(tools or ()),
-            tuple(stages if stages is not None else Stages or ()),
+            tuple(stages or ()),
             provider or _DEFAULT_PROVIDER,
             prompts or _DEFAULT_PROMPTS,
             limits or _DEFAULT_LIMITS,
@@ -156,14 +153,6 @@ class IkaBaseAgent:
     def prompt(self, value: str) -> None:
         from .agent_conversation import replace_prompt
         replace_prompt(self, value)
-
-    @property
-    def stages(self) -> list[IkaStage]:
-        return self.Stages
-
-    @stages.setter
-    def stages(self, value: list[IkaStage]) -> None:
-        self.Stages = value
 
     @property
     def transcript(self) -> dict[str, Any]:
