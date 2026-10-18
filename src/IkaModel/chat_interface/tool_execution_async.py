@@ -50,7 +50,7 @@ async def async_execute_tool(
         error_msg = f"Tool '{tool_name}' not found in tool executors"
         LOG.error(error_msg)
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
-        return json.dumps({"error": error_msg})
+        return truncate_tool_result(json.dumps({"error": error_msg}), tool_name)
 
     try:
         validated_args = validate_tool_args(tool_name, tool_args)
@@ -58,7 +58,7 @@ async def async_execute_tool(
         error_msg = f"Validation error for tool '{tool_name}': {str(e)}"
         LOG.warning(error_msg)
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
-        return json.dumps({"error": error_msg})
+        return truncate_tool_result(json.dumps({"error": error_msg}), tool_name)
 
     executor_fn = tool_executors[tool_name]
     tool_timeout = getattr(executor_fn, "__tool_timeout__", timeout)
@@ -93,12 +93,12 @@ async def async_execute_tool(
         timeout_msg = f"Tool '{tool_name}' execution timed out after {tool_timeout}s"
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
         LOG.warning(timeout_msg)
-        return json.dumps({"error": timeout_msg})
+        return truncate_tool_result(json.dumps({"error": timeout_msg}), tool_name)
     except Exception as e:
         error_msg = f"Error executing tool '{tool_name}': {str(e)}"
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
         LOG.error(error_msg, exc_info=True)
-        return json.dumps({"error": error_msg})
+        return truncate_tool_result(json.dumps({"error": error_msg}), tool_name)
 
 
 async def _execute_parallel_tool_plan_async(

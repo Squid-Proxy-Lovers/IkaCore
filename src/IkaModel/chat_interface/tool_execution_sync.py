@@ -134,7 +134,7 @@ def execute_tool(
         error_msg = f"Tool '{tool_name}' not found in tool executors"
         LOG.error(error_msg)
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
-        return json.dumps({"error": error_msg})
+        return truncate_tool_result(json.dumps({"error": error_msg}), tool_name)
 
     try:
         validated_args = validate_tool_args(tool_name, tool_args)
@@ -142,7 +142,7 @@ def execute_tool(
         error_msg = f"Validation error for tool '{tool_name}': {str(e)}"
         LOG.warning(error_msg)
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
-        return json.dumps({"error": error_msg})
+        return truncate_tool_result(json.dumps({"error": error_msg}), tool_name)
 
     executor_fn = tool_executors[tool_name]
     cli.tool_call(tool_name, validated_args, hierarchy, step)
@@ -172,12 +172,12 @@ def execute_tool(
         timeout_msg = f"Tool '{tool_name}' execution timed out after {tool_timeout}s"
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
         LOG.warning(timeout_msg)
-        return json.dumps({"error": timeout_msg})
+        return truncate_tool_result(json.dumps({"error": timeout_msg}), tool_name)
     except Exception as e:
         error_msg = f"Error executing tool '{tool_name}': {str(e)}"
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
         LOG.error(error_msg, exc_info=True)
-        return json.dumps({"error": error_msg})
+        return truncate_tool_result(json.dumps({"error": error_msg}), tool_name)
 
 
 def _schema_dict(value: object) -> JsonDict:
@@ -419,7 +419,10 @@ def _ordered_tool_results(plan: ToolCallPlan) -> list[str]:
         fn = _tool_function_payload(tool_call)
         raw_tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
         tool_call_id = raw_tool_call_id if isinstance(raw_tool_call_id, str) else str(raw_tool_call_id)
-        tool_results.append(plan.tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})))
+        tool_results.append(truncate_tool_result(
+            plan.tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})),
+            str(fn.get("name") or tool_call.get("name", "tool")),
+        ))
     return tool_results
 
 
