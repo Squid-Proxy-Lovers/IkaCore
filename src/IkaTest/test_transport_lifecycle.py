@@ -155,7 +155,7 @@ def test_sync_abort_closes_only_response_and_preserves_caller_client(codex, mode
         with request_controls(timeout=0.03 if mode == 'deadline' else None,
                               cancel_checker=cancelled.is_set, abort_registrar=register), pytest.raises(error):
             api_request_retry(url, {}, {}, client=client)
-        assert released.is_set() and not callbacks
+        assert released.wait(1) and not callbacks
         assert not client.is_closed
         assert api_request_retry(url, {}, {}, client=client).status_code == 200
 
@@ -225,7 +225,7 @@ def test_sync_abort_never_accesses_transport_sockets(multiplexed):
         def __iter__(self):
             cancelled.set()
             callbacks[0]()
-            assert released.is_set()
+            assert released.wait(1)
             yield b'{}'
         def close(self):
             released.set()
@@ -246,3 +246,178 @@ def test_sync_abort_never_accesses_transport_sockets(multiplexed):
         assert not client.is_closed and not callbacks
     network.get_extra_info.assert_not_called()
     sock.shutdown.assert_not_called()
+
+
+@pytest.mark.parametrize('phase', ['transport', 'hook', 'client'])
+def test_slow_user_code_cannot_hold_the_sync_caller(monkeypatch, phase):
+    import time
+
+    import IkaModel.request_transport as transport
+    entered, release = threading.Event(), threading.Event()
+    def stall(*args, **kwargs):
+        entered.set()
+        assert release.wait(2)
+    class Borrowed(httpx.MockTransport):
+        def close(self):
+            raise AssertionError('caller-owned custom transport was closed')
+    def respond(request):
+        if phase == 'transport':
+            stall()
+        return httpx.Response(200, json={})
+    client = httpx.Client(transport=Borrowed(respond), event_hooks={'response': [stall] if phase == 'hook' else []})
+    def create(timeout):
+        stall()
+        return client
+    if phase == 'client':
+        monkeypatch.setattr(transport, 'new_sync_client', create)
+    try:
+        started = time.monotonic()
+        with request_controls(timeout=.04), pytest.raises(IkaRequestDeadlineExceeded):
+            controlled_post(URL, {}, {}, 10, None if phase == 'client' else client)
+        assert entered.is_set() and time.monotonic() - started < .25
+        assert not client.is_closed
+    finally:
+        release.set()
+        for thread in threading.enumerate():
+            if thread.name.startswith('ika-http-'):
+                thread.join(2)
+                assert not thread.is_alive()
+        # The factory case creates an owned client; the test deliberately gives
+        # it a transport whose close raises to check that late cleanup is consumed.
+        if phase != 'client':
+            client._transport = httpx.MockTransport(respond)
+            client.close()
+
+
+@pytest.mark.parametrize('error', [ValueError('hook failed'), KeyboardInterrupt(), SystemExit(7)])
+def test_sync_worker_preserves_exception_identity(error):
+    def respond(request):
+        raise error
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        with request_controls(cancel_checker=lambda: False), pytest.raises(type(error)) as raised:
+            controlled_post(URL, {}, {}, 10, client)
+        assert raised.value is error
+
+
+def test_closed_caller_client_fails_without_reopening():
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+    client.close()
+    with request_controls(timeout=1), pytest.raises(RuntimeError, match='client has been closed'):
+        controlled_post(URL, {}, {}, 10, client)
+
+
+def test_private_pool_copies_configuration_and_preserves_trace():
+    from IkaModel.request_transport import _RequestTransport, _SyncRequestAbort
+    events = []
+    with httpx.HTTPTransport(verify=False, proxy='http://localhost:9999', retries=2,
+                             local_address='127.0.0.1', socket_options=[(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]) as source:
+        abort = _SyncRequestAbort()
+        private = _RequestTransport(source, abort)
+        pool, original = private.transport._pool, source._pool
+        assert type(pool) is type(original) and pool is not original
+        for key, value in original.__dict__.items():
+            if key not in {'_connections', '_requests', '_optional_thread_lock', '_max_keepalive_connections'}:
+                assert getattr(pool, key) is value
+        assert pool._requests is not original._requests and pool._connections is not original._connections
+        assert pool._optional_thread_lock is not original._optional_thread_lock
+        assert pool._max_keepalive_connections == 0
+        # A hook's trace is composed with ours, rather than silently replaced.
+        request = httpx.Request('POST', URL, extensions={'trace': lambda event, info: events.append(event)})
+        original_handle = private.transport.handle_request
+        private.transport.handle_request = lambda request: httpx.Response(200)
+        try:
+            private.handle_request(request)
+            request.extensions['trace']('http11.send_request_headers.started', {'request': request})
+            assert events == ['http11.send_request_headers.started']
+        finally:
+            private.transport.handle_request = original_handle
+            private.close()
+
+
+def test_connection_arriving_after_abort_is_shutdown_and_closed():
+    from IkaModel.request_transport import _SyncRequestAbort
+    abort = _SyncRequestAbort()
+    abort.abort()
+    duplicate = Mock(spec=socket.socket)
+    duplicate.shutdown.side_effect = OSError('already closed')
+    stream = Mock()
+    stream.get_extra_info.return_value.dup.return_value = duplicate
+    abort.own_connection('connection.connect_tcp.complete', {'return_value': stream})
+    duplicate.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+    duplicate.close.assert_called_once()
+    assert not abort.sockets
+
+
+def test_custom_response_arriving_after_abort_is_closed():
+    from IkaModel.request_transport import _SyncRequestAbort
+    closed = threading.Event()
+    class Stream(httpx.SyncByteStream):
+        def close(self):
+            closed.set()
+    abort = _SyncRequestAbort()
+    abort.abort()
+    abort.bind_response(httpx.Response(200, stream=Stream()))
+    assert closed.is_set()
+
+
+def test_controlled_client_retains_mounts_auth_cookies_redirects_and_hooks():
+    seen, hooks = [], []
+    def respond(request):
+        seen.append(request)
+        if request.url.path == '/start':
+            return httpx.Response(302, headers={'Location': '/finish', 'Set-Cookie': 'first=1; Path=/'})
+        return httpx.Response(200, json={}, headers={'Set-Cookie': 'second=2; Path=/'})
+    mounted = httpx.MockTransport(respond)
+    with httpx.Client(base_url=URL, headers={'X-Client': 'preserved'}, cookies={'initial': 'yes'},
+                      auth=('user', 'password'), params={'query': 'value'}, follow_redirects=True,
+                      event_hooks={'response': [lambda response: hooks.append(response.status_code)]},
+                      mounts={'https://': mounted, 'http://': None}) as client:
+        original_pool = client._transport._pool
+        with request_controls(timeout=1):
+            assert controlled_post('/start', {'X-Request': 'also-preserved'}, {}, 10, client).json() == {}
+        assert hooks == [302, 200] and len(seen) == 2
+        assert all(request.headers['X-Client'] == 'preserved' and request.headers['X-Request'] == 'also-preserved'
+                   and request.headers['Authorization'].startswith('Basic ') for request in seen)
+        assert seen[0].url.params['query'] == 'value'
+        assert 'initial=yes' in seen[0].headers['Cookie'] and 'first=1' in seen[1].headers['Cookie']
+        assert client.cookies.get('first') == '1' and client.cookies.get('second') == '2'
+        assert client._transport._pool is original_pool and not client.is_closed
+
+
+@pytest.mark.parametrize('use_async', [False, True])
+def test_retry_sleep_never_schedules_past_the_execution_deadline(use_async):
+    from IkaModel.request_lifecycle import sleep_with_controls
+    intervals = []
+    def sleep(delay):
+        intervals.append(delay)
+        raise ValueError('stop before sleeping')
+    async def async_sleep(delay):
+        sleep(delay)
+    async def run():
+        await async_sleep_with_controls(10, async_sleep)
+    with request_controls(timeout=.03), pytest.raises(ValueError, match='stop before sleeping'):
+        if use_async:
+            asyncio.run(run())
+        else:
+            sleep_with_controls(10, sleep)
+    assert len(intervals) == 1 and 0 < intervals[0] <= .03
+
+
+@pytest.mark.parametrize('error_type', [OSError, RuntimeError, httpx.ReadError])
+def test_custom_abort_cleanup_errors_do_not_escape_background_thread(error_type):
+    released = threading.Event()
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            assert released.wait(2)
+            yield b'{}'
+        def close(self):
+            released.set()
+            raise error_type('close failed after releasing the reader')
+    with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=Stream()))) as client:
+        with request_controls(timeout=.03), pytest.raises(IkaRequestDeadlineExceeded):
+            controlled_post(URL, {}, {}, 10, client)
+        for thread in threading.enumerate():
+            if thread.name.startswith('ika-http-'):
+                thread.join(2)
+                assert not thread.is_alive()
+        assert released.is_set() and not client.is_closed

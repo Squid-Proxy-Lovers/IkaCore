@@ -181,8 +181,41 @@ def test_preloaded_response_does_not_abort_another_request(pooled_server, monkey
             with request_controls(cancel_checker=cancelled.is_set, abort_registrar=register):
                 with pytest.raises(IkaRequestCancelled):
                     controlled_post(url + '/ok', {}, {}, 3, client)
+            for request_worker in threading.enumerate():
+                if request_worker.name == 'ika-http-request':
+                    request_worker.join(2)
+                    assert not request_worker.is_alive()
             assert not errors
         finally:
             release.set()
             if second is not None:
                 second.join(3)
+
+
+@pytest.mark.parametrize('tls', [False, True])
+def test_private_abort_preserves_already_in_flight_caller_request(pooled_server, tls):
+    url, entered, release = pooled_server(tls=tls)
+    results, errors = [], []
+    with httpx.Client(verify=False, trust_env=False, limits=httpx.Limits(max_connections=1)) as client:
+        def other_request():
+            try:
+                results.append(client.post(url + '/block', json={}).json())
+            except BaseException as error:
+                errors.append(error)
+        other = threading.Thread(target=other_request)
+        other.start()
+        try:
+            assert entered.wait(2)
+            with request_controls(timeout=.2), pytest.raises(IkaRequestDeadlineExceeded):
+                controlled_post(url + '/block', {}, {}, 10, client)
+            # The controlled request never queues in or mutates the caller's pool.
+            assert len(client._transport._pool._requests) == 1
+            assert other.is_alive() and not errors and not client.is_closed
+            release.set()
+            other.join(2)
+            assert results == [{}] and not errors
+            assert client.post(url + '/ok', json={}).json() == {}
+        finally:
+            release.set()
+            other.join(3)
+            assert not other.is_alive()

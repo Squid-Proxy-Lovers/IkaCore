@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable, Generator
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
+from contextvars import copy_context
 from typing import Any, Optional, TypeVar
 
 from .request_control import (
@@ -23,6 +24,43 @@ from .request_control import (
 )
 
 T = TypeVar("T")
+
+
+def run_sync_with_controls(operation: Callable[[], T], abort: Callable[[], None]) -> T:
+    """Bound the caller's wait, including time spent in hooks, DNS and cleanup.
+
+    Abort callbacks only wake the caller: they never run user cleanup on the
+    cancelling thread. The operation must own its abortable network resources.
+    """
+    check_request_controls()
+    wake = threading.Event()
+    future: Future[T] = Future()
+    context = copy_context()
+
+    def work() -> None:
+        try:
+            future.set_result(context.run(operation))
+        except BaseException as error:
+            future.set_exception(error)
+        finally:
+            wake.set()
+
+    unregister = register_request_abort_callback(wake.set)
+    try:
+        check_request_controls()
+        threading.Thread(target=work, name="ika-http-request", daemon=True).start()
+        while True:
+            check_request_controls()
+            if future.done():
+                return future.result()
+            # Check-only cancellation is supported too, without a registrar.
+            wake.wait(effective_timeout(0.01))
+            wake.clear()
+    finally:
+        if not future.done():
+            abort()
+        if unregister is not None:
+            _quiet_close(unregister)
 
 
 def _quiet_close(callback: Callable[[], None]) -> None:
@@ -68,7 +106,7 @@ def sleep_with_controls(delay: float, sleeper: Callable[[float], None]) -> None:
         remaining = end - time.monotonic()
         if remaining <= 0:
             return
-        sleeper(min(0.05, remaining))
+        sleeper(effective_timeout(min(0.05, remaining)) or 0)
 
 
 async def async_sleep_with_controls(delay: float, sleeper: Callable[[float], Awaitable[Any]]) -> None:
@@ -81,7 +119,7 @@ async def async_sleep_with_controls(delay: float, sleeper: Callable[[float], Awa
         remaining = end - time.monotonic()
         if remaining <= 0:
             return
-        await sleeper(min(0.05, remaining))
+        await sleeper(effective_timeout(min(0.05, remaining)) or 0)
 
 
 def wait_for_tool(future: Future[T], timeout: Optional[float]) -> T:

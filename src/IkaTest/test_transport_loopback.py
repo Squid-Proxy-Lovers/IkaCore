@@ -1,4 +1,4 @@
-"""Real sockets bound deadlines and cancellation by per-request I/O timeouts."""
+"""Real sockets enforce absolute deadlines and reclaim request-owned resources."""
 
 import threading
 import time
@@ -103,6 +103,12 @@ def test_real_socket_deadline_and_cancel_timeout_preserve_client(blocked_server,
         expected = IkaRequestDeadlineExceeded if mode == 'deadline' else IkaRequestCancelled
         assert len(errors) == 1 and isinstance(errors[0], expected)
         assert not callbacks
+        # Caller return is independent of asynchronous worker cleanup.
+        if owned:
+            for request_worker in threading.enumerate():
+                if request_worker.name == 'ika-http-request':
+                    request_worker.join(1)
+                    assert not request_worker.is_alive()
         assert clients[0].is_closed == owned
         if client is not None:
             assert api_request_retry(url + '/ok', {}, {}, client=client).json() == {}

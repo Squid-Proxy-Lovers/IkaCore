@@ -23,6 +23,7 @@ import json
 import logging
 import time
 import uuid
+from functools import partial
 from typing import Any, Optional, cast
 
 import httpx
@@ -32,9 +33,10 @@ from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict,
 from ..base import BareBoneModel
 from ..codex_constants import CODEX_API_URL
 from ..model_metadata import CODEX_KNOWN_MODELS
-from ..request_control import check_request_controls, effective_max_retries, effective_timeout
+from ..request_control import check_request_controls, effective_max_retries, effective_timeout, request_lifecycle_active
 from ..request_interface import agent_tools_for_payload
-from ..request_lifecycle import request_scope, sleep_with_controls
+from ..request_lifecycle import sleep_with_controls
+from ..request_transport import controlled_sync_request
 from ..retry_policy import backoff_seconds, response_body, retry_delay, retry_hint_seconds
 from ..runtime_errors import IkaRequestControlError
 from .codex_responses import codex_responses_fill_payload
@@ -203,6 +205,18 @@ def codex_retry_delay(response: httpx.Response, body: str, attempt: int,
     return retry_delay(attempt, retry_hint_seconds(response.headers, response_body(response)), wait_seconds)
 
 
+def _consume_codex_response(api_url: str, headers: dict[str, str], payload: JsonDict, timeout: float,
+                            attempt: int, max_retries: int, wait_seconds: float,
+                            client: Optional[httpx.Client]) -> _CodexResponseShim | float:
+    with open_stream(api_url, headers, payload, effective_timeout(timeout), client) as response:
+        rate_headers = _codex_rate_headers(response)
+        if response.status_code == 200:
+            data = _collect_stream(response)
+            return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
+        body = response.read().decode("utf-8", "replace")
+        return codex_retry_delay(response, body, attempt, max_retries, wait_seconds)
+
+
 def _request_codex_once(
     api_url: str,
     headers: dict[str, str],
@@ -214,17 +228,14 @@ def _request_codex_once(
     client: Optional[httpx.Client] = None,
 ) -> Optional[_CodexResponseShim]:
     check_request_controls()
-    with open_stream(api_url, headers, payload, effective_timeout(timeout), client) as response:
-        # Older test/client shims need not expose close when controls are unused.
-        close = getattr(response, "close", lambda: None)
-        with request_scope(close):
-            rate_headers = _codex_rate_headers(response)
-            if response.status_code == 200:
-                data = _collect_stream(response)
-                return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
-
-            body = response.read().decode("utf-8", "replace")
-            delay = codex_retry_delay(response, body, attempt, max_retries, wait_seconds)
+    if request_lifecycle_active():
+        consume = partial(_consume_codex_response, api_url, headers, payload, timeout, attempt, max_retries, wait_seconds)
+        result = controlled_sync_request(consume, timeout, client)
+    else:
+        result = _consume_codex_response(api_url, headers, payload, timeout, attempt, max_retries, wait_seconds, client)
+    if isinstance(result, _CodexResponseShim):
+        return result
+    delay = result
     sleep_with_controls(delay, time.sleep)
     return None
 
