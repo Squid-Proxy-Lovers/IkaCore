@@ -22,7 +22,7 @@ from IkaModel.runtime_policy import current_runtime_options
 from .. import request_interface as _requests
 from .. import summarization as _summaries
 from ..base import BareBoneModel
-from ..chat_helpers_common import build_provider_request, parse_provider_response
+from ..chat_helpers_common import build_provider_request, parse_provider_response, provider_response_interruption
 from ..request_interface import IkaAPIError, _is_context_length_error, get_max_tokens, get_provider
 from ..runtime_errors import (
     IkaContextWindowError,
@@ -174,6 +174,10 @@ def _parse_provider_round(
     try:
         content, reasoning_content, tool_calls, tokens = parse_provider_response(provider, data, model_id, message_history)
         usage_info = extract_usage(provider, data)
+        interruption = provider_response_interruption(provider, data)
+        if interruption is not None:
+            usage_info["_provider_interruption"] = interruption
+            tool_calls = []  # A truncated tool call is not safe to execute.
     except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
         raise IkaProviderResponseError(
             f"Failed to parse {provider} response for model {model_id}: {e}"

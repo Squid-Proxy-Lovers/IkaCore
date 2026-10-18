@@ -558,4 +558,5 @@ def _new_chat_state(
         tokens=tokens,
         content_before_tools=content,
         usage=UsageInfo.from_mapping(usage_info),
+        interruption=(usage_info or {}).get("_provider_interruption"),
     )

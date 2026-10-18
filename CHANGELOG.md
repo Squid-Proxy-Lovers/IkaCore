@@ -26,6 +26,20 @@ V2 intentionally breaks compatibility with v1. See the
 - Chained runs execute isolated downstream clones and close their owned resources, including
   on errors; concurrent workflow instances leave downstream templates and histories intact.
 
+### Fixed — provider review
+
+- Preserve plain-turn DeepSeek and Z.AI reasoning exactly once alongside provider replay data.
+- Mark truncated provider answers as interrupted with their reason, skip partial tool calls,
+  and preserve history when compaction is truncated; retain Codex incomplete-stream rejection.
+- Omit unsupported Opus 4.7/4.8 sampling, support model-aware adaptive thinking, reject
+  unsupported manual budgets locally, and preserve Gemini 2.5 Pro dynamic thinking.
+- Use Anthropic `tool_choice: {"type": "any"}` for multiple required tools.
+- Honor borrowed async-client request timeouts; promptly cancel and drain checker-only async
+  requests while preserving external task cancellation; retry transient HTTP failures only.
+- Cap every provider-bound tool result, including validation, planning, execution and timeout errors.
+- Count Anthropic cached input and Gemini thought tokens, retaining cache accounting categories.
+- Parse multiline Codex SSE data fields at event boundaries in both sync and async paths.
+
 ### Application ergonomics and intentional behavior changes
 
 - Final validators are never called at construction; only the callable signature is checked.

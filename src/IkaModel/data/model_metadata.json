@@ -541,5 +541,18 @@
     "o4": 200000,
     "o4-mini": 200000,
     "qwen-2.5-72b": 131072
-  }
+  },
+  "anthropic_adaptive_thinking_models": [
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "claude-opus-4-7",
+    "claude-opus-4-8"
+  ],
+  "anthropic_adaptive_only_models": [
+    "claude-opus-4-7",
+    "claude-opus-4-8"
+  ],
+  "gemini_disable_thinking_models": [
+    "gemini-2.5-flash"
+  ]
 }

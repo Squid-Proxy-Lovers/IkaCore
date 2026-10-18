@@ -2,6 +2,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from ..history_replay import is_user_entry, plan_history_replay
+from ..reasoning_replay import _merge_live_assistants
 from ..tool_schema import build_provider_tool_payload
 
 
@@ -55,7 +56,7 @@ def _append_live_messages(api_messages: List[Dict[str, Any]], messages: List[Dic
             continue
         if isinstance(msg, dict):
             if "role" in msg and "content" in msg:
-                api_messages.append(msg)
+                api_messages.append({key: value for key, value in msg.items() if key != "provider_data"})
             elif "content" in msg:
                 api_messages.append({"role": "user", "content": msg["content"]})
             else:
@@ -78,13 +79,14 @@ def deepseek_fill_payload(
     message_history = message_history or _default_message_history()
     api_messages: List[Dict[str, Any]] = []
     plan = plan_history_replay(message_history, messages)
+    entries, messages = _merge_live_assistants(plan.entries, messages)
     if plan.first_input_first:
         _append_deepseek_context(api_messages, message_history)
-        _append_deepseek_history(api_messages, plan.entries)
+        _append_deepseek_history(api_messages, entries)
     else:
         if message_history["system"]["message"]:
             api_messages.append({"role": "system", "content": message_history["system"]["message"]})
-        _append_deepseek_history(api_messages, plan.entries)
+        _append_deepseek_history(api_messages, entries)
         if plan.emit_first_input:
             api_messages.append({"role": "user", "content": message_history["first_input"]["message"]})
     _append_live_messages(api_messages, messages, message_history["first_input"]["message"])

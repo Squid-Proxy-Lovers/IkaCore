@@ -39,7 +39,8 @@ def test_retry_after_falls_back_when_http_date_parser_raises():
 
 
 def test_iter_sse_skips_none_empty_done_and_non_json_lines():
-    lines = [None, "", "event: response.completed", "data:", "data: [DONE]", "data: not-json", "data: {\"ok\": true}", ""]
+    lines = [None, "", "data:", "", "data: [DONE]", "", "data: not-json", "",
+             "event: response.completed", "data: {\"ok\": true}", ""]
 
     assert list(_iter_sse(_FakeStreamResponse(lines))) == [("response.completed", {"ok": True})]
 

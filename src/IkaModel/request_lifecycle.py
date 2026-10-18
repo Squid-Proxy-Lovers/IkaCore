@@ -19,7 +19,6 @@ from .request_control import (
     effective_timeout,
     register_request_abort_callback,
     remaining_request_time,
-    request_cancelled,
     request_lifecycle_active,
 )
 
@@ -143,36 +142,35 @@ def wait_for_tool(future: Future[T], timeout: Optional[float]) -> T:
 
 async def await_with_controls(factory: Callable[[], Awaitable[T]]) -> T:
     check_request_controls()
+    if not request_lifecycle_active():
+        return await factory()
     loop = asyncio.get_running_loop()
-    task = asyncio.current_task()
+    operation = asyncio.ensure_future(factory())
     active = True
-    requested_cancel = False
 
     def perform_abort() -> None:
-        nonlocal requested_cancel
-        if active and task is not None and not task.done():
-            requested_cancel = True
-            task.cancel()
+        if active:
+            operation.cancel()
 
     def abort() -> None:
         if active:
             loop.call_soon_threadsafe(perform_abort)
 
-    unregister = register_request_abort_callback(abort)
+    unregister = None
     try:
-        async with asyncio.timeout(remaining_request_time()):
-            result = await factory()
+        unregister = register_request_abort_callback(abort)
+        while not operation.done():
+            check_request_controls()
+            await asyncio.wait((operation,), timeout=effective_timeout(0.01))
         check_request_controls()
-        return result
-    except asyncio.CancelledError:
-        if requested_cancel and task is not None and request_cancelled():
-            task.uncancel()
-        check_request_controls()
-        raise
-    except TimeoutError:
-        check_request_controls()
-        raise
+        return await operation
     finally:
         active = False
         if unregister is not None:
             _quiet_close(unregister)
+        if not operation.done():
+            operation.cancel()
+        # Drain before returning: cancellation must release the response/socket.
+        # Never cancel or uncancel the parent task for internal request controls;
+        # external cancellation keeps its original CancelledError and count.
+        await asyncio.gather(operation, return_exceptions=True)

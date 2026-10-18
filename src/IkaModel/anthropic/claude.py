@@ -2,7 +2,13 @@ import json
 from typing import Any, Dict, List, Optional
 
 from ..history_replay import is_user_entry, plan_history_replay
-from ..model_metadata import is_anthropic_haiku_model, supports_anthropic_parallel_tool_use
+from ..model_metadata import (
+    is_anthropic_haiku_model,
+    requires_anthropic_adaptive_thinking,
+    supports_anthropic_adaptive_thinking,
+    supports_anthropic_parallel_tool_use,
+    supports_custom_temperature,
+)
 from ..reasoning_replay import replay_items
 from ..tool_schema import build_provider_tool_payload
 
@@ -114,12 +120,12 @@ def _anthropic_tool_choice(model: Any, tool_payload: Any) -> Dict[str, Any]:
     elif len(tool_payload.required_names) == 1:
         tool_choice = {"type": "tool", "name": tool_payload.required_names[0]}
     elif len(tool_payload.required_names) > 1:
-        tool_choice = {"type": "required"}
+        tool_choice = {"type": "any"}
     else:
         tool_choice = {"type": "auto"}
 
     if hasattr(model, 'parallel_tool_calls') and not model.parallel_tool_calls:
-        if supports_anthropic_parallel_tool_use(model.model_id) and tool_choice.get("type") in ["auto", "required"]:
+        if supports_anthropic_parallel_tool_use(model.model_id) and tool_choice.get("type") in ["auto", "any"]:
             tool_choice["disable_parallel_tool_use"] = True
     return tool_choice
 
@@ -128,7 +134,7 @@ def _apply_anthropic_tools(payload: Dict[str, Any], model: Any, agent_tools: lis
     tool_payload = build_provider_tool_payload("anthropic", agent_tools)
     payload["tools"] = tool_payload.tools
     choice = _anthropic_tool_choice(model, tool_payload)
-    if payload.get("thinking") and choice["type"] not in {"auto", "none"}:
+    if payload.get("thinking", {}).get("type") == "enabled" and choice["type"] not in {"auto", "none"}:
         choice = dict[str, Any](type="auto")
         if not getattr(model, "parallel_tool_calls", False) and supports_anthropic_parallel_tool_use(model.model_id):
             choice["disable_parallel_tool_use"] = True
@@ -139,7 +145,15 @@ def _apply_anthropic_tools(payload: Dict[str, Any], model: Any, agent_tools: lis
 def _apply_thinking_config(payload: Dict[str, Any], model: Any) -> None:
     budget = getattr(model, "thinking_budget_tokens", None)
     if budget is None:
+        if getattr(model, "deepthinking", False) and supports_anthropic_adaptive_thinking(model.model_id):
+            payload["thinking"] = {"type": "adaptive"}
+            payload.pop("temperature", None)
+            if getattr(model, "reasoning_effort", None):
+                payload["output_config"] = {"effort": model.reasoning_effort}
         return
+    if requires_anthropic_adaptive_thinking(model.model_id):
+        raise ValueError(f"{model.model_id} requires adaptive thinking; thinking_budget_tokens is unsupported. "
+                         "Set deepthinking=True to enable adaptive thinking.")
     if type(budget) is not int or budget < 1024:
         raise ValueError("Anthropic thinking_budget_tokens must be an integer of at least 1024")
     if budget >= payload["max_tokens"]:
@@ -172,11 +186,12 @@ def anthropic_fill_payload(
     payload = {
         "model": model.model_id,
         "max_tokens": _anthropic_max_tokens(model),
-        "temperature": model.temperature,
         "system": _anthropic_system_prompt(model, message_history),
         "messages": api_messages,
     }
 
+    if supports_custom_temperature(model.model_id):
+        payload["temperature"] = model.temperature
     _apply_thinking_config(payload, model)
     agent_tools = model.agent_tools if agent_tools is None else agent_tools
     if agent_tools:

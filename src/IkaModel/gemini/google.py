@@ -2,6 +2,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from ..history_replay import is_user_entry, plan_history_replay
+from ..model_metadata import supports_gemini_disabled_thinking
 from ..reasoning_replay import replay_items
 from ..tool_schema import build_provider_tool_payload
 
@@ -110,11 +111,11 @@ def gemini_fill_payload(
         "generationConfig": {
             "temperature": model.temperature,
             "maxOutputTokens": model.max_tokens if model.max_tokens and model.max_tokens > 0 else 100,
-            "thinkingConfig": {
-                "thinkingBudget": 0,
-            },
         }
     }
+
+    if supports_gemini_disabled_thinking(model.model_id):
+        payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
 
     if system_instruction:
         payload["systemInstruction"] = {"parts": [_gemini_text_part(system_instruction)]}

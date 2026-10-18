@@ -44,7 +44,12 @@ def _extract_responses_usage(raw_usage: UsageDict, data: UsageDict) -> UsageDict
 
 def _extract_anthropic_usage(raw_usage: UsageDict, data: UsageDict) -> UsageDict:
     usage = _empty_usage()
-    usage["input_tokens"] = raw_usage.get("input_tokens", 0)
+    read = raw_usage.get("cache_read_input_tokens", 0) or 0
+    creation = raw_usage.get("cache_creation_input_tokens", 0) or 0
+    usage["input_tokens"] = (raw_usage.get("input_tokens", 0) or 0) + read + creation
+    usage["input_cached_tokens"] = read
+    if creation:
+        usage["input_cache_creation_tokens"] = creation
     usage["output_tokens"] = raw_usage.get("output_tokens", 0)
     usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
     return usage
@@ -54,7 +59,9 @@ def _extract_gemini_usage(raw_usage: UsageDict, data: UsageDict) -> UsageDict:
     usage = _empty_usage()
     meta = _as_usage_dict(data.get("usageMetadata")) or raw_usage
     usage["input_tokens"] = meta.get("promptTokenCount", 0)
-    usage["output_tokens"] = meta.get("candidatesTokenCount", meta.get("totalTokenCount", 0))
+    fallback_output = max(0, meta.get("totalTokenCount", 0) - usage["input_tokens"])
+    usage["output_tokens"] = (meta.get("candidatesTokenCount", 0) + meta.get("thoughtsTokenCount", 0)
+                              if "candidatesTokenCount" in meta or "thoughtsTokenCount" in meta else fallback_output)
     usage["total_tokens"] = meta.get("totalTokenCount", usage["input_tokens"] + usage["output_tokens"])
     usage["input_cached_tokens"] = meta.get("cachedContentTokenCount", 0)
     return usage

@@ -42,11 +42,12 @@ Sources: the OpenAI Responses references above and the existing Codex endpoint
 request contract in codex_responses.py. Endpoint compatibility is checked separately
 by the bounded live replay probe when local login and network are available.
 
-## Anthropic manual extended thinking
+## Anthropic extended and adaptive thinking
 
 Opt in with ProviderConfig(thinking_budget_tokens=1024, max_tokens=4096).
 BareBoneModel accepts the same thinking_budget_tokens option; per-model overrides
-can set it too. The default None preserves ordinary non-thinking behavior.
+can set it too on models that support manual thinking. The default None preserves
+the model default.
 Budgets must be integers at least 1024 and strictly less than the effective
 max_tokens, including the existing Haiku cap. Invalid values raise before any
 network call.
@@ -56,6 +57,11 @@ temperature (top_k/top_p are not exposed), and adjust forced/required tool choic
 to auto. Tool requirements and completion remain enforced by the agent loop.
 This adjustment includes the framework's forced control tools. Supported modern
 models may prefer adaptive thinking; this option explicitly selects manual mode.
+Opus 4.7/4.8 reject manual budgets locally. Those models also omit temperature
+in ordinary requests and summaries. Metadata enables adaptive thinking on
+Opus 4.6/4.7/4.8 and Sonnet 4.6: set BareBoneModel.deepthinking = True and,
+optionally, reasoning_effort to populate output_config.effort. Adaptive thinking
+preserves forced/required tool choices, unlike manual thinking.
 
 Complete assistant blocks, including thinking with its signature and
 redacted_thinking with its opaque data, are replayed verbatim in their original
@@ -82,7 +88,13 @@ HTTP debug previews redact opaque encrypted_content, signatures, redacted thinki
 data and OpenRouter encrypted reasoning data on a copy. Gemini's per-call debug
 message no longer serializes the signed part. Replay/snapshot originals stay intact.
 
-Source: [Gemini generateContent thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures).
+Gemini 2.5 Pro keeps its dynamic thinking default: it cannot accept a zero
+thinking budget. Only the metadata-listed 2.5 Flash families receive the existing
+zero budget. Usage includes thought tokens in output and total accounting.
+
+Sources: [Gemini generateContent thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures),
+[per-model budgets](https://ai.google.dev/gemini-api/docs/generate-content/thinking),
+[usage metadata](https://ai.google.dev/api/generate-content#UsageMetadata).
 
 ## OpenRouter reasoning passthrough
 
@@ -200,3 +212,9 @@ The integrated runtime (parents `7c410f3` / `a2b7984`, runtime fingerprint
 All six live Codex apps pass; the matrix reports **14 passed / 0 failed / 1
 reasoning_not_exposed skip**. See [merge-validation.md](merge-validation.md) for current
 revision labels, soak metrics, semantic integration checks and live limits.
+
+The final provider review fixes are recorded separately in
+[provider-review-fixes.md](provider-review-fixes.md), including plain assistant
+reasoning, truncation, usage, cancellation, error caps, retry classification and
+multiline SSE regressions. All 21 benchmark checksums remain unchanged relative
+to the provider review base.

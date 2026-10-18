@@ -13,7 +13,7 @@ from IkaCore.agent_runtime_payloads import JsonDict
 from ..request_control import check_request_controls, effective_max_retries, effective_timeout
 from ..request_lifecycle import async_sleep_with_controls, await_with_controls
 from ..request_transport import new_async_client
-from ..retry_policy import backoff_seconds
+from ..retry_policy import TRANSIENT_TRANSPORT_ERRORS, backoff_seconds
 from .chat_helpers_codex import _codex_rate_headers, _CodexResponseShim, _streaming_codex_payload, codex_retry_delay
 from .codex_stream import CodexRetryableStreamError, async_collect_stream
 
@@ -43,7 +43,7 @@ async def async_request_codex(url: str, headers: dict[str, str], payload: JsonDi
                 if isinstance(result, _CodexResponseShim):
                     return result
                 delay = result
-            except (CodexRetryableStreamError, httpx.HTTPError):
+            except (CodexRetryableStreamError, *TRANSIENT_TRANSPORT_ERRORS):
                 check_request_controls()
                 if attempt == attempts - 1:
                     raise

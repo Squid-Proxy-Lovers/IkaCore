@@ -38,7 +38,7 @@ from ..request_control import check_request_controls, effective_max_retries, eff
 from ..request_interface import agent_tools_for_payload
 from ..request_lifecycle import sleep_with_controls
 from ..request_transport import controlled_sync_request
-from ..retry_policy import backoff_seconds, response_body, retry_delay, retry_hint_seconds
+from ..retry_policy import TRANSIENT_TRANSPORT_ERRORS, backoff_seconds, response_body, retry_delay, retry_hint_seconds
 from ..runtime_errors import IkaRequestControlError
 from .codex_responses import codex_responses_fill_payload
 from .codex_stream import CodexRetryableStreamError as _CodexRetryableStreamError
@@ -300,7 +300,7 @@ def _request_codex_with_retries(
                 "codex request timeout: %s",
                 backoff, attempt, max_retries, error,
             )
-        except httpx.HTTPError as error:
+        except TRANSIENT_TRANSPORT_ERRORS as error:
             check_request_controls()
             last_exc = error
             _retry_codex_exception(
