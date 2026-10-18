@@ -30,6 +30,8 @@ INITIAL_BACKOFF_S = 1.0
 MAX_BACKOFF_S = 30.0
 MAX_HINT_S = 300.0
 
+TRANSIENT_TRANSPORT_ERRORS = (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError, httpx.ProxyError)
+
 _RETRYABLE_STATUS = frozenset({408, 409, 429})
 _DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ms|s|m|h)")
 _DURATION_SCALE = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}

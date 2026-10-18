@@ -29,7 +29,7 @@ from .request_control import set_request_cancel_checker as set_request_cancel_ch
 from .request_control import set_request_max_retries as set_request_max_retries
 from .request_lifecycle import async_sleep_with_controls, sleep_with_controls
 from .request_transport import controlled_async_post, controlled_post, new_async_client
-from .retry_policy import backoff_seconds, response_delay
+from .retry_policy import TRANSIENT_TRANSPORT_ERRORS, backoff_seconds, response_delay
 from .runtime_errors import IkaRequestCancelled as IkaRequestCancelled
 from .runtime_errors import IkaRequestControlError
 from .runtime_errors import IkaRequestDeadlineExceeded as IkaRequestDeadlineExceeded
@@ -314,7 +314,7 @@ def api_request_retry(
             check_request_controls()
             sleep_with_controls(delay, time.sleep)
 
-        except httpx.HTTPError as e:
+        except TRANSIENT_TRANSPORT_ERRORS as e:
             delay, last_exception = _http_retry_delay_and_error(e, wait_seconds, attempt, max_retries)
             check_request_controls()
             sleep_with_controls(delay, time.sleep)
@@ -391,7 +391,7 @@ async def _async_retry_loop(
             check_request_controls()
             await async_sleep_with_controls(delay, asyncio.sleep)
 
-        except httpx.HTTPError as e:
+        except TRANSIENT_TRANSPORT_ERRORS as e:
             delay, last_exception = _http_retry_delay_and_error(e, wait_seconds, attempt, max_retries)
             check_request_controls()
             await async_sleep_with_controls(delay, asyncio.sleep)
