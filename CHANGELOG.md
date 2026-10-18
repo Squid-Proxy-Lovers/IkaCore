@@ -78,6 +78,7 @@ IkaCore 2.0 intentionally breaks compatibility with v1. Start with the
   WorkflowError includes node/instance details and partial results.
 - Retain constraints, latest input, complete tool exchanges and reasoning during compaction;
   truncated summaries preserve history and interrupted provider answers skip partial tools.
+  Empty truncated turns remain interrupted instead of completing through forced summaries.
 - Apply model-aware Anthropic thinking/sampling/tool choice, Gemini dynamic thinking,
   cached/thought usage accounting, multiline Codex SSE and capped provider tool results.
 - Manual secret scans inspect the working directory without accidentally scanning all history.

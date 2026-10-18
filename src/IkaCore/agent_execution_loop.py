@@ -221,11 +221,11 @@ class AgentTurnLoop:
             )
             state.used_steps += 1
             state.last_content = turn.last_content
-            if not staged and agent.turns._simple_turn_has_no_progress(turn, state.used_steps - 1):
-                break
             terminal = agent.turns._terminal_turn_result(runtime, state, turn, state.remaining_steps, started)
             if terminal is not None:
                 return agent.turns._finish_loop(state, terminal)
+            if not staged and agent.turns._simple_turn_has_no_progress(turn, state.used_steps - 1):
+                break
             agent.turns._record_execution_progress(runtime, state, turn, started)
             if agent.turns._extend_execution(runtime, state):
                 break

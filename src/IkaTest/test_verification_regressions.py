@@ -74,3 +74,30 @@ def test_workflow_approval_blocks_dependent_tools(agents, tmp_path, parallel, as
                 workflow.resume_from_snapshot("unavailable", resume_input="YES")
     finally:
         workflow.async_executor.shutdown()
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("snapshots", [False, True])
+def test_later_empty_truncation_stays_interrupted(agents, tmp_path, asynchronous, snapshots):
+    agent = agents("truncation", asynchronous)
+    if snapshots:
+        agent.enable_snapshots(str(tmp_path / "agent.db"))
+    calls = 0
+    def respond(url, payload):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return provider_response(url, payload, "Working on it")
+        if calls == 2:
+            return {"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"},
+                    "output": [], "usage": {"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}}
+        return provider_response(url, payload, "FORCED_SUMMARY_MUST_NOT_BECOME_SUCCESS")
+    with MockProvider(responder=respond) as mock:
+        result = agent.execution()
+    assert result.get("status") in {"paused", "awaiting_user_input"}
+    assert result["interrupt_data"]["type"] == "provider_response_truncated"
+    assert len(mock.requests) == 2
+    assert result["usage"]["output_tokens"] >= 100
+    if snapshots:
+        saved = agent._snapshot_runtime.store.load_snapshot(result["snapshot_id"])["state_json"]
+        assert saved["interrupt_data"]["type"] == "provider_response_truncated"
