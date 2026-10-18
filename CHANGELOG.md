@@ -175,3 +175,8 @@ V2 intentionally breaks compatibility with v1. See the
 - Retain reasoning_content replay as required by the current DeepSeek thinking
   API for requests carrying tools. Add sync/async golden requests and final-turn
   history checks; document that no-tools requests accept but ignore the field.
+
+### Reasoning replay: Z.AI verification
+
+- Protect existing GLM reasoning_content replay with sync/async golden tool loops
+  and fresh-buffer reconstruction tests, including final-turn reasoning.

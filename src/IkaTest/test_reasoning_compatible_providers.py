@@ -13,6 +13,7 @@ from IkaModel.chat_interface.chat_interface import async_chat, chat, init_messag
 
 PROVIDERS = {
     "deepseek": ("deepseek-reasoner", "https://api.deepseek.com/chat/completions", "deepseek"),
+    "zai": ("glm-4.7", "https://api.z.ai/api/coding/paas/v4/chat/completions", "openai"),
 }
 CALL = {"id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
 

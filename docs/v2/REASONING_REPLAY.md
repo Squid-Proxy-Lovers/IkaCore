@@ -114,3 +114,17 @@ goldens and fresh-buffer replay tests cover both tool-turn and final-turn though
 
 Sources: [DeepSeek thinking mode](https://api-docs.deepseek.com/guides/thinking_mode/),
 [Chat Completions assistant message schema](https://api-docs.deepseek.com/api/create-chat-completion/).
+
+## Z.AI GLM verification
+
+Z.AI continues to replay the original unmodified reasoning_content on assistant
+turns, including the Coding Plan endpoint where preserved thinking is enabled by
+default. The shared persisted-history reconstruction additionally supports fresh
+live buffers after resume. Sync/async payload goldens protect this behavior.
+
+The standard API endpoint defaults to clearing cross-turn reasoning; callers using
+that endpoint who need Preserved Thinking must select clear_thinking: false in
+their own request customization. This change does not alter the existing Coding
+Plan default or add a standard-endpoint configuration API.
+
+Source: [Z.AI thinking mode and preserved thinking](https://docs.z.ai/guides/capabilities/thinking-mode).
