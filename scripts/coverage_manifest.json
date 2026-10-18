@@ -127,7 +127,8 @@
         "src/IkaTest/test_quality_properties.py::test_snapshot_json_roundtrip_and_append_only_chain",
         "src/IkaTest/test_snapshot_transactions.py::test_nested_transactions_rollback_only_failed_scope",
         "src/IkaTest/test_snapshot_transactions.py::test_snapshot_boundary_is_atomic_and_pause_is_committed",
-        "src/IkaTest/test_snapshot_transactions.py::test_transactions_use_one_connection_and_isolate_workers"
+        "src/IkaTest/test_snapshot_transactions.py::test_transactions_use_one_connection_and_isolate_workers",
+        "src/IkaTest/test_snapshot_transactions.py::test_snapshot_connection_closes_when_setup_fails"
       ],
       "known_gap": "No power-loss/process-kill durability or multi-process contention qualification; redaction is pattern-based.",
       "min_lines": 90,

@@ -10,6 +10,11 @@ if str(src) not in sys.path:
     sys.path.insert(0, str(src))
 
 
+def pytest_configure(config):
+    config.addinivalue_line('filterwarnings', 'error::ResourceWarning')
+    config.addinivalue_line('filterwarnings', 'error::pytest.PytestUnraisableExceptionWarning')
+
+
 @pytest.fixture(autouse=True)
 def offline_network_guard(monkeypatch):
     if os.getenv("IKACORE_LIVE_PROVIDER_TESTS") == "1":

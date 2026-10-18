@@ -2,6 +2,7 @@
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -81,5 +82,27 @@ def test_transactions_use_one_connection_and_isolate_workers(tmp_path, monkeypat
     for connection in connections:
         with pytest.raises(sqlite3.ProgrammingError, match=r'closed|thread'):
             connection.execute('SELECT 1')
-    with original(store.db_path) as connection:
+    with closing(original(store.db_path)) as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name = 'checkpoints'").fetchall() == []
+    with pytest.raises(sqlite3.ProgrammingError, match='closed'):
+        connection.execute('SELECT 1')
+
+
+def test_snapshot_connection_closes_when_setup_fails(tmp_path, monkeypatch):
+    store = SnapshotStore(str(tmp_path / 'runtime.db'))
+    connections = []
+    original = sqlite3.connect
+    class Connection(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql.startswith('PRAGMA'):
+                raise sqlite3.OperationalError('setup failed')
+            return super().execute(sql, *args)
+    def connect(*args, **kwargs):
+        connection = original(*args, factory=Connection, **kwargs)
+        connections.append(connection)
+        return connection
+    monkeypatch.setattr(sqlite3, 'connect', connect)
+    with pytest.raises(sqlite3.OperationalError, match='setup failed'):
+        store.get_run('missing')
+    with pytest.raises(sqlite3.ProgrammingError, match='closed'):
+        connections[0].execute('SELECT 1')

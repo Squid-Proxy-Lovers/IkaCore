@@ -26,9 +26,9 @@ def connect(store: Any) -> Generator[sqlite3.Connection, None, None]:
         yield active
         return
     connection = sqlite3.connect(store.db_path, timeout=30)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
     try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
         with connection:
             yield connection
     finally:
