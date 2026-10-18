@@ -10,9 +10,10 @@ import pytest
 from IkaModel import runtime_options
 from IkaModel.codex.stream_transport import open_stream
 from IkaModel.request_control import request_controls
+from IkaModel.request_interface import api_request_retry, async_api_request_retry
 from IkaModel.request_lifecycle import async_sleep_with_controls, await_with_controls, request_scope, wait_for_tool
 from IkaModel.request_transport import controlled_post, new_async_client
-from IkaModel.runtime_errors import IkaRequestCancelled
+from IkaModel.runtime_errors import IkaRequestCancelled, IkaRequestDeadlineExceeded
 
 URL = 'https://example.invalid'
 
@@ -120,3 +121,69 @@ def test_abort_cleanup_failures_do_not_replace_request_failure():
     with request_controls(abort_registrar=register), pytest.raises(ValueError, match='request failed'), request_scope(fail):
         callbacks[0]()
         raise ValueError('request failed')
+
+
+@pytest.mark.parametrize('codex', [False, True])
+@pytest.mark.parametrize('mode', ['deadline', 'cancel'])
+def test_sync_abort_closes_only_response_and_preserves_caller_client(codex, mode):
+    released, cancelled = threading.Event(), threading.Event()
+    callbacks, requests = [], []
+    body = b'data: {"type":"response.completed","response":{"status":"completed","output":[]}}\n\n' if codex else b'{"ok":true}'
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            if mode == 'cancel':
+                cancelled.set()
+                callbacks[0]()
+            assert released.wait(1), 'the individual response was not aborted'
+            yield body
+        def close(self):
+            released.set()
+    class Transport(httpx.MockTransport):
+        def close(self):
+            released.set()
+            super().close()
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, stream=Stream()) if len(requests) == 1 else httpx.Response(200, content=body)
+    def register(callback):
+        callbacks.append(callback)
+        return lambda: callbacks.remove(callback)
+    url = URL + ('/backend-api/codex/responses' if codex else '/v1/messages')
+    with httpx.Client(transport=Transport(respond)) as client:
+        error = IkaRequestDeadlineExceeded if mode == 'deadline' else IkaRequestCancelled
+        with request_controls(timeout=0.03 if mode == 'deadline' else None,
+                              cancel_checker=cancelled.is_set, abort_registrar=register), pytest.raises(error):
+            api_request_retry(url, {}, {}, client=client)
+        assert released.is_set() and not callbacks
+        assert not client.is_closed
+        assert api_request_retry(url, {}, {}, client=client).status_code == 200
+
+
+@pytest.mark.parametrize('mode', ['deadline', 'cancel'])
+def test_async_post_abort_preserves_caller_client(mode):
+    async def run():
+        started, closed = asyncio.Event(), asyncio.Event()
+        callbacks = []
+        cancelled = False
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                started.set()
+                await asyncio.Event().wait()
+                yield b''
+            async def aclose(self):
+                closed.set()
+        def register(callback):
+            callbacks.append(callback)
+            return lambda: callbacks.remove(callback)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=Stream()))) as client:
+            with request_controls(timeout=0.02 if mode == 'deadline' else None,
+                                  cancel_checker=lambda: cancelled, abort_registrar=register):
+                task = asyncio.create_task(async_api_request_retry(URL, {}, {}, client=client))
+                await started.wait()
+                if mode == 'cancel':
+                    cancelled = True
+                    callbacks[0]()
+                with pytest.raises(IkaRequestDeadlineExceeded if mode == 'deadline' else IkaRequestCancelled):
+                    await task
+            assert closed.is_set() and not client.is_closed and not callbacks
+    asyncio.run(run())

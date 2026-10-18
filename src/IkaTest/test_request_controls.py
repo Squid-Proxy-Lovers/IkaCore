@@ -112,26 +112,26 @@ def test_request_scope_unregisters_and_ignores_stale_abort_callbacks():
 def test_sync_deadline_closes_request_and_unregisters_abort():
     released = threading.Event()
     registered = []
-
-    class Client:
-        calls = 0
-
+    calls = []
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            assert released.wait(1)
+            yield b'{"ok":true}'
         def close(self):
             released.set()
-
-        def post(self, *args, **kwargs):
-            self.calls += 1
-            assert released.wait(1)
-            return httpx.Response(200, json={"ok": True})
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, stream=Stream())
 
     def register(callback):
         registered.append(callback)
         return lambda: registered.remove(callback)
 
-    client = Client()
-    with request_controls(timeout=0.03, abort_registrar=register), pytest.raises(IkaRequestDeadlineExceeded):
-        requests.api_request_retry(URL, {}, {}, client=client)
-    assert client.calls == 1 and not registered
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        with request_controls(timeout=0.03, abort_registrar=register), pytest.raises(IkaRequestDeadlineExceeded):
+            requests.api_request_retry(URL, {}, {}, client=client)
+        assert not client.is_closed
+    assert len(calls) == 1 and not registered
 
 
 def test_sync_tool_and_worker_receive_controls():

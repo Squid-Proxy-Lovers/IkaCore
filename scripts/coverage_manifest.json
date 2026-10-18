@@ -54,7 +54,9 @@
         "src/IkaTest/test_runtime_options.py::test_scoped_clients_preserve_environment_proxy_routing",
         "src/IkaTest/test_runtime_options.py::test_ssl_context_cache_can_be_explicitly_invalidated",
         "src/IkaTest/test_transport_lifecycle.py::test_scoped_posts_and_streams_share_owned_client_and_close_it",
-        "src/IkaTest/test_transport_lifecycle.py::test_deadline_owned_client_is_closed_after_success"
+        "src/IkaTest/test_transport_lifecycle.py::test_deadline_owned_client_is_closed_after_success",
+        "src/IkaTest/test_transport_lifecycle.py::test_sync_abort_closes_only_response_and_preserves_caller_client",
+        "src/IkaTest/test_transport_lifecycle.py::test_async_post_abort_preserves_caller_client"
       ],
       "known_gap": "HTTPX mock transports and local SSL construction; real TLS/proxy handshakes are not exercised.",
       "min_lines": 95,

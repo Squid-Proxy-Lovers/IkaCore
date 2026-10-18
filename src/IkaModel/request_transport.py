@@ -31,10 +31,11 @@ def controlled_post(
     if client is None:
         with new_sync_client(effective_timeout(timeout)) as owned:
             return controlled_post(api_url, headers, payload, timeout, owned)
-    with request_scope(client.close):
-        response = client.post(api_url, headers=headers, json=payload, timeout=effective_timeout(timeout))
-        check_request_controls()
-        return response
+    with client.stream("POST", api_url, headers=headers, json=payload, timeout=effective_timeout(timeout)) as response:
+        with request_scope(response.close):
+            response.read()
+            check_request_controls()
+            return response
 
 
 async def controlled_async_post(
