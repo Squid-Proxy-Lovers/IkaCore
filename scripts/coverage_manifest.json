@@ -164,7 +164,8 @@
         "src/IkaTest/test_snapshot_resume_state.py::test_hitl_resume_consumes_saved_transcript_before_entering_next_stage",
         "src/IkaTest/test_snapshot_resume_state.py::test_fresh_execution_starts_at_first_stage_after_replay",
         "src/IkaTest/test_snapshot_resume_state.py::test_snapshot_without_loop_state_uses_only_remaining_budget",
-        "src/IkaTest/test_snapshot_resume_state.py::test_snapshot_without_loop_state_subtracts_only_current_stage_steps"
+        "src/IkaTest/test_snapshot_resume_state.py::test_snapshot_without_loop_state_subtracts_only_current_stage_steps",
+        "src/IkaTest/test_snapshot_resume_state.py::test_exhausted_legacy_budget_does_not_regain_a_turn"
       ],
       "known_gap": "In-process mocked models; mid-tool replay restarts execution rather than restoring Python stacks.",
       "min_lines": 95,

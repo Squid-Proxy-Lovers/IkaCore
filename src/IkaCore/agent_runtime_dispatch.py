@@ -61,7 +61,7 @@ class StagedResumeMixin(InterruptOutputMixin):
         if "loop_state" in resume_cp:
             remaining_steps = resume_cp["loop_state"]["remaining_steps"]
         state.stage_idx = min(stage_index if isinstance(stage_index, int) else 0, len(self.Stages) - 1)
-        state.remaining_steps = max(1, remaining_steps if isinstance(remaining_steps, int) else state.remaining_steps)
+        state.remaining_steps = max(0, remaining_steps if isinstance(remaining_steps, int) else state.remaining_steps)
         raw_message_history = resume_cp.get("message_history")
         if isinstance(raw_message_history, dict):
             self.message_history = cast(JsonDict, raw_message_history)

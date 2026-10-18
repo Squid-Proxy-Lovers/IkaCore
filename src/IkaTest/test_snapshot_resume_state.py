@@ -234,3 +234,35 @@ def test_snapshot_without_loop_state_subtracts_only_current_stage_steps(agent_fa
     agent.clear_pause_requests()
     agent.resume_from_snapshot(historical)
     assert calls == [0, 1, 1, 1]
+
+
+@pytest.mark.parametrize('staged', [False, True])
+@pytest.mark.parametrize('use_async', [False, True])
+def test_exhausted_legacy_budget_does_not_regain_a_turn(agent_factory, monkeypatch, staged, use_async):
+    options = {'maxsteps': 1, 'use_async': use_async,
+               'Stages': [IkaStage('ask', 'approval', [], hitl=True, stage_max_step=1)] if staged else []}
+    calls = []
+    def chat(*args, **kwargs):
+        calls.append(True)
+        return {**_turn('Approve?'), 'interrupted': True, 'status': 'awaiting_user_input'} if staged else _turn()
+    async def async_chat(*args, **kwargs):
+        return chat(*args, **kwargs)
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    monkeypatch.setattr('IkaCore.agent_chat_support.async_chat', async_chat)
+    agent = agent_factory(**options)
+    if not staged:
+        agent.request_pause_at('post_model')
+    paused = agent.execution()
+    store = agent._snapshot_runtime.store
+    saved = store.load_snapshot(paused['snapshot_id'])
+    state = saved['state_json']
+    if staged:
+        assert state['remaining_steps'] == 0
+    del state['loop_state']
+    legacy = store.create_snapshot(saved['run_id'], saved['frame_id'], saved['snapshot_kind'], state)
+    other = agent_factory(**options)
+    other.enable_snapshots(store.db_path)
+    result = other.resume_from_snapshot(legacy, resume_input='ANSWER-YES' if staged else None)
+    assert len(calls) == 1
+    assert result['final_message'] == 'forced final'
+    assert result.get('status') != 'awaiting_user_input'

@@ -38,6 +38,9 @@ V2 intentionally breaks compatibility with v1. See the
 
 ### Fixed
 
+- Preserve zero remaining steps in legacy staged HITL snapshots without `loop_state`
+  so sync and async resumes cannot regain a model turn.
+
 - Invalidate interrupted downstream transcripts and their old answers when upstream
   workflow instances rerun. Restart with fresh inputs and enforce replay-safety checks.
 
