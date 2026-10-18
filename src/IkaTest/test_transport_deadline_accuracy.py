@@ -155,7 +155,8 @@ def test_uncontrolled_request_has_no_worker_or_pool_copy(monkeypatch):
         assert controlled_post('https://example.invalid', {}, {}, 1, client).json() == {'ok': True}
 
 
-def test_dns_can_finish_later_without_delaying_the_sync_caller(tls_context, monkeypatch):
+@pytest.mark.parametrize('tls', [False, True])
+def test_dns_can_finish_later_without_delaying_the_sync_caller(tls_context, monkeypatch, tls):
     entered, release = threading.Event(), threading.Event()
     original = socket.getaddrinfo
     def resolve(*args, **kwargs):
@@ -163,7 +164,7 @@ def test_dns_can_finish_later_without_delaying_the_sync_caller(tls_context, monk
         assert release.wait(2)
         return original(*args, **kwargs)
     monkeypatch.setattr(socket, 'getaddrinfo', resolve)
-    with deadline_server(tls_context, 'accept', False) as (url, _), httpx.Client(trust_env=False) as client:
+    with deadline_server(tls_context, 'accept', tls) as (url, _), httpx.Client(verify=False, trust_env=False) as client:
         try:
             started = time.monotonic()
             with request_controls(timeout=.04), pytest.raises(IkaRequestDeadlineExceeded):

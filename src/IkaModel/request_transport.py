@@ -17,7 +17,8 @@ import httpx
 from IkaCore.agent_runtime_payloads import JsonDict
 
 from .request_control import check_request_controls, effective_timeout, request_lifecycle_active
-from .request_lifecycle import await_with_controls, run_sync_with_controls
+from .request_lifecycle import _quiet_close, await_with_controls, run_sync_with_controls
+from .runtime_errors import IkaRequestControlError
 from .runtime_policy import current_runtime_options
 
 T = TypeVar("T")
@@ -34,6 +35,7 @@ class _SyncRequestAbort:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.sockets: list[socket.socket] = []
+        self.stream_closers: list[Callable[[], None]] = []
         self.response: Optional[httpx.Response] = None
         self.aborted = False
 
@@ -46,12 +48,18 @@ class _SyncRequestAbort:
             request.extensions["timeout"] = {key: effective_timeout(value) for key, value in timeouts.items()}
 
     def own_connection(self, event: str, info: dict[str, Any]) -> None:
-        if event in {"connection.connect_tcp.complete", "connection.connect_unix_socket.complete"}:
+        connected = event.endswith((".connect_tcp.complete", ".connect_unix_socket.complete"))
+        if connected or event.endswith(".start_tls.complete"):
             stream = info["return_value"]
+            # A trace callback can fail before httpcore attaches this stream to
+            # its connection. Retain cleanup ownership through that hand-off.
+            with self.lock:
+                self.stream_closers.append(stream.close)
+        if connected:
             # A dup also interrupts a TLS handshake while wrap_socket owns the
             # original descriptor, before start_tls.complete can expose it.
+            duplicate = info["return_value"].get_extra_info("socket").dup()
             with self.lock:
-                duplicate = stream.get_extra_info("socket").dup()
                 if self.aborted:
                     self._shutdown(duplicate)
                     duplicate.close()
@@ -72,7 +80,13 @@ class _SyncRequestAbort:
             aborted = self.aborted
         if aborted:
             response.close()
-        check_request_controls()
+        try:
+            check_request_controls()
+        except IkaRequestControlError:
+            # HTTPX has not adopted this transport response yet, so its normal
+            # send/context-manager cleanup cannot see it when we raise here.
+            self._close_response(response)
+            raise
 
     def abort(self) -> None:
         with self.lock:
@@ -95,10 +109,15 @@ class _SyncRequestAbort:
 
     def clear(self) -> None:
         with self.lock:
-            for sock in self.sockets:
-                sock.close()
-            self.sockets.clear()
+            sockets, closers = self.sockets, self.stream_closers
+            self.sockets, self.stream_closers = [], []
             self.response = None
+        try:
+            for close in closers:
+                _quiet_close(close)
+        finally:
+            for sock in sockets:
+                sock.close()
 
 
 class _RequestTransport(httpx.BaseTransport):

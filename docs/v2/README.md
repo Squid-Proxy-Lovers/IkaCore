@@ -122,8 +122,9 @@ For HTTPX's built-in transport, each controlled synchronous request uses a priva
 httpcore pool with the caller's TLS, proxy/mount, auth, cookie, hook, redirect, and
 protocol settings. No connection enters the caller's pool. Abort shuts down only
 duplicated descriptors from that private pool, preserving socket identity even
-during TLS wrapping or after a response hook consumes the body. The worker closes
-its client, pool, and descriptors. Caller-owned clients/transports remain open;
+during TLS wrapping or after a response hook consumes the body. Stream cleanup
+callbacks also cover connection/TLS hand-offs before httpcore attaches the stream
+to its connection. The worker closes its client, streams, pool, and descriptors. Caller-owned clients/transports remain open;
 concurrent and subsequently pooled requests are unaffected. Without a lifecycle
 scope the existing direct transport path is unchanged and creates no worker.
 

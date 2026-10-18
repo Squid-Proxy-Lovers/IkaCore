@@ -421,3 +421,19 @@ def test_custom_abort_cleanup_errors_do_not_escape_background_thread(error_type)
                 thread.join(2)
                 assert not thread.is_alive()
         assert released.is_set() and not client.is_closed
+
+
+def test_custom_response_cancelled_before_httpx_adopts_it_is_closed():
+    from IkaModel.request_transport import _RequestTransport, _SyncRequestAbort
+    cancelled, closed = threading.Event(), threading.Event()
+    class Stream(httpx.SyncByteStream):
+        def close(self):
+            closed.set()
+    def respond(request):
+        cancelled.set()
+        return httpx.Response(200, stream=Stream())
+    with httpx.MockTransport(respond) as source:
+        transport = _RequestTransport(source, _SyncRequestAbort())
+        with request_controls(cancel_checker=cancelled.is_set), pytest.raises(IkaRequestCancelled):
+            transport.handle_request(httpx.Request('POST', URL))
+        assert closed.is_set(), 'a transport response escaped ownership during cancellation'
