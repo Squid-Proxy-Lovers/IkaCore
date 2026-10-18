@@ -45,9 +45,14 @@ def capture_response_replay(provider: str, data: JsonDict, history: JsonDict) ->
             history[_PENDING] = {"provider": "openrouter", "fields": fields}
 
 
-def take_response_replay(history: JsonDict) -> JsonDict:
+def take_response_replay(history: JsonDict, *, final: bool = False) -> JsonDict:
     raw = history.pop(_PENDING, None)
-    return cast(JsonDict, raw) if isinstance(raw, dict) else {}
+    data = cast(JsonDict, raw) if isinstance(raw, dict) else {}
+    if final and "items" in data:
+        # Control tools finish locally, without outputs to redeem orphan calls.
+        data["items"] = [item for item in data["items"]
+                         if item.get("type") not in {"function_call", "tool_use"} and "functionCall" not in item]
+    return data
 
 
 def replay_items(message: JsonDict, provider: str) -> list[JsonDict] | None:

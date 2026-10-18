@@ -129,7 +129,7 @@ def _apply_anthropic_tools(payload: Dict[str, Any], model: Any, agent_tools: lis
     payload["tools"] = tool_payload.tools
     choice = _anthropic_tool_choice(model, tool_payload)
     if payload.get("thinking") and choice["type"] not in {"auto", "none"}:
-        choice = {"type": "auto"}
+        choice = dict[str, Any](type="auto")
         if not getattr(model, "parallel_tool_calls", False) and supports_anthropic_parallel_tool_use(model.model_id):
             choice["disable_parallel_tool_use"] = True
     payload["tool_choice"] = choice

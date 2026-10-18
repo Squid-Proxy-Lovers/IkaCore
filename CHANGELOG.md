@@ -180,3 +180,11 @@ V2 intentionally breaks compatibility with v1. See the
 
 - Protect existing GLM reasoning_content replay with sync/async golden tool loops
   and fresh-buffer reconstruction tests, including final-turn reasoning.
+
+### Reasoning replay: durable and live validation
+
+- Add public SQLite snapshot resume regressions for all seven provider routes,
+  plus an offline replay probe covering opaque state and display-safe logging.
+- Merge indexed Codex SSE done items with the complete envelope, preserving
+  missing items and original order. A bounded live gpt-5.6-sol high-effort tool
+  case returned encrypted reasoning, replayed it exactly, and was accepted.

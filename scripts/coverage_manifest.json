@@ -363,13 +363,19 @@
         "src/IkaModel/openai/openai_responses.py",
         "src/IkaModel/openrouter/__init__.py",
         "src/IkaModel/openrouter/chat_helpers_openrouter.py",
-        "src/IkaModel/openrouter/openrouter.py"
+        "src/IkaModel/openrouter/openrouter.py",
+        "src/IkaModel/reasoning_replay.py"
       ],
       "required_tests": [
         "src/IkaTest/test_history_replay.py::test_provider_payloads_send_each_round_once",
         "src/IkaTest/test_history_replay.py::test_hitl_resume_keeps_stage_prompt_in_place_and_ends_on_answer",
         "src/IkaTest/test_quality_properties.py::test_history_replay_conserves_multiplicity_order_and_inputs",
-        "src/IkaTest/test_provider_payload_equivalence.py::test_all_provider_payloads_match_baseline_without_mutating_inputs"
+        "src/IkaTest/test_provider_payload_equivalence.py::test_all_provider_payloads_match_baseline_without_mutating_inputs",
+        "src/IkaTest/test_responses_reasoning_replay.py::test_two_turn_reasoning_payload",
+        "src/IkaTest/test_anthropic_reasoning_replay.py::test_signed_and_redacted_blocks_replayed_verbatim",
+        "src/IkaTest/test_gemini_reasoning_replay.py::test_gemini_keeps_each_signed_part_at_its_original_position",
+        "src/IkaTest/test_openrouter_reasoning_replay.py::test_openrouter_reasoning_details_survive_tool_loop",
+        "src/IkaTest/test_reasoning_snapshot_replay.py::test_public_snapshot_resume_mid_tool_loop_preserves_reasoning"
       ],
       "known_gap": "Provider schemas/metadata can drift; eight provider routes have an opt-in installed-wheel 15-case live matrix. Offline CI tests the harness with MockTransport; unsupported thinking/SSE capabilities are explicit skips.",
       "min_lines": 90,

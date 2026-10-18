@@ -128,3 +128,34 @@ their own request customization. This change does not alter the existing Coding
 Plan default or add a standard-endpoint configuration API.
 
 Source: [Z.AI thinking mode and preserved thinking](https://docs.z.ai/guides/capabilities/thinking-mode).
+
+## Snapshot and live validation
+
+A parametrized public-API regression interrupts an ask_user tool turn, closes the
+agent, opens a distinct agent/store instance, and resumes from the durable SQLite
+snapshot. All seven provider routes must replay the original reasoning/signatures
+on the next request. Opaque values remain out of CLI output.
+
+The offline scripts/live_replay_repro.py now checks Codex, OpenAI Responses,
+Anthropic, DeepSeek, Gemini, OpenRouter and Z.AI, including encrypted/signed fields,
+and exits nonzero if any replay fails.
+
+Live Codex gpt-5.6-sol was checked on 2026-10-18 with explicit local-login access
+and a 45-second request budget (60-second process alarm, one attempt). The initial
+low-effort fixture executed successfully but returned no reasoning item, so it was
+inconclusive. A high-effort CRT arithmetic fixture with a harmless local multiplier
+tool passed: one encrypted reasoning item preceded the tool, the exact native
+item was present in the follow-up input, and the backend accepted it and returned
+the correct final product. One tool execution; 596 input + 186 output = 782 tokens.
+SSE completion events also returned final-answer reasoning. Only counts, booleans,
+event types and usage were recorded; no bearer or encrypted data was printed.
+
+The high-effort probe used reasoning.summary: "auto" solely to observe the live
+case; normal library requests do not require a readable summary. Its report is
+artifacts/live/reasoning-replay-codex-high.json. This direct runtime probe is the
+equivalent reasoning_replay case: the existing live harness only exposes the
+reasoning_tools case and otherwise requires an installed wheel.
+
+Codex SSE collection also merges the completed envelope with indexed done events,
+keeping items absent from individual events and restoring original output order.
+Completed done-event data wins over envelope data for the same item.

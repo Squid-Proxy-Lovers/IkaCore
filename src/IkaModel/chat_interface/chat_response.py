@@ -98,12 +98,8 @@ def _record_model_message(
 ) -> None:
     msg_id = str(uuid.uuid4())
     history_entry: JsonDict = {"message": content, "tokens": tokens}
-    provider_data = take_response_replay(message_history)
+    provider_data = take_response_replay(message_history, final=True)
     if provider_data:
-        # Control tools terminate locally and have no function_call_output to replay.
-        provider_data = dict(provider_data)
-        provider_data["items"] = [item for item in provider_data.get("items", [])
-                                  if item.get("type") not in {"function_call", "tool_use"}]
         history_entry["provider_data"] = provider_data
     if reasoning_content:
         history_entry["reasoning_content"] = reasoning_content

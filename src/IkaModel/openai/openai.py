@@ -34,18 +34,6 @@ def _default_message_history() -> JsonDict:
     }
 
 
-def _message_content(message: object) -> str:
-    if isinstance(message, dict) or isinstance(message, Mapping):
-        mapped = cast(Mapping[str, object], message)
-        content = mapped.get("content")
-        return content if isinstance(content, str) else str(dict(mapped))
-    return str(message)
-
-
-def _should_skip_first_message(messages: list[JsonDict], first_input_content: str) -> bool:
-    return bool(first_input_content and messages and _message_content(messages[0]) == first_input_content)
-
-
 def _history_message(message_history: JsonDict, key: str) -> str:
     entry = message_history.get(key)
     if not isinstance(entry, Mapping):
@@ -54,26 +42,16 @@ def _history_message(message_history: JsonDict, key: str) -> str:
     return message if isinstance(message, str) else ""
 
 
-def _append_history_messages(api_messages: list[JsonDict], message_history: JsonDict) -> None:
-    system_message = _history_message(message_history, "system")
-    first_input_message = _history_message(message_history, "first_input")
-    summary_message = _history_message(message_history, "summary")
-    if system_message:
-        api_messages.append({"role": "system", "content": system_message})
-    if first_input_message:
-        api_messages.append({"role": "user", "content": first_input_message})
-    if summary_message:
-        api_messages.append({"role": "assistant", "content": summary_message})
-
-
 def _normalise_openai_message(message: object, replay_provider: Optional[str] = None) -> JsonDict:
     if isinstance(message, dict) or isinstance(message, Mapping):
         mapped = cast(Mapping[str, Any], message)
         if "role" in mapped and "content" in mapped:
             normal = {key: value for key, value in mapped.items() if key != "provider_data"}
             data = mapped.get("provider_data")
-            if isinstance(data, dict) and data.get("provider") == replay_provider:
-                normal.update(data.get("fields", {}))
+            if isinstance(data, dict):
+                replay_data = cast(JsonDict, data)
+                if replay_data.get("provider") == replay_provider:
+                    normal.update(replay_data.get("fields", {}))
             return normal
         if "content" in mapped:
             return {"role": "user", "content": mapped["content"]}
