@@ -406,3 +406,69 @@ def test_delegated_clones_close_only_owned_clients(make_agent, tmp_path, outcome
         else:
             for client in clients:
                 client.close()
+
+
+def test_delegated_result_replacement_preserves_unrelated_content():
+    from IkaCore.snapshot_agent_state import _replace_interrupt
+
+    pending = {"__ika_interrupt__": True, "delegated": {"snapshot_id": "child"}}
+    assert _replace_interrupt({"functionResponse": {"response": pending}}, "child", "approved") == {
+        "functionResponse": {"response": {"result": "approved"}}}
+    for value in ["untrusted __ika_interrupt__ text", json.dumps({"other": "__ika_interrupt__"}),
+                  json.dumps({"__ika_interrupt__": True, "delegated": {"snapshot_id": "other"}})]:
+        assert _replace_interrupt(value, "child", "approved") == value
+
+
+@pytest.mark.parametrize("invalid", ["missing_agent", "missing_snapshot", "other_run", "wrong_child", "missing_root", "wrong_parent"])
+def test_delegated_resume_rejects_missing_or_foreign_child(make_agent, tmp_path, invalid):
+    child = make_agent("child", stages=[IkaStage("approve", "Get approval", [], hitl=True)])
+    parent = make_agent("parent", topology=AgentTopology(subagents=(child,)))
+    store = parent.enable_snapshots(str(tmp_path / "invalid.db"))
+    actions = iter([("child", {"input": "approval"}), ("ask_user", {"question": "Approve?"})])
+    with MockProvider(responder=lambda u, p: provider_response(u, p, next(actions))):
+        paused = parent.execution()
+    saved = store.load_snapshot(paused["snapshot_id"])
+    state = saved["state_json"]
+    if invalid == "missing_agent":
+        parent.subagents = []
+    elif invalid == "missing_snapshot":
+        state["interrupt_data"]["delegated"]["snapshot_id"] = "missing"
+    elif invalid == "other_run":
+        run = store.create_run("agent", "unrelated")
+        frame = store.create_frame(run, "agent", "unrelated")
+        foreign = store.create_snapshot(run, frame, "human_input", {})
+        state["interrupt_data"]["delegated"]["snapshot_id"] = foreign
+    else:
+        child_snapshot = store.load_snapshot(state["interrupt_data"]["delegated"]["snapshot_id"])
+        child_state = child_snapshot["state_json"]
+        if invalid == "missing_root":
+            child_state["root_frame_id"] = "missing"
+        elif invalid == "wrong_child":
+            child_state["root_frame_id"] = saved["frame_id"]
+        else:
+            frame = store.create_frame(saved["run_id"], "agent", "child")
+            child_state["root_frame_id"] = frame
+            child_snapshot["frame_id"] = frame
+        bad_child = store.create_snapshot(saved["run_id"], child_snapshot["frame_id"], "human_input", child_state)
+        state["interrupt_data"]["delegated"]["snapshot_id"] = bad_child
+    snapshot = store.create_snapshot(saved["run_id"], saved["frame_id"], "human_input", state)
+    with MockProvider() as mock, pytest.raises(ValueError, match=r"no longer configured|belong to the parent"):
+        parent.resume_from_snapshot(snapshot, resume_input="YES")
+    assert not mock.requests
+
+
+
+def test_delegated_resume_without_tool_frame_identity(make_agent, tmp_path):
+    child = make_agent("child", stages=[IkaStage("approve", "Get approval", [], hitl=True)])
+    parent = make_agent("parent", topology=AgentTopology(subagents=(child,)))
+    store = parent.enable_snapshots(str(tmp_path / "no-tool-frame.db"))
+    actions = iter([("child", {"input": "approval"}), ("ask_user", {"question": "Approve?"}),
+                    end("approved"), end("done")])
+    with MockProvider(responder=lambda u, p: provider_response(u, p, next(actions))):
+        paused = parent.execution()
+        snapshot = store.load_snapshot(paused["snapshot_id"])
+        state = snapshot["state_json"]
+        state["interrupt_data"]["delegated"]["tool_frame_id"] = None
+        historical = store.create_snapshot(snapshot["run_id"], snapshot["frame_id"], "human_input", state)
+        result = parent.resume_from_snapshot(historical, resume_input="YES")
+    assert result["final_message"] == "done"

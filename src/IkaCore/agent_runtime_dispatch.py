@@ -195,7 +195,7 @@ class AgentExecution:
         raw_resume_cp = getattr(agent, "_resume_state", None)
         resume_cp = cast(JsonDict, raw_resume_cp) if isinstance(raw_resume_cp, dict) else None
         if resume_cp and resume_cp.get("interrupt_data", {}).get("delegated"):
-            from .agent_delegation import resume_delegation
+            from .snapshot_agent_state import resume_delegation
 
             interrupted = resume_delegation(agent, resume_cp, resume_input)
             if interrupted is not None:

@@ -163,7 +163,7 @@ class AgentTools:
         subagent_run = agent.tool_runtime._prepare_subagent_run(subagent, task_input, parent_hierarchy)
         try:
             result = subagent_run.execution()
-            from .agent_delegation import raise_delegated_interrupt
+            from .snapshot_agent_state import raise_delegated_interrupt
 
             raise_delegated_interrupt(subagent_run, task_input, result)
             final_output = result.get("final_message", "")

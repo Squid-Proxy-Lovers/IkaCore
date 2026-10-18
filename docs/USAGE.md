@@ -261,6 +261,14 @@ Useful `IkaStage` fields:
 
 ### Human In The Loop
 
+A delegated agent that pauses also suspends its parent. With snapshots enabled on the parent,
+resume the **parent** snapshot with `resume_input`; the runtime restores the saved child,
+routes the answer to it, and then continues the parent's pending tool call. The interrupt's
+`interrupt_data.delegated` identifies the child and its snapshot. This also works for workflow
+instances and repeated questions. Enable snapshots before delegation: without persistence,
+the parent returns `awaiting_user_input` with `interrupt_data.resumable=False` and an explanatory error;
+the interrupted child cannot be resumed.
+
 HITL stages raise a resumable interrupt instead of reading from stdin. Enable HITL when constructing the stage:
 
 ```python
