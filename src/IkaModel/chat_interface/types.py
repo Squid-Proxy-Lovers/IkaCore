@@ -22,6 +22,7 @@ class UsageInfo:
     output_tokens: int = 0
     total_tokens: int = 0
     input_cached_tokens: int = 0
+    input_cache_creation_tokens: int = 0
 
     @classmethod
     def from_mapping(cls, usage: Optional[dict[str, Any]]) -> "UsageInfo":
@@ -31,6 +32,7 @@ class UsageInfo:
             output_tokens=_coerce_token_count(usage.get("output_tokens")),
             total_tokens=_coerce_token_count(usage.get("total_tokens")),
             input_cached_tokens=_coerce_token_count(usage.get("input_cached_tokens")),
+            input_cache_creation_tokens=_coerce_token_count(usage.get("input_cache_creation_tokens")),
         )
 
     def add_mapping(self, usage: Optional[dict[str, Any]]) -> None:
@@ -39,6 +41,7 @@ class UsageInfo:
         self.output_tokens += _coerce_token_count(usage.get("output_tokens"))
         self.total_tokens += _coerce_token_count(usage.get("total_tokens"))
         self.input_cached_tokens += _coerce_token_count(usage.get("input_cached_tokens"))
+        self.input_cache_creation_tokens += _coerce_token_count(usage.get("input_cache_creation_tokens"))
 
     def to_dict(self) -> dict[str, int]:
         return {
@@ -46,6 +49,7 @@ class UsageInfo:
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
             "input_cached_tokens": self.input_cached_tokens,
+            **({"input_cache_creation_tokens": self.input_cache_creation_tokens} if self.input_cache_creation_tokens else {}),
         }
 
 

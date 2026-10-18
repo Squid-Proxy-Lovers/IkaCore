@@ -309,7 +309,8 @@ def _usage_total_tokens(data: JsonDict) -> int:
 
 def _usage_anthropic_tokens(data: JsonDict) -> int:
     usage = json_dict(data.get("usage"))
-    return _token_count(usage.get("input_tokens")) + _token_count(usage.get("output_tokens"))
+    return sum(_token_count(usage.get(key)) for key in
+               ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
 
 
 def _usage_gemini_tokens(data: JsonDict) -> int:
