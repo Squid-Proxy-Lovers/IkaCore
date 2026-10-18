@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional, cast
 
 from IkaCore.agent_runtime_payloads import JsonDict, history_section
-from IkaCore.cli_output import get_cli_output
+from IkaCore.events import current_output as get_cli_output
 from IkaCore.prompts import AGENT_END_INSTRUCTION
 from IkaModel.chat_interface.chat_interface import run_summarization as _run_summarization_untyped
 
@@ -32,14 +32,14 @@ class AgentPolicy:
     ) -> tuple[int, int, str, bool]:
         agent = self.agent
         message_history = agent.message_history
-        if extension_count < agent.max_stage_extensions:
+        if extension_count < agent.config.policy.max_stage_extensions:
             what_remains = (
                 run_summarization(barebone_model, message_history, prompt_kind="what_remains", write_to_history=False)
                 or "(no summary)"
             )
-            redirect = f"CRITICAL: You have used all allocated steps for this stage. Summary of what remains:\n\n{what_remains}\n\nComplete the stage or call stage_end / agent_end. You have {agent.extend_stage_steps_by} additional steps."
+            redirect = f"CRITICAL: You have used all allocated steps for this stage. Summary of what remains:\n\n{what_remains}\n\nComplete the stage or call stage_end / agent_end. You have {agent.config.policy.extend_stage_steps_by} additional steps."
             messages.append({"role": "user", "content": redirect})
-            return (step_limit + agent.extend_stage_steps_by, extension_count + 1, last_content, False)
+            return (step_limit + agent.config.policy.extend_stage_steps_by, extension_count + 1, last_content, False)
         force_answer = run_summarization(
             barebone_model, message_history, prompt_kind="force_answer", write_to_history=False
         )
@@ -66,7 +66,7 @@ class AgentPolicy:
         cli: Any,
     ) -> int:
         agent = self.agent
-        if extension_count >= agent.max_step_extensions:
+        if extension_count >= agent.config.policy.max_step_extensions:
             return extension_count
         barebone_summary = agent.get_barebone(
             system_prompt, [], parent_hierarchy=current_hierarchy, suppress_init_output=True
@@ -76,12 +76,12 @@ class AgentPolicy:
             run_summarization(barebone_summary, message_history, prompt_kind="what_remains", write_to_history=False)
             or "(no summary)"
         )
-        redirect = f"CRITICAL: You have used all allocated steps without completing the task. You MUST refer back to your original prompt and complete the original goal. Do NOT repeat the same tool calls. Summary of the conversation so far:\n\n{summary}\n\nComplete the task now: use submit_discovery with your findings if you have not already, then call agent_end with your final answer. You have {agent.extend_steps_by} additional steps."
+        redirect = f"CRITICAL: You have used all allocated steps without completing the task. You MUST refer back to your original prompt and complete the original goal. Do NOT repeat the same tool calls. Summary of the conversation so far:\n\n{summary}\n\nComplete the task now: use submit_discovery with your findings if you have not already, then call agent_end with your final answer. You have {agent.config.policy.extend_steps_by} additional steps."
         messages.append({"role": "user", "content": redirect})
-        agent.maxsteps += agent.extend_steps_by
+        agent.maxsteps += agent.config.policy.extend_steps_by
         cli.agent_response(
             agent.name,
-            f"Max steps reached. Injected redirect and extended by {agent.extend_steps_by} steps. Complete the original goal.",
+            f"Max steps reached. Injected redirect and extended by {agent.config.policy.extend_steps_by} steps. Complete the original goal.",
             current_hierarchy,
             step=current_step,
             is_final=False,

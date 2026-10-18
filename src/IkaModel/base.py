@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional
 
-from IkaCore.cli_output import OutputType, get_cli_output
+from IkaCore.events import OutputType
+from IkaCore.events import current_output as get_cli_output
 
 _LOG = logging.getLogger(__name__)
 

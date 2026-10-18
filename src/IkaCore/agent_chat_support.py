@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from IkaCore.cli_output import get_cli_output
+from IkaCore.events import current_output as get_cli_output
 from IkaModel.async_runner import run_async
 from IkaModel.base import AgentEndException, AgentTool, BareBoneModel, HumanInputRequired
 from IkaModel.chat_interface.chat_interface import async_chat, chat, summarise_message_history

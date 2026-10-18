@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .agents import IkaBaseAgent
+    from .events import EventSubscriber
     from .stages import IkaStage
     from .tools import IkaTools
 
@@ -68,10 +69,15 @@ class AgentTopology:
 
 @dataclass(frozen=True)
 class OutputConfig:
+    cli: bool = True
+    subscribers: tuple[EventSubscriber, ...] = ()
     logging_level: int = 0
     logging_file: str = "logs.txt"
     show_usage_level0: bool = True
     summarize_final: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "subscribers", tuple(self.subscribers))
 
 
 @dataclass(frozen=True)

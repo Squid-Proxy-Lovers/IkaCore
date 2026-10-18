@@ -21,6 +21,7 @@ from IkaCore.config import (
     PromptConfig,
     ProviderConfig,
 )
+from IkaCore.events import RuntimeOutput, output_scope
 from IkaCore.execution_types import StageExecutionResult, StageTarget
 from IkaCore.runtime_control import RuntimeControl
 from IkaCore.snapshot_session import SnapshotSession
@@ -44,14 +45,11 @@ from .agent_tools import AgentTools
 
 
 class IkaBaseAgent:
+    events: RuntimeOutput
     _snapshot_resume_messages: list[dict[str, Any]] | None
     _snapshot_runtime: SnapshotSession | None
     context_budget: int | None
     reasoning_effort: str | None
-    extend_stage_steps_by: int
-    max_stage_extensions: int
-    extend_steps_by: int
-    max_step_extensions: int
     max_tool_calls: int
     client: Optional[Any]
     final_answer_checks: list[FinalAnswerCheck]
@@ -83,8 +81,8 @@ class IkaBaseAgent:
     def __init__(
         self,
         name: str,
-        description: str,
-        prompt: str,
+        description: str | None = None,
+        prompt: str = "",
         *,
         model_id: str = "",
         api_key: str = "",
@@ -99,7 +97,7 @@ class IkaBaseAgent:
     ):
         self.config = AgentConfig(
             name,
-            description,
+            name if description is None else description,
             prompt,
             model_id,
             api_key,
@@ -328,7 +326,8 @@ class IkaBaseAgent:
         return self.turns.run_simple()
 
     def execution(self, resume_input: str | None = None) -> dict[str, Any]:
-        return execute_with_snapshots(self, self.execution_runtime.execution, resume_input)
+        with output_scope(self.events):
+            return execute_with_snapshots(self, self.execution_runtime.execution, resume_input)
 
     @staticmethod
     def _validate_required_fields(fields: dict[str, object]) -> None:

@@ -66,6 +66,19 @@ V2 intentionally breaks compatibility with v1. See the
 - Merged `agent_tool_conversion`, `agent_tool_execution` and `agent_tool_schema`
   into `agent_tools`; pure history/validation helpers remain in `agent_helper_support`.
 
+### Structured output events
+
+- Runtime presentation uses scoped `RuntimeOutput` / `RuntimeEvent` publishers with
+  optional CLI, file and usage subscribers. Configure agent/workflow `output=` or use
+  `output_scope()` for standalone calls. Runtime output no longer follows legacy
+  global CLI sink/stdout setters; those remain for direct presentation utility users.
+  CLI boxes and file formats retain their defaults. Empty publishers skip event allocation.
+- Worker contexts propagate output subscriptions; workflow instances share CLI buffering.
+  Subscriber exceptions propagate, and nested/exceptional scopes restore their parent.
+- Agent description is optional (defaults to name), keeping common calls short.
+- A saved snapshot fixture written by `dc9efbd` resumes without a provider call or
+  duplicate usage. Its former memory-access state is ignored; explicit tools configure memory.
+
 ### Fixed
 
 - Preserve zero remaining steps in legacy staged HITL snapshots without `loop_state`

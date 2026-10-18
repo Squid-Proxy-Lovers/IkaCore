@@ -159,7 +159,7 @@ class AgentTurnLoop:
                 )
             )
             return stop
-        if state.used_steps >= agent.maxsteps and state.extension_count < agent.max_step_extensions:
+        if state.used_steps >= agent.maxsteps and state.extension_count < agent.config.policy.max_step_extensions:
             state.extension_count = agent.policy_runtime._maybe_extend_simple_run(
                 runtime.system_prompt,
                 runtime.messages,

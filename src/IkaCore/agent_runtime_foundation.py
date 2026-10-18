@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Optional, cast
 
 from IkaCore.agent_execution_helpers import build_stage_content_prompt, resolve_stage_model_overrides, stage_step_limit
 from IkaCore.agent_runtime_payloads import JsonDict, history_message_text, history_section
-from IkaCore.cli_output import get_cli_output
+from IkaCore.events import current_output as get_cli_output
 from IkaCore.execution_types import AgentChatTurn, SimpleRuntimeContext, StageExecutionResult, StageRuntimeContext
 from IkaModel.base import AgentEndException
 from IkaModel.chat_interface.chat_interface import run_summarization as _run_summarization_untyped

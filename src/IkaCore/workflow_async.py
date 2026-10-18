@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set
 
-from IkaCore.cli_output import get_cli_output
+from IkaCore.events import current_output as get_cli_output
 
 from .workflow_core import WorkflowCore
 from .workflow_types import WorkflowNode, WorkflowResult, WorkflowStateProtocol

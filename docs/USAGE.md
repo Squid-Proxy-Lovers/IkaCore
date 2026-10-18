@@ -46,10 +46,31 @@ print(result["final_message"])
 Required constructor fields:
 
 - `name`
-- `description`
 - `prompt`
 - `model_id`
 - `api_key`
+
+`description` is optional and defaults to the name. Keep task text in `prompt`.
+The advanced options are keyword-only frozen configuration values:
+
+```python
+from IkaCore import ExecutionLimits, ExecutionPolicy, OutputConfig, PromptConfig, ProviderConfig
+
+observed_events = []
+agent = IkaBaseAgent("configured", prompt="Answer clearly.", model_id="gpt-4o-mini", api_key="...",
+                     provider=ProviderConfig(temperature=0.2),
+                     prompts=PromptConfig(system_prompt="Be concise."),
+                     limits=ExecutionLimits(maxsteps=10, max_tool_calls=5),
+                     policy=ExecutionPolicy(max_step_extensions=0, max_stage_extensions=0),
+                     output=OutputConfig(cli=False, subscribers=(observed_events.append,)))
+```
+
+`ExecutionPolicy(final_answer_checks=(check,))` preserves final-answer validation;
+`validation_retries=3` and `validation_extra_steps=10` are explicit defaults.
+Checks require a docstring and a boolean return value. Extension counts and sizes
+also belong to this policy. `policy.use_async` selects the async request bridge.
+Configuration is retained in `agent.config`; transcripts, counters, usage and the
+current (possibly extended) budget live in `agent.state`.
 
 ### Tools
 
@@ -153,7 +174,6 @@ Useful `IkaStage` fields:
 - `subagents`
 - `allowed_back_to`
 - `hitl`
-- `memory_access`
 - `long_term_filter`
 - `model_id`, `api_key`, `api_url`, `max_tokens`, `temperature`
 
@@ -281,7 +301,7 @@ result = agent.execution()
 assert result["final_message"]
 ```
 
-`STMemory` and `LTMemory` accept any backend implementing `save(value, metadata)`, `search(query, limit, score_threshold)` and `reset()`. For optional Mem0 storage, install/configure `mem0ai`, call `agent.init_short_term_memory({"provider": "mem0", "config": {...}})`, and assign `LTMemory(embedder_config=...)` for long-term storage. See the [memory setup guide](../src/IkaMem/docs/README.md).
+`STMemory` and `LTMemory` accept any backend implementing `save(value, metadata)`, `search(query, limit, score_threshold)` and `reset()`. For optional Mem0 storage, install/configure `mem0ai`, construct `STMemory(embedder_config={"provider": "mem0", "config": {...}})` and `LTMemory(embedder_config=...)`, then pass them explicitly to `MemoryTools`. See the [memory setup guide](../src/IkaMem/docs/README.md).
 
 ### Provider Selection
 
@@ -428,8 +448,8 @@ v1 before migrating. Snapshot replay does not restore a Python stack or undo too
 
 Useful options:
 
-- `logging_level=1..3`
-- `logging_file="logs.txt"`
+- `output=OutputConfig(logging_level=1..3)`
+- `OutputConfig(logging_file="logs.txt")`
 - `show_usage_level0=True`
 - `IKA_DUMP_REQUESTS=/path/to/dir` to dump request/response payloads for debugging
 
@@ -455,3 +475,19 @@ The repo includes runnable examples in `examples/`:
 - `example_workflow_advanced.py`
 
 These examples assume the package is installed, for example with `pip install -e .`, and should not mutate `sys.path`.
+
+### Structured output events
+
+Default CLI boxes retain the existing presentation. Disable them with
+`output=OutputConfig(cli=False)`. Subscribe with `OutputConfig(subscribers=(callback,))`;
+callbacks receive `RuntimeEvent(kind, data, instance_id)` with structured fields.
+Subscriber exceptions propagate. Runtime scopes are restored on exceptions, follow
+async tasks and tool workers, and isolate nested agents. Workflow output accepts the
+same `output=` configuration and shares CLI buffering across parallel instances.
+
+`IkaCore.output_adapters` ships `CLIAdapter`, `FileLogAdapter`, and opt-in `UsageAdapter`.
+`logging_level` / `logging_file` select the file adapter. No file adapter is created
+at level zero. Legacy `cli_output.set_stdout_enabled` / `set_output_sink` affect
+only direct legacy CLI users; runtime presentation uses explicit configuration.
+For standalone BareBoneModel/chat/tool calls use `with output_scope(RuntimeOutput(...))`.
+An empty `RuntimeOutput()` emits no presentation and skips event allocation.

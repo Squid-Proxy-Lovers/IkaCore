@@ -20,6 +20,7 @@ It composes runtime owners directly; no agent mixin inheritance or lookup forwar
 - `policy_runtime` (`agent_policy.py`): final checks, retries and bounded extensions
 - `tool_runtime` (`agent_tools.py`) / `controls` (`agent_parse.py`): tool schemas, execution, delegation and controls
 - `chat` (`agent_chat_support.py`): model calls, accounting and final output
+- `events` (`events.py` / `output_adapters.py`): scoped structured publishing with optional CLI, usage and file subscribers
 - `lifecycle` (`agent_lifecycle.py`): run cloning and workflow context
 - `snapshots` (`agent_snapshots.py`): snapshot opt-in and replay entry points
 - optional memory tools (`IkaMem/agent_tools.py`): explicit backends and ordinary tool definitions

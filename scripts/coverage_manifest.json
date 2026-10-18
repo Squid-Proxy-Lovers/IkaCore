@@ -244,12 +244,16 @@
       "sources": [
         "src/IkaCore/cli_output.py",
         "src/IkaCore/logging_utils.py",
-        "src/IkaCore/logging_utils_support.py"
+        "src/IkaCore/logging_utils_support.py",
+        "src/IkaCore/events.py",
+        "src/IkaCore/output_adapters.py"
       ],
       "required_tests": [
         "src/IkaTest/test_logging_utils.py::test_logger_shutdown_drains_queued_lines",
         "src/IkaTest/test_logging_utils.py::test_level_two_logger_writes_structured_json_events",
-        "src/IkaTest/test_cli_output.py::test_output_buffer_sink_failures_do_not_block_stdout_suppressed_path"
+        "src/IkaTest/test_cli_output.py::test_output_buffer_sink_failures_do_not_block_stdout_suppressed_path",
+        "src/IkaTest/test_runtime_events.py::test_events_are_structured_isolated_and_follow_worker_context",
+        "src/IkaTest/test_runtime_events.py::test_no_subscriber_does_not_allocate_events_and_scopes_restore"
       ],
       "known_gap": "Local files and captured output; extended high-volume logging and sink failures need soak testing.",
       "min_lines": 95,

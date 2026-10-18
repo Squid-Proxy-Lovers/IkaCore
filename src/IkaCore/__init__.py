@@ -13,6 +13,9 @@ if TYPE_CHECKING:
     from IkaCore.config import OutputConfig as OutputConfig
     from IkaCore.config import PromptConfig as PromptConfig
     from IkaCore.config import ProviderConfig as ProviderConfig
+    from IkaCore.events import RuntimeEvent as RuntimeEvent
+    from IkaCore.events import RuntimeOutput as RuntimeOutput
+    from IkaCore.events import output_scope as output_scope
     from IkaCore.runtime_control import RuntimeControl as RuntimeControl
     from IkaCore.snapshot_store import SnapshotStore as SnapshotStore
     from IkaCore.stages import IkaStage as IkaStage
@@ -28,6 +31,7 @@ except PackageNotFoundError:
     __version__ = "2.0.0"
 
 __all__ = [
+    "RuntimeEvent", "RuntimeOutput", "output_scope",
     "AgentConfig",
     "ProviderConfig",
     "PromptConfig",
@@ -49,6 +53,9 @@ __all__ = [
 ]
 
 _EXPORTS: dict[str, tuple[str, str]] = {
+    "RuntimeEvent": ("IkaCore.events", "RuntimeEvent"),
+    "RuntimeOutput": ("IkaCore.events", "RuntimeOutput"),
+    "output_scope": ("IkaCore.events", "output_scope"),
     "AgentConfig": ("IkaCore.config", "AgentConfig"),
     "ProviderConfig": ("IkaCore.config", "ProviderConfig"),
     "PromptConfig": ("IkaCore.config", "PromptConfig"),

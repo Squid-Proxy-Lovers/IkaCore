@@ -12,8 +12,9 @@ from IkaCore import ExecutionLimits, ExecutionPolicy, OutputConfig, ProviderConf
 def setup(case: str, directory: Path):
     import httpx
 
-    from IkaCore.cli_output import set_stdout_enabled
-    set_stdout_enabled(False)
+    from IkaCore.events import RuntimeOutput, output_scope
+    scope = output_scope(RuntimeOutput())
+    scope.__enter__()
     if case == 'agent_construct':
         def construct():
             agent = make_agent()
@@ -40,7 +41,7 @@ def make_agent(asynchronous=False):
     from IkaCore import IkaBaseAgent
     return IkaBaseAgent(name='benchmark', description='offline benchmark', prompt='finish', model_id='gpt-4o',
                         api_key='benchmark-placeholder', provider=ProviderConfig(api_url='https://benchmark.invalid/v1/responses'),
-                        output=OutputConfig(logging_level=0, show_usage_level0=False), policy=ExecutionPolicy(use_async=asynchronous, max_step_extensions=0), limits=ExecutionLimits(maxsteps=1))
+                        output=OutputConfig(cli=False, logging_level=0, show_usage_level0=False), policy=ExecutionPolicy(use_async=asynchronous, max_step_extensions=0), limits=ExecutionLimits(maxsteps=1))
 
 
 def request_case(case, directory, httpx):
@@ -124,7 +125,7 @@ def workflow_case(case):
     nodes = [WorkflowNode(name, FixtureAgent(name)) for name in ('root', 'left', 'right', 'join')]
     edges = [WorkflowEdge(a, b) for a, b in [('root', 'left'), ('root', 'right'), ('left', 'join'), ('right', 'join')]]
     workflow = IkaWorkflow('benchmark', 'diamond', nodes, edges, compress_hook=lambda contexts, agent: '\n'.join(contexts),
-                           max_parallel_workers=4)
+                           max_parallel_workers=4, output=__import__("IkaCore").OutputConfig(cli=False))
     def operation():
         if set(workflow.run(use_async=case == 'workflow_parallel')) != {'root', 'left', 'right', 'join'}:
             raise AssertionError('workflow lost a node')

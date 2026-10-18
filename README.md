@@ -9,7 +9,7 @@ The current runtime supports:
 - `IkaWorkflow` for multi-agent graphs
 - OpenAI, Anthropic, DeepSeek, Gemini, OpenRouter, and Codex backends
 - snapshot/resume and interruptible HITL flows
-- optional short-term and long-term memory helpers
+- optional memory integration through ordinary tools
 
 This branch develops v2 with intentional breaking changes. See the [migration guide](docs/v2/README.md) before adopting it.
 
@@ -43,9 +43,26 @@ result = agent.execution()
 print(result["final_message"])
 ```
 
+Common calls remain short: `IkaBaseAgent("helper", prompt="Summarize the task", model_id="gpt-4o-mini", api_key=key)`.
+Advanced settings use frozen `ProviderConfig`, `PromptConfig`, `ExecutionLimits`,
+`ExecutionPolicy`, `AgentTopology`, and `OutputConfig` values. For example:
+
+```python
+from IkaCore import ExecutionLimits, ExecutionPolicy, OutputConfig
+
+agent = IkaBaseAgent("helper", prompt="Summarize the task", model_id="gpt-4o-mini", api_key="...",
+                     limits=ExecutionLimits(maxsteps=10),
+                     policy=ExecutionPolicy(max_step_extensions=0), output=OutputConfig(cli=False))
+```
+
+`agent.config` holds configured defaults; `agent.state` holds run budgets, history and
+usage. `OutputConfig(subscribers=(callback,))` receives structured `RuntimeEvent`
+values. Memory backends are explicitly adapted with `IkaMem.agent_tools.MemoryTools`.
+See the [usage guide](docs/USAGE.md) for executable setup examples.
+
 ## Main Concepts
 
-- `IkaBaseAgent`: provider config, prompt, tools, memory, snapshots, optional stages
+- `IkaBaseAgent`: frozen configuration, prompt, tools, snapshots, optional stages
 - `IkaTools`: Python callables exposed to the model as structured tool calls
 - `IkaStage`: phase-specific prompt, tool set, and optional model overrides
 - `IkaWorkflow`: graph runner with `next` and tool-only `child` edges

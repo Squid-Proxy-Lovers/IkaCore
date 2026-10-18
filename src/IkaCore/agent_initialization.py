@@ -10,7 +10,7 @@ from IkaCore.agent_helper_support import (
     validate_final_answer_checks_for_history,
     validate_required_fields,
 )
-from IkaCore.logging_utils import IkaLogger
+from IkaCore.output_adapters import make_output
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
 from IkaModel.model_metadata import get_api_url_for_model
@@ -67,7 +67,8 @@ def _assign_agent_topology(
 def _configure_agent_logger(self: Any, logging_level: int, logging_file: str, show_usage_level0: bool) -> None:
     self.logging_level = logging_level
     self.logging_file = logging_file
-    self.logger = IkaLogger(logging_level, logging_file, show_usage_level0=show_usage_level0)
+    self.events = make_output(self.config.output)
+    self.logger = self.events
     if logging_level == 3:
         import logging
 
@@ -90,10 +91,6 @@ def _assign_execution_limits(
     self.step_timeout = step_timeout
     self.max_tool_rounds = max_tool_rounds if max_tool_rounds is not None else 5
     self.max_tool_calls = max_tool_calls if max_tool_calls is not None else maxsteps
-    self.max_step_extensions = max_step_extensions
-    self.extend_steps_by = extend_steps_by
-    self.max_stage_extensions = max_stage_extensions
-    self.extend_stage_steps_by = extend_stage_steps_by
 
 
 def _assign_runtime_state(

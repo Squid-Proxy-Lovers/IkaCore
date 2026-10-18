@@ -12,7 +12,7 @@ from collections.abc import Awaitable
 from typing import Optional
 
 from IkaCore.agent_runtime_payloads import JsonDict
-from IkaCore.cli_output import get_cli_output
+from IkaCore.events import current_output as get_cli_output
 
 from ..base import AgentEndException, HumanInputRequired
 from ..execution_hooks import hooks_enabled, invoke_async_tool, invoke_tool

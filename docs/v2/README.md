@@ -80,6 +80,8 @@ The permanent suite also checks these behaviors across both execution modes.
 | `IkaModel.init_global_long_term_memory` / `get_global_long_term_memory` | Construct and explicitly share an `LTMemory` backend. No global backend is read. |
 | Agent mixin subclassing/private helpers and `agent_execution` / `agent_helpers` imports | Use the public facade or the explicit component owners listed in `docs/indepth.md`; private helpers no longer appear on the agent. |
 | `agent_tool_conversion` / `agent_tool_execution` / `agent_tool_schema` | Tool ownership is consolidated in `agent_tools`. |
+| Global CLI sink/stdout setters controlling runtime output | Use `output=OutputConfig(cli=False, subscribers=(callback,))` on an agent/workflow, or `output_scope(RuntimeOutput(...))` for standalone model/tools. Runtime emits structured events to optional CLI, usage and file adapters. Legacy setters only affect direct legacy CLI calls. |
+| Required agent description | Description is optional (defaults to name); `IkaBaseAgent("helper", prompt="task", model_id=..., api_key=...)` is supported. |
 | Flat `api_url`, `max_tokens`, `temperature`, `use_responses_api`, `reasoning_effort` | `provider=ProviderConfig(...)` |
 | Flat `system_prompt`, `start_prompt`, `end_prompt` | `prompts=PromptConfig(...)` |
 | Flat `maxsteps`, `step_timeout`, tool budgets and rate limits | `limits=ExecutionLimits(...)` |
@@ -180,20 +182,27 @@ Nested and unfinished tool effects are checked before replay. Snapshot JSON filt
 known credential patterns and redacted state is refused for replay by default. Filtering
 cannot identify all private content, so keep runtime databases private.
 
-## Remaining candidates for simplification
+## Completed simplification candidates
 
-| Area | Evidence and proposed direction |
-| --- | --- |
-| Agent configuration/inheritance | The turn loop and preparation component are unified. `IkaBaseAgent` still accepts 35 constructor arguments; group configuration by responsibility and separate configuration from live run state. |
-| Built-in memory | At least 842 lines plus tool/schema integration. No explicit memory opt-ins appeared in the small downstream constructor sample. Consider a separate integration implemented through ordinary tools; this sample is not proof that nobody uses it. |
-| Logging and CLI presentation | About 860 lines across the logger/CLI modules, coupled to runtime calls and global sinks. Consider a small event interface with optional presentation adapters. |
-| Public API organization | The dependency-copying/private facades have been removed. Consolidate the remaining agent mixins into coherent components before expanding the public API. |
-| Validation/automatic extension loops | These can add implicit model calls. The downstream sample uses final-answer checks and step-extension configuration, so retain their behavior until a replacement execution policy is designed. |
+The configuration, memory, presentation, mixin, and validation candidates are implemented:
 
-The downstream sample contains nine directly identifiable constructor calls across
-three projects; dynamic calls, subclasses, and runtime values are not fully captured.
-Feature removal decisions should use observed behavior and product needs, not line
-count alone. IkaGeneral is outside the active runtime scope.
+- Frozen responsibility-specific configuration groups retain the flat common fields.
+  `AgentRunState` holds live transcript, usage, budget and replay state.
+- The public facade composes explicit preparation, turn loop, execution, policy, tools,
+  controls, chat, lifecycle and snapshot owners; aggregate agent mixins are removed.
+- Runtime emits structured scoped events. CLI, usage and file presentation are optional
+  subscribers, with no process-global sink in the runtime path. Empty publishers skip
+  event allocation. Legacy direct CLI APIs remain separate presentation utilities.
+- IkaMem remains shipped as an explicit `MemoryTools` integration using ordinary agent
+  or stage tools; no core/model dependency on IkaMem internals or global backend remains.
+- `ExecutionPolicy` expresses final checks, validation retries and automatic extensions.
+  Defaults preserve downstream final-answer checks and step-extension behavior.
+
+The downstream sample contained nine directly identifiable constructor calls across
+three projects. Dynamic calls/subclasses were not fully captured; common calls remain
+one-liners, and this sample was not used to justify feature removal. IkaGeneral remains
+outside the active runtime scope. Snapshots from `dc9efbd` are covered by a real saved
+post-model fixture: resume consumes its response with no network or duplicate usage.
 
 ## Checks
 

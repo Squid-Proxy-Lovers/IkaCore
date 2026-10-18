@@ -6,9 +6,10 @@ import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from enum import Enum
 from threading import Lock, local
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Protocol, Tuple, cast
+
+from .events import OutputType
 
 _stdout_lock = Lock()
 _stdout_enabled = True
@@ -47,14 +48,6 @@ def _write_stdout(rendered: str) -> None:
     with _stdout_lock:
         sys.stdout.write(rendered)
         sys.stdout.flush()
-
-
-class OutputType(Enum):
-    AGENT_INIT = "agent_init"
-    TOOL_CALL = "tool_call"
-    TOOL_RESULT = "tool_result"
-    AGENT_RESPONSE = "agent_response"
-    SUMMARIZATION = "summarization"
 
 
 @dataclass
@@ -276,7 +269,9 @@ class BoxRenderer(BoxFrameMixin, BoxTextMixin):
 
 
 class OutputBuffer:
-    def __init__(self, renderer: Optional[BoxRenderer] = None):
+    def __init__(self, renderer: Optional[BoxRenderer] = None, *, writer: Optional[Callable[[str], None]] = None, sink: Optional[Callable[[OutputContext, str], None]] = None):
+        self._writer = writer or _write_stdout
+        self._sink = sink or _route_to_sink
         self._lock = Lock()
         self._buffers: Dict[Tuple[str, int], List[OutputContext]] = defaultdict(list)
         self._buffering_enabled = False
@@ -311,8 +306,8 @@ class OutputBuffer:
 
     def _print_output(self, ctx: OutputContext):
         rendered = self._renderer.render(ctx) + "\n"
-        _route_to_sink(ctx, rendered)
-        _write_stdout(rendered)
+        self._sink(ctx, rendered)
+        self._writer(rendered)
 
     def _sorted_buffered_outputs(self) -> List[OutputContext]:
         all_outputs: List[OutputContext] = []
@@ -325,7 +320,7 @@ class OutputBuffer:
         for ctx in outputs:
             rendered = self._renderer.render(ctx)
             rendered_outputs.append(rendered)
-            _route_to_sink(ctx, rendered + "\n")
+            self._sink(ctx, rendered + "\n")
         return rendered_outputs
 
     def flush(self):
@@ -338,7 +333,7 @@ class OutputBuffer:
             self._buffering_enabled = False
 
         if rendered_outputs:
-            _write_stdout("\n".join(rendered_outputs) + "\n")
+            self._writer("\n".join(rendered_outputs) + "\n")
 
 
 class CLIOutputSingletonMixin:
@@ -488,6 +483,14 @@ class CLIOutput(
 ):
     _instance = None
     _instance_lock = Lock()
+
+    @classmethod
+    def owned(cls) -> CLIOutput:
+        from .output_adapters import write_stdout
+        instance = object.__new__(cls)
+        instance.__init__()
+        instance._buffer = OutputBuffer(instance._renderer, writer=write_stdout, sink=lambda ctx, rendered: None)
+        return instance
 
     def __init__(self):
         if getattr(self, "_initialized", False):

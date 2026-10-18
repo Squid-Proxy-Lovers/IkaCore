@@ -12,7 +12,8 @@ from typing import Any, Optional, cast
 import httpx
 
 from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
-from IkaCore.cli_output import OutputType, get_cli_output
+from IkaCore.events import OutputType
+from IkaCore.events import current_output as get_cli_output
 from IkaCore.tools import ToolExecutor
 from IkaModel.execution_hooks import emit_boundary
 from IkaModel.runtime_policy import current_runtime_options

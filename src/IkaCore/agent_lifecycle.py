@@ -70,6 +70,8 @@ class AgentLifecycle:
     def _sync_clone_runtime_state(self, clone: "IkaBaseAgent", include_history: bool) -> None:
         agent = self.agent
         clone.logging_level = agent.logging_level
+        clone.events.shutdown()
+        clone.events = agent.events
         clone.logger = agent.logger
         clone.final_answer_checks = list(agent.final_answer_checks)
         clone.message_history = (

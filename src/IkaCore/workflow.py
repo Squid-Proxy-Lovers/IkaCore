@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Set
 
+from .config import OutputConfig
+from .events import output_scope
+from .output_adapters import make_output
 from .workflow_async import WorkflowExecution
 from .workflow_async_executor import AsyncWorkflowExecutor
 from .workflow_context_cache import reset_context_cache
@@ -25,9 +28,11 @@ class IkaWorkflow(WorkflowSnapshotMixin, WorkflowExecution):
         start_node: Optional[str] = None,
         async_executor: Optional[AsyncWorkflowExecutor] = None,
         max_parallel_workers: int = 30,
+        output: Optional[OutputConfig] = None,
     ):
         if not nodes:
             raise ValueError("Workflow requires at least one node.")
+        self.events = make_output(output or OutputConfig())
         self.name = name
         self.description = description
         self.nodes = nodes
@@ -50,10 +55,12 @@ class IkaWorkflow(WorkflowSnapshotMixin, WorkflowExecution):
         self._next_reachable_nodes: Set[str] = self._compute_next_reachable_nodes()
 
     def run(self, initial_context: Optional[str] = None, use_async: bool = False) -> Dict[str, WorkflowResult]:
-        self._validate_execution_graph()
-        if self._workflow_snapshot is not None:
-            return self._snapshot_run(lambda: run_workflow(self, initial_context, use_async), initial_context, use_async)
-        return run_workflow(self, initial_context, use_async)
+        with output_scope(self.events, share_cli=True):
+            self._validate_execution_graph()
+            if self._workflow_snapshot is not None:
+                return self._snapshot_run(lambda: run_workflow(self, initial_context, use_async), initial_context, use_async)
+            return run_workflow(self, initial_context, use_async)
+
 
 
 def run_workflow(self: IkaWorkflow, initial_context: Optional[str], use_async: bool) -> Dict[str, WorkflowResult]:

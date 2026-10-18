@@ -7,7 +7,7 @@ import threading
 from typing import Any, Callable, Coroutine, Dict, List, Optional, cast
 
 from IkaCore.agents import IkaBaseAgent
-from IkaCore.cli_output import get_cli_output
+from IkaCore.events import current_output as get_cli_output
 from IkaModel.async_runner import run_async
 from IkaModel.worker_context import submit_with_controls
 

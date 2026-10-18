@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, cast
 
 from IkaCore.agent_runtime_payloads import JsonDict
-from IkaCore.cli_output import get_cli_output
+from IkaCore.events import current_output as get_cli_output
 from IkaCore.tools import ToolExecutor, ToolParameters
 
 from ..base import AgentEndException, HumanInputRequired
