@@ -83,3 +83,22 @@ data and OpenRouter encrypted reasoning data on a copy. Gemini's per-call debug
 message no longer serializes the signed part. Replay/snapshot originals stay intact.
 
 Source: [Gemini generateContent thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures).
+
+## OpenRouter reasoning passthrough
+
+Previously only a flattened reasoning string survived; reasoning_details was lost.
+Now the original reasoning, reasoning_content and reasoning_details fields are
+replayed on their owning assistant message, including signatures, encryption,
+IDs, indexes and formats. Details-only responses are preserved even without
+readable reasoning. Final-answer details are persisted and history can reconstruct
+the next request after resume.
+
+Explicit reasoning_effort now sends the unified reasoning object with effort and
+exclude: false, including tool requests; it takes precedence over the legacy
+per-model reasoning exclusion default. Unconfigured routes retain that default.
+Do not change the upstream model while replaying its opaque data.
+
+The shared Chat Completions builder now replays persisted turns, which also
+preserves the existing Z.AI reasoning_content behavior with a fresh resumed buffer.
+
+Source: [OpenRouter preserving reasoning and reasoning_details schema](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).

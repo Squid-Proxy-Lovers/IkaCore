@@ -9,6 +9,7 @@ from typing import Optional, cast
 from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
 
 from ..base import BareBoneModel
+from ..reasoning_replay import take_response_replay
 from ..request_interface import agent_tools_for_payload
 from .openrouter import openrouter_fill_payload
 
@@ -124,7 +125,10 @@ def append_openrouter_tool_messages(
 ) -> None:
     """Append tool messages to conversation history (OpenAI-compatible)."""
     assistant_msg: JsonDict = {"role": "assistant", "content": content}
-    if reasoning_content:
+    provider_data = take_response_replay(message_history)
+    if provider_data.get("provider") == "openrouter":
+        assistant_msg.update(provider_data["fields"])
+    elif reasoning_content:
         assistant_msg["reasoning_content"] = reasoning_content
     if executed_tool_call_list:
         assistant_msg["tool_calls"] = executed_tool_call_list

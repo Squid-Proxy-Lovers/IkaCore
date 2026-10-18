@@ -10,6 +10,7 @@ from ..model_metadata import (
     supports_custom_temperature,
     uses_openai_max_completion_tokens,
 )
+from ..reasoning_replay import ordered_replay_messages
 from ..tool_schema import build_provider_tool_payload
 
 JsonDict = dict[str, Any]
@@ -65,25 +66,27 @@ def _append_history_messages(api_messages: list[JsonDict], message_history: Json
         api_messages.append({"role": "assistant", "content": summary_message})
 
 
-def _normalise_openai_message(message: object) -> JsonDict:
+def _normalise_openai_message(message: object, replay_provider: Optional[str] = None) -> JsonDict:
     if isinstance(message, dict) or isinstance(message, Mapping):
         mapped = cast(Mapping[str, Any], message)
         if "role" in mapped and "content" in mapped:
-            return dict(mapped)
+            normal = {key: value for key, value in mapped.items() if key != "provider_data"}
+            data = mapped.get("provider_data")
+            if isinstance(data, dict) and data.get("provider") == replay_provider:
+                normal.update(data.get("fields", {}))
+            return normal
         if "content" in mapped:
             return {"role": "user", "content": mapped["content"]}
         return {"role": "user", "content": str(dict(mapped))}
     return {"role": "user", "content": str(message)}
 
 
-def _build_openai_messages(messages: list[JsonDict], message_history: JsonDict) -> list[JsonDict]:
-    api_messages: list[JsonDict] = []
-    _append_history_messages(api_messages, message_history)
-    skip_first = _should_skip_first_message(messages, _history_message(message_history, "first_input"))
-    for index, message in enumerate(messages):
-        if skip_first and index == 0:
-            continue
-        api_messages.append(_normalise_openai_message(message))
+def _build_openai_messages(messages: list[JsonDict], message_history: JsonDict,
+                           replay_provider: Optional[str] = None) -> list[JsonDict]:
+    system = _history_message(message_history, "system")
+    api_messages = [{"role": "system", "content": system}] if system else []
+    api_messages.extend(_normalise_openai_message(message, replay_provider)
+                        for message in ordered_replay_messages(messages, message_history, summary_first=False))
     return api_messages
 
 
@@ -120,11 +123,12 @@ def openai_fill_payload(
     messages: list[JsonDict],
     message_history: Optional[JsonDict] = None,
     agent_tools: Optional[list[Any]] = None,
+    *, replay_provider: Optional[str] = None,
 ) -> JsonDict:
     message_history = message_history or _default_message_history()
     payload: JsonDict = {
         "model": model.model_id,
-        "messages": _build_openai_messages(messages, message_history),
+        "messages": _build_openai_messages(messages, message_history, replay_provider),
     }
     _apply_generation_config(payload, model)
 

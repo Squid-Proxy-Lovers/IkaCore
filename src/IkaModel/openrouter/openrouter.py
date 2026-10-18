@@ -32,7 +32,7 @@ def openrouter_fill_payload(
 ) -> JsonDict:
     """Build OpenRouter API payload (OpenAI-compatible with extensions)."""
     # Start with OpenAI payload as base
-    payload = openai_fill_payload(model, messages, message_history, agent_tools=agent_tools)
+    payload = openai_fill_payload(model, messages, message_history, agent_tools=agent_tools, replay_provider="openrouter")
 
     # Add OpenRouter-specific extensions
     if plugins:
@@ -54,6 +54,12 @@ def openrouter_fill_payload(
     # so the model focuses on calling tools rather than thinking out loud.
     if openrouter_should_exclude_reasoning_for_tools(model.model_id) and "tools" in payload:
         payload["reasoning"] = {"exclude": True}
+
+    # An explicit reasoning request must take precedence over the legacy
+    # per-model exclusion policy and apply even when tools are present.
+    if getattr(model, "reasoning_effort", None):
+        payload.pop("reasoning_effort", None)
+        payload["reasoning"] = {"effort": model.reasoning_effort, "exclude": False}
 
     # OpenRouter routes to multiple upstream providers and handles their
     # individual token limits itself, so remove OpenAI-specific model caps

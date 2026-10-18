@@ -36,6 +36,13 @@ def capture_response_replay(provider: str, data: JsonDict, history: JsonDict) ->
         if any(isinstance(part, dict) and ("thoughtSignature" in part or "thought_signature" in part or part.get("thought"))
                for part in parts):
             history[_PENDING] = {"provider": "gemini", "items": deepcopy(parts)}
+    elif provider == "openrouter":
+        choices = data.get("choices") or []
+        message = choices[0].get("message", {}) if choices else {}
+        fields = {key: deepcopy(message[key]) for key in ("reasoning", "reasoning_content", "reasoning_details")
+                  if key in message}
+        if fields:
+            history[_PENDING] = {"provider": "openrouter", "fields": fields}
 
 
 def take_response_replay(history: JsonDict) -> JsonDict:
@@ -91,7 +98,7 @@ def _merge_live_assistants(entries: list[JsonDict], messages: list[JsonDict]) ->
     return list(reversed(kept)), live
 
 
-def ordered_replay_messages(messages: list[JsonDict], history: JsonDict) -> list[JsonDict]:
+def ordered_replay_messages(messages: list[JsonDict], history: JsonDict, *, summary_first: bool = True) -> list[JsonDict]:
     """Merge persisted and live turns once, retaining the owning assistant's order."""
     plan = plan_history_replay(history, messages)
     entries, messages = _merge_live_assistants(plan.entries, messages)
@@ -103,6 +110,8 @@ def ordered_replay_messages(messages: list[JsonDict], history: JsonDict) -> list
         context.append({"role": "assistant", "content": summary})
     if first:
         context.append({"role": "user", "content": first})
+    if not summary_first:
+        context.reverse()
     if plan.first_input_first:
         ordered = context + replayed
     else:

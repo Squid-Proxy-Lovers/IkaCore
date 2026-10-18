@@ -161,3 +161,11 @@ V2 intentionally breaks compatibility with v1. See the
   final-part signatures and separate thought text from visible content.
 - Redact opaque reasoning/signatures from shared HTTP debug previews, retaining
   original data for provider requests and snapshots.
+
+### Reasoning replay: OpenRouter
+
+- Round-trip complete reasoning_details and original reasoning string fields,
+  including signed/encrypted entries and final-answer reasoning. Reconstruct
+  Chat Completions tool history from persisted history after resume.
+- Honor explicit reasoning effort with tools via OpenRouter's unified reasoning
+  object, requesting passthrough instead of excluding reasoning.
