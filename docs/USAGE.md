@@ -13,18 +13,27 @@ This guide documents the current API in `src/`.
 
 ### Install
 
-From the repo root:
+For an application evaluating the unreleased v2 checkout, install a wheel into a fresh environment:
 
 ```bash
-pip install -e .
+python3 -m venv .venv
+export PATH="$PWD/.venv/bin:$PATH" VIRTUAL_ENV="$PWD/.venv"
+python -m pip install build
+python -m build --wheel
+python -m pip install dist/ikacore-2.0.0-py3-none-any.whl
+python -m examples.apps.research_assistant.main --offline
 ```
 
-For test work:
+Run the application command from the repository root. The installed package should resolve
+inside `.venv/.../site-packages`; do not set `PYTHONPATH=src` for a wheel evaluation.
+The [six application examples](../examples/apps/README.md) each include an offline mode
+and a bounded Codex live mode. To opt in to your local ChatGPT login:
 
 ```bash
-pip install -e ".[test]"
-pytest
+python -m examples.apps.research_assistant.main --live --use-local-login --model gpt-5.6-sol
 ```
+
+For development instead, use `python -m pip install -e ".[test,dev]"` and `pytest`.
 
 ### Minimal Agent
 
@@ -67,7 +76,14 @@ agent = IkaBaseAgent("configured", prompt="Answer clearly.", model_id="gpt-4o-mi
 
 `ExecutionPolicy(final_answer_checks=(check,))` preserves final-answer validation;
 `validation_retries=3` and `validation_extra_steps=10` are explicit defaults.
-Checks require a docstring and a boolean return value. Extension counts and sizes
+Checks require a docstring and a boolean return value. Currently construction also
+invokes each check with an initial history dictionary, while execution passes the final
+result dictionary. Use `result.get("final_message", "")` when checking answer text.
+Staged execution currently bypasses final checks; use a separate simple writer and verify
+its result at the application boundary. Even simple execution returns its last output after
+validation retries are exhausted, so applications must reject invalid results themselves.
+See the [usage findings](v2/dogfood-report.md) and the research example for a working pattern.
+Extension counts and sizes
 also belong to this policy. `policy.use_async` selects the async request bridge.
 Configuration is retained in `agent.config`; transcripts, counters, usage and the
 current (possibly extended) budget live in `agent.state`.
@@ -229,6 +245,15 @@ if result.get("status") == "awaiting_user_input":
         resume_input="Use the stricter filtering option.",
     )
 ```
+
+For a full process-exit/resume/fork example, run
+`python -m examples.apps.approval_workflow.main --offline`. A workflow fork with a different
+human answer uses the `SnapshotStore` returned by `enable_snapshots()`:
+
+Call `store = workflow.enable_snapshots("state/workflow.db")` before running the
+workflow. After a pause, read `info = workflow.snapshot_runtime_info()`, create
+`fork = store.fork_run_from_snapshot(info["last_snapshot_id"])`, then call
+`workflow.resume_from_snapshot(fork["snapshot_id"], resume_input="NO")`.
 
 The interrupt payload includes the stage name, question, and snapshot identifier when snapshots are enabled.
 Resume consumes the saved transcript once and appends the human answer before continuing.
@@ -427,6 +452,26 @@ Current workflow semantics:
 - A `"child"` edge without `stage_index` is invalid.
 - Sync and async workflow execution now use the same child-edge semantics.
 - With workflow snapshots enabled, an instance returning `paused` or `awaiting_user_input` pauses the workflow and blocks its dependents in both execution modes. Interrupted outputs are not completed results.
+
+`workflow.run(use_async=True)` schedules eligible instances in parallel worker threads;
+it is a blocking call. Set `max_parallel_workers` on the workflow to bound concurrency.
+`WorkflowResult.final` is answer text; `WorkflowResult.history` contains execution output,
+not the agent's transcript. The parallel pipeline example demonstrates fan-out/fan-in,
+request deadlines, cooperative SIGINT cancellation and explicit borrowed-client ownership.
+Workflow clones do not inherit `.client`, and agent shutdown closes an attached client;
+follow that example when sharing a caller-owned client.
+
+For multi-turn chat, the long_chat application demonstrates explicit turn updates.
+Currently changing `agent.prompt` alone after the first execution reuses the saved
+`first_input`; the example refreshes that section and records the prior user turn using
+the existing `stage_input` history type. This workaround is a current API limitation,
+tracked by a strict repro in the usage report. The transcript remains available on
+`agent.message_history`. `agent.context_budget` and
+`runtime_options(compact_at_fraction=...)` control compaction; the long_chat example uses
+`post_compaction` snapshots to verify it happened. Persist your memory backend separately:
+agent snapshots do not serialize arbitrary storage backends. A completed snapshot returns
+its saved output; to restore a pending chat turn in a new process, pause at `post_model`
+and resume that snapshot before starting the next turn.
 
 ### Snapshots
 

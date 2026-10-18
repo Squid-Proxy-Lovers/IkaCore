@@ -1,0 +1,113 @@
+{
+  "date_utc": "2026-10-18T05:57:01.772777+00:00",
+  "revision": "aca8c53a57332c0e5ab225628ac7b29bae99d23b",
+  "wheel_sha256": "b864484f9173841568f92a5c6a823b9b29f244771983295e807137f5bd43d226",
+  "results": [
+    {
+      "app": "research_assistant",
+      "passed": true,
+      "seconds": 16.76,
+      "request_attempts": 6,
+      "checks": {
+        "app": "research_assistant",
+        "citations_valid": true,
+        "extension_observed": null,
+        "status": "passed",
+        "tools_used": [
+          "search",
+          "fetch"
+        ]
+      }
+    },
+    {
+      "app": "code_reviewer",
+      "passed": true,
+      "seconds": 14.86,
+      "request_attempts": 6,
+      "checks": {
+        "app": "code_reviewer",
+        "output_cap": 1200,
+        "repository_read": true,
+        "status": "passed",
+        "structured_review": true,
+        "tool_timeout_seconds": 0.005
+      }
+    },
+    {
+      "app": "approval_workflow",
+      "passed": true,
+      "seconds": 30.99,
+      "request_attempts": 11,
+      "checks": {
+        "app": "approval_workflow",
+        "dependent_blocked": true,
+        "fresh_process_resume": true,
+        "rejection_fork": true,
+        "status": "passed"
+      }
+    },
+    {
+      "app": "long_chat",
+      "passed": false,
+      "seconds": 90.19,
+      "request_attempts": 13,
+      "error_type": "subprocess_failed"
+    },
+    {
+      "app": "parallel_pipeline",
+      "passed": true,
+      "seconds": 6.81,
+      "request_attempts": 5,
+      "checks": {
+        "app": "parallel_pipeline",
+        "caller_client_open": true,
+        "deadline_seconds": 70,
+        "fan_in": true,
+        "status": "passed",
+        "workers": 2
+      }
+    },
+    {
+      "app": "provider_switch",
+      "passed": true,
+      "seconds": 2.04,
+      "request_attempts": 1,
+      "checks": {
+        "app": "provider_switch",
+        "grouped_config": true,
+        "routes": {
+          "anthropic": "mocked",
+          "codex": "live",
+          "deepseek": "mocked",
+          "gemini": "mocked",
+          "openai-chat": "mocked",
+          "openai-responses": "mocked",
+          "openrouter": "mocked"
+        },
+        "runtime_control_resume": true,
+        "status": "passed"
+      }
+    },
+    {
+      "app": "long_chat",
+      "passed": true,
+      "seconds": 115.25,
+      "request_attempts": 32,
+      "application_revision": "1f667520889de190ef7848769935bea332b102b7",
+      "attempt": 2,
+      "checks": {
+        "app": "long_chat",
+        "compactions": 11,
+        "fresh_process_resume": true,
+        "memory_recalled": true,
+        "status": "passed",
+        "turns": 12
+      }
+    }
+  ],
+  "completed_at_utc": "2026-10-18T06:01:19.077992+00:00",
+  "application_commit": "1f667520889de190ef7848769935bea332b102b7",
+  "model": "gpt-5.6-sol",
+  "total_request_boundary_invocations": 74,
+  "count_note": "Upper bound on live HTTP attempts: includes one pre-dispatch expired-deadline probe; max_retries=1. Non-Codex routes were mocked."
+}
