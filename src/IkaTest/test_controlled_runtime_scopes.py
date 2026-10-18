@@ -22,6 +22,8 @@ from IkaCore.runtime_control import emit_tool_checkpoint
 from IkaModel import request_controls, runtime_options
 from IkaModel.execution_hooks import current_execution_context
 from IkaModel.request_control import effective_max_retries, remaining_request_time
+from IkaModel.request_transport import controlled_post
+from IkaModel.runtime_errors import IkaRequestDeadlineExceeded
 from IkaModel.runtime_policy import current_runtime_options
 
 
@@ -94,3 +96,53 @@ def test_controlled_request_keeps_output_hooks_and_runtime_control(tmp_path, pro
         assert current_execution_context() == {} and remaining_request_time() is None
     finally:
         agent.shutdown()
+
+
+def test_deadline_response_cleanup_preserves_scope_after_caller_returns():
+    captured, observed = [], []
+    entered, close_started, release_close = threading.Event(), threading.Event(), threading.Event()
+    release_read, closed = threading.Event(), threading.Event()
+    marker = ContextVar('cleanup_fixture', default='outside')
+    output = RuntimeOutput((captured.append,))
+
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            entered.set()
+            assert release_read.wait(2)
+            yield b'{}'
+
+        def close(self):
+            close_started.set()
+            try:
+                assert release_close.wait(2)
+                observed.append((marker.get(), effective_max_retries(9),
+                                 current_runtime_options().compact_at_fraction))
+                current_output().log_action('late cleanup')
+            finally:
+                release_read.set()
+                closed.set()
+
+    try:
+        with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=Stream()))) as client:
+            with output_scope(output), request_controls(timeout=.1, max_retries=1), runtime_options(compact_at_fraction=.7):
+                output.set_instance_id(23)
+                token = marker.set('inside')
+                try:
+                    with pytest.raises(IkaRequestDeadlineExceeded):
+                        controlled_post('https://fixture.invalid', {}, {}, 10, client)
+                finally:
+                    marker.reset(token)
+            assert entered.is_set() and close_started.wait(1) and not client.is_closed
+            assert marker.get() == 'outside' and remaining_request_time() is None
+            release_close.set()
+            assert closed.wait(1)
+        assert observed == [('inside', 1, .7)]
+        assert len(captured) == 1 and captured[0].data['action'] == 'late cleanup'
+        assert captured[0].instance_id == 23
+    finally:
+        release_close.set()
+        release_read.set()
+        for thread in threading.enumerate():
+            if thread.name.startswith('ika-http-'):
+                thread.join(2)
+                assert not thread.is_alive()

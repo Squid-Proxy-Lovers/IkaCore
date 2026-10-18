@@ -36,7 +36,8 @@
         "src/IkaTest/test_request_controls.py::test_async_contexts_are_isolated_and_sync_tools_inherit",
         "src/IkaTest/test_transport_lifecycle.py::test_external_async_cancellation_is_preserved",
         "src/IkaTest/test_request_controls.py::test_legacy_control_setters_reach_sync_worker_and_restore",
-        "src/IkaTest/test_controlled_runtime_scopes.py::test_controlled_request_keeps_output_hooks_and_runtime_control"
+        "src/IkaTest/test_controlled_runtime_scopes.py::test_controlled_request_keeps_output_hooks_and_runtime_control",
+        "src/IkaTest/test_controlled_runtime_scopes.py::test_deadline_response_cleanup_preserves_scope_after_caller_returns"
       ],
       "known_gap": "Controlled JSON/SSE workers preserve request controls, runtime options, output scopes and snapshot RuntimeControl pauses. The caller wait is bounded; forcibly stopping arbitrary synchronous functions is unsupported.",
       "min_lines": 95,
@@ -264,7 +265,8 @@
         "src/IkaTest/test_cli_output.py::test_output_buffer_sink_failures_do_not_block_stdout_suppressed_path",
         "src/IkaTest/test_runtime_events.py::test_events_are_structured_isolated_and_follow_worker_context",
         "src/IkaTest/test_runtime_events.py::test_no_subscriber_does_not_allocate_events_and_scopes_restore",
-        "src/IkaTest/test_controlled_runtime_scopes.py::test_controlled_request_keeps_output_hooks_and_runtime_control"
+        "src/IkaTest/test_controlled_runtime_scopes.py::test_controlled_request_keeps_output_hooks_and_runtime_control",
+        "src/IkaTest/test_controlled_runtime_scopes.py::test_deadline_response_cleanup_preserves_scope_after_caller_returns"
       ],
       "known_gap": "Local files and captured output; extended high-volume logging and sink failures need soak testing.",
       "min_lines": 95,
