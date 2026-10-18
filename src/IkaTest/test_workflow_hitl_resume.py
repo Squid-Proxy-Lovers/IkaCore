@@ -162,6 +162,26 @@ def test_workflow_rejects_child_snapshot_from_another_run(approval_workflow):
 
 
 @pytest.mark.parametrize('parallel', [False, True])
+def test_rejected_workflow_fork_leaves_no_partial_records(approval_workflow, parallel):
+    workflow, store, _ = approval_workflow(parallel=True)
+    workflow.run(use_async=parallel)
+    saved = store.load_snapshot(workflow.snapshot_runtime_info()['last_snapshot_id'])
+    workflow.run(use_async=parallel)
+    foreign = next(iter(workflow.snapshot_runtime_info()['interrupted_instances'].values()))
+    interrupted = saved['state_json']['interrupted_instances']
+    interrupted[list(interrupted)[-1]] = foreign
+    malformed = store.create_snapshot(saved['run_id'], saved['frame_id'], 'workflow_paused', saved['state_json'])
+    def counts():
+        with store._connect() as connection:
+            return [connection.execute(f'select count(*) from {table}').fetchone()[0]
+                    for table in ('runs', 'frames', 'snapshots', 'events')]
+    before = counts()
+    with pytest.raises(ValueError, match='workflow run'):
+        store.fork_run_from_snapshot(malformed)
+    assert counts() == before
+
+
+@pytest.mark.parametrize('parallel', [False, True])
 @pytest.mark.parametrize('reuse', [False, True])
 def test_selective_replay_invalidates_interrupted_descendant(approval_workflow, parallel, reuse):
     workflow, _, calls = approval_workflow(parallel=True, version_root=True)

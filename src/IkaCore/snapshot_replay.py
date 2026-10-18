@@ -171,26 +171,28 @@ def fork_run_from_snapshot(
         "forked_from_snapshot_id": snapshot_id,
         "forked_from_frame_id": target_frame["frame_id"],
     })
-    new_run_id = self.create_run(
-        entry_type=source_run["entry_type"] if source_run else "fork",
-        entry_name=source_run["entry_name"] if source_run else target_frame["frame_name"],
-        status="paused",
-        metadata=fork_metadata,
-        branch_from_snapshot_id=snapshot_id,
-    )
+    # One boundary: a rejected interruption clone must not leave a partial fork behind.
+    with self.transaction():
+        new_run_id = self.create_run(
+            entry_type=source_run["entry_type"] if source_run else "fork",
+            entry_name=source_run["entry_name"] if source_run else target_frame["frame_name"],
+            status="paused",
+            metadata=fork_metadata,
+            branch_from_snapshot_id=snapshot_id,
+        )
 
-    frame_id_map = _clone_lineage(self, lineage, new_run_id)
-    root_source_id = lineage[0]["frame_id"]
-    new_root_frame_id = frame_id_map[root_source_id]
-    self.set_run_root_frame(new_run_id, new_root_frame_id)
+        frame_id_map = _clone_lineage(self, lineage, new_run_id)
+        root_source_id = lineage[0]["frame_id"]
+        new_root_frame_id = frame_id_map[root_source_id]
+        self.set_run_root_frame(new_run_id, new_root_frame_id)
 
-    _clone_entry_snapshots(self, lineage, frame_id_map, new_run_id)
-    cloned_state = _remap_state(snapshot["state_json"], frame_id_map, new_run_id)
-    cloned_state["frame_id"] = frame_id_map[target_frame["frame_id"]]
-    _clone_workflow_interruptions(self, snapshot, cloned_state, frame_id_map, new_run_id)
+        _clone_entry_snapshots(self, lineage, frame_id_map, new_run_id)
+        cloned_state = _remap_state(snapshot["state_json"], frame_id_map, new_run_id)
+        cloned_state["frame_id"] = frame_id_map[target_frame["frame_id"]]
+        _clone_workflow_interruptions(self, snapshot, cloned_state, frame_id_map, new_run_id)
 
-    return _finish_fork(self, snapshot_id, snapshot, target_frame, new_run_id, new_root_frame_id,
-                        frame_id_map, cloned_state, replay_assessment, allow_unsafe_replay)
+        return _finish_fork(self, snapshot_id, snapshot, target_frame, new_run_id, new_root_frame_id,
+                            frame_id_map, cloned_state, replay_assessment, allow_unsafe_replay)
 
 
 def restart_frame(self: Any, frame_id: str, *, allow_unsafe_replay: bool = False) -> dict[str, Any]:
