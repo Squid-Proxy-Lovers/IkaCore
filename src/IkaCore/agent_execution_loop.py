@@ -139,6 +139,9 @@ class AgentExecutionLoopMixin(RuntimePreparationMixin):
         state = restore_loop_state(self, runtime.step_limit if isinstance(runtime, StageRuntimeContext) else self.maxsteps,
                                    remaining_steps)
         remaining_steps = state.remaining_steps
+        # Interrupts return before extension/finalization, including on the last step.
+        if state.used_steps >= state.step_limit:
+            self._extend_execution(runtime, state)
         while state.used_steps < state.step_limit:
             started = self._start_execution_step(runtime, state, remaining_steps)
             turn = self._run_chat_turn(

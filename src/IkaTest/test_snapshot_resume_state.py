@@ -154,3 +154,34 @@ def test_hitl_resume_preserves_the_stage_budget_already_consumed(agent_factory, 
     first = agent.execution()
     agent.resume_from_snapshot(first['snapshot_id'], resume_input='Yes')
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize('use_async', [False, True])
+@pytest.mark.parametrize('extensions', [0, 1])
+def test_exhausted_hitl_resume_extends_or_finalizes_before_stage_completion(
+    agent_factory, monkeypatch, use_async, extensions,
+):
+    agent = agent_factory(Stages=[IkaStage('approval', 'ask approval', [], hitl=True, stage_max_step=1)],
+                          max_stage_extensions=extensions, extend_stage_steps_by=2, use_async=use_async)
+    calls, summaries = [], []
+    def chat(model, messages, history, **kwargs):
+        calls.append(deepcopy(messages))
+        if len(calls) == 1:
+            return {**_turn('Approve?'), 'interrupted': True, 'status': 'awaiting_user_input'}
+        return _turn('Answer processed', 'agent_end')
+    async def async_chat(*args, **kwargs):
+        return chat(*args, **kwargs)
+    def summarize(model, history, **kwargs):
+        summaries.append((deepcopy(history), kwargs['prompt_kind']))
+        return 'forced final'
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    monkeypatch.setattr('IkaCore.agent_chat_support.async_chat', async_chat)
+    monkeypatch.setattr('IkaCore.agent_runtime_foundation.run_summarization', summarize)
+    paused = agent.execution()
+    result = agent.resume_from_snapshot(paused['snapshot_id'], resume_input='YES')
+    assert result['final_message'] == ('Answer processed' if extensions else 'forced final')
+    assert len(calls) == 1 + extensions
+    assert summaries[0][1] == ('what_remains' if extensions else 'force_answer')
+    assert any(item.get('message') == 'YES' for item in summaries[0][0]['messages'].values())
+    if extensions:
+        assert {'role': 'user', 'content': 'YES'} in calls[1]

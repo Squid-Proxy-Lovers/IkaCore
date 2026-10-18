@@ -38,6 +38,8 @@ V2 intentionally breaks compatibility with v1. See the
 
 ### Fixed
 
+- Run exhausted HITL resumes through stage extension or forced finalization before
+  completing the stage, so a last-step question cannot bypass the human answer.
 - Require explicit `allow_unsafe_replay=True` approval before historical snapshot
   resume repeats unsafe tool effects, including nested calls.
 - Pause snapshot-enabled workflows when an agent waits for human input, blocking its
