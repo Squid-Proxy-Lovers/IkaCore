@@ -200,12 +200,14 @@ def test_mocked_tool_replay_compaction_and_workflow(runner, monkeypatch):
     def respond(request):
         payload = json.loads(request.content)
         text = json.dumps(payload)
+        fixture = runner.re.search(r'(?:compact|upstream)_[a-f0-9]{12}', text)
+        value = fixture.group() if fixture else 'MISSING'
         tools = [entry['function']['name'] for entry in payload.get('tools', [])]
         results = [m['content'] for m in payload.get('messages', []) if m['role'] == 'tool' and str(m['content']).startswith('fixture_')]
         if results:
             message = {'content': results[-1]}
         elif not tools:
-            message = {'content': 'The synthetic fixture answer is COMPACT_OK.'}
+            message = {'content': 'The synthetic fixture value is ' + value + '.'}
         elif 'lookup_fixture' in tools:
             messages = payload['messages']
             results = [m['content'] for m in messages if m['role'] == 'tool']
@@ -219,8 +221,7 @@ def test_mocked_tool_replay_compaction_and_workflow(runner, monkeypatch):
                 function, arguments = 'ask_user', {'question': 'Approve?'}
             else:
                 function = 'agent_end'
-                arguments = {'input': 'UPSTREAM_OK' if 'ask_user' in tools else
-                             'WORKFLOW_OK' if 'WORKFLOW_OK' in text else 'COMPACT_OK'}
+                arguments = {'input': value}
             message = {'tool_calls': [{'id': 'fixture', 'type': 'function', 'function': {
                 'name': function, 'arguments': json.dumps(arguments)}}]}
         return httpx.Response(200, json={'choices': [{'message': message}], 'usage': token_usage})

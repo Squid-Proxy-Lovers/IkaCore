@@ -113,8 +113,8 @@ class Probe:
         return {'completed': True, 'usage': result['usage']}
 
     def staged_agent(self):
-        stages = [IkaStage('first', 'Call stage_end immediately to advance to the second stage. Do not call agent_end.', []),
-                  IkaStage('second', 'Call agent_end with input exactly STAGED_OK immediately.', [])]
+        stages = [IkaStage('first', 'Call stage_end immediately to advance to the second stage. Do not call agent_end.', [], stage_max_step=2),
+                  IkaStage('second', 'Call agent_end with input exactly STAGED_OK immediately.', [], stage_max_step=2)]
         agent = self.agent('Follow each stage instruction exactly.', Stages=stages)
         with tempfile.TemporaryDirectory() as directory:
             store = agent.enable_snapshots(str(Path(directory) / 'stages.db'))
@@ -332,16 +332,17 @@ def transient_retry(probe):
 
 def compaction(probe):
     from IkaModel import runtime_options
-    agent = probe.agent('Call agent_end with input exactly COMPACT_OK immediately.')
+    sentinel = 'compact_' + uuid4().hex[:12]
+    agent = probe.agent('Call agent_end with input exactly the synthetic fixture value from earlier context.')
     agent.context_budget = 256
     agent.message_history['messages']['fixture'] = {
-        'type': 'assistant', 'message': 'The synthetic fixture answer is COMPACT_OK.', 'tokens': 180}
+        'type': 'assistant', 'message': 'The synthetic fixture value is ' + sentinel + '.', 'tokens': 180}
     with tempfile.TemporaryDirectory() as directory:
         store = agent.enable_snapshots(str(Path(directory) / 'compact.db'))
         try:
             with runtime_options(compact_at_fraction=0.6):
                 result = agent.execution()
-            assert result['final_message'] == 'COMPACT_OK'
+            assert result['final_message'] == sentinel
             assert agent.message_history['summary']['message'].startswith('[SUMMARY]')
             snapshots = store.list_snapshots(result['runtime']['run_id'])
             count = sum(row['snapshot_kind'] == 'post_compaction' for row in snapshots)
@@ -353,11 +354,12 @@ def compaction(probe):
 
 def workflow_hitl(probe):
     from IkaCore.workflow import IkaWorkflow, WorkflowEdge, WorkflowNode
+    sentinel = 'upstream_' + uuid4().hex[:12]
     first = probe.agent('Follow the approval stage.', name='approval', Stages=[IkaStage(
-        'approve', 'If no approval was supplied, call ask_user with question exactly Approve?. '
-        'When the user says YES, call agent_end with input exactly UPSTREAM_OK.', [], hitl=True)])
-    second = probe.agent('Read upstream context. If it contains UPSTREAM_OK, call agent_end with input '
-                         'exactly WORKFLOW_OK.', name='final')
+        'approve', 'If no approval was supplied, call ask_user with question exactly Approve? '
+        'When the user says YES, call agent_end with input exactly ' + sentinel + '.', [], hitl=True, stage_max_step=2)])
+    second = probe.agent('Read upstream context and call agent_end with input exactly the upstream fixture value. '
+                         'If no upstream value is present, use MISSING.', name='final')
     workflow = IkaWorkflow('live_flow', 'Synthetic dependency + HITL',
         [WorkflowNode('approval', first), WorkflowNode('final', second)], [WorkflowEdge('approval', 'final')],
         compress_hook=lambda contexts, agent: '\n'.join(contexts))
@@ -368,7 +370,7 @@ def workflow_hitl(probe):
             info = workflow.snapshot_runtime_info()
             assert list(info['interrupted_instances']) == ['approval:0']
             result = workflow.resume_from_snapshot(info['last_snapshot_id'], resume_input='YES')
-            assert result['approval'].final == 'UPSTREAM_OK' and result['final'].final == 'WORKFLOW_OK'
+            assert result['approval'].final == sentinel and result['final'].final == sentinel
             assert not workflow.snapshot_runtime_info()['interrupted_instances']
         finally:
             workflow.async_executor.shutdown()
@@ -448,7 +450,8 @@ def case_process(command, directory, env, timeout):
             return process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             if os.name == 'posix':
-                os.killpg(process.pid, signal.SIGKILL)
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
             else:
                 process.kill()
             process.wait()
@@ -491,7 +494,7 @@ def provider_report(provider, model, identity, requested, env, timeout, execute=
               'live_attempts_per_request': 1, 'cases_requested': requested, 'results': []}
     reason = 'not_configured' if not env.get(config['key']) else 'model_required' if not model else None
     for name in requested:
-        row = {'case': name, 'status': 'skipped', 'reason': reason, 'seconds': 0, 'usage': {}} if reason else execute(
+        row = {'case': name, 'status': 'skipped', 'reason': reason, 'seconds': 0, 'usage': {}, 'usage_complete': False} if reason else execute(
             provider, model, name, timeout, env)
         report['results'].append(row)
         if progress:
