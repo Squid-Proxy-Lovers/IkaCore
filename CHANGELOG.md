@@ -54,19 +54,23 @@ V2 intentionally breaks compatibility with v1. See the
   siblings, and continue dependents in sync and parallel workflows.
 - Keep remaining step budgets for older v2 snapshots without `loop_state`, including
   the consumed allowance recorded by the current stage's entry boundary.
-- Register synchronous HTTP abort before headers, clamp every per-request I/O timeout
-  to the remaining deadline, and close only the owned response/stream. Remove raw
-  socket shutdown so cancelling a preloaded response cannot abort another pooled request.
-  A blocked synchronous read may observe explicit cancellation only at the next clamped
-  I/O timeout; deadlines are per-I/O bounds, not hard wall-clock guarantees. Verify real
-  loopback HTTP/HTTPS ownership and header/body timeout behavior.
+- Enforce absolute wall-clock deadlines and prompt cancellation for synchronous JSON
+  posts and Codex SSE, including trickled headers/bodies and stalled TLS handshakes.
+  Controlled requests run on a context-preserving worker with private HTTPX/httpcore
+  pools that retain caller configuration. Abort shuts down only duplicated sockets
+  owned by those pools; caller clients and their concurrent/pooled requests stay
+  untouched, including when response hooks preload bodies. The uncontrolled path
+  creates no worker. Check-only cancellation is polled every 10 ms. Blocking DNS,
+  pre-connect system calls, and uncooperative custom code may finish and release
+  worker resources later without extending the caller's wait; wall-clock return
+  remains subject to normal thread scheduling.
 - Require explicit `allow_unsafe_replay=True` approval before historical snapshot
   resume repeats unsafe tool effects, including nested calls.
 - Pause snapshot-enabled workflows when an agent waits for human input, blocking its
   dependents in sync and async runs. Do not reuse interrupted outputs as completed
   results; invalidate their downstream cached results during replay.
-- Close only the active HTTP response on synchronous deadline or cancellation, keeping
-  caller-owned HTTPX clients usable.
+- Keep caller-owned HTTPX clients usable when synchronous deadlines or cancellation
+  abort request-owned transports.
 - Keep nested-agent snapshots in the child's frame and restore the parent's execution
   context when the child returns.
 - Restore the saved HITL transcript once and append the human answer before continuing.
