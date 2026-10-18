@@ -75,21 +75,28 @@ def classify_stream_error(err_obj: object) -> bool:
 
 
 class _SSEDecoder:
-    event: Optional[str] = None
+    def __init__(self) -> None:
+        self.event: Optional[str] = None
+        self.data: list[str] = []
 
     def feed(self, line: str) -> Optional[tuple[Optional[str], object]]:
         check_request_controls()
         if not line:
-            self.event = None
-        elif line.startswith("event:"):
-            self.event = line[6:].strip()
-        elif line.startswith("data:"):
-            data = line[5:].strip()
+            event, data = self.event, "\n".join(self.data)
+            self.event, self.data = None, []
             if data and data != "[DONE]":
                 try:
-                    return self.event, json.loads(data)
+                    return event, json.loads(data)
                 except json.JSONDecodeError:
-                    LOG.debug("Skipping unparseable SSE data line")
+                    LOG.debug("Skipping unparseable SSE data event")
+            return None
+        field, _, value = line.partition(":")
+        if value.startswith(" "):
+            value = value[1:]
+        if field == "event":
+            self.event = value
+        elif field == "data":
+            self.data.append(value)
         return None
 
 
