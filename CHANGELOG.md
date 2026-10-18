@@ -169,3 +169,9 @@ V2 intentionally breaks compatibility with v1. See the
   Chat Completions tool history from persisted history after resume.
 - Honor explicit reasoning effort with tools via OpenRouter's unified reasoning
   object, requesting passthrough instead of excluding reasoning.
+
+### Reasoning replay: DeepSeek verification
+
+- Retain reasoning_content replay as required by the current DeepSeek thinking
+  API for requests carrying tools. Add sync/async golden requests and final-turn
+  history checks; document that no-tools requests accept but ignore the field.

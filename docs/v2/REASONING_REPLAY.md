@@ -102,3 +102,15 @@ The shared Chat Completions builder now replays persisted turns, which also
 preserves the existing Z.AI reasoning_content behavior with a fresh resumed buffer.
 
 Source: [OpenRouter preserving reasoning and reasoning_details schema](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
+
+## DeepSeek verification
+
+The current official thinking-mode contract supersedes older R1-era advice:
+requests carrying tools must replay complete reasoning_content from all prior
+assistant turns, even turns without a tool call. Without tools, the field is
+optional and ignored by the API. The existing adapter already follows this
+contract, so its payload policy is deliberately retained. Sync/async two-request
+goldens and fresh-buffer replay tests cover both tool-turn and final-turn thoughts.
+
+Sources: [DeepSeek thinking mode](https://api-docs.deepseek.com/guides/thinking_mode/),
+[Chat Completions assistant message schema](https://api-docs.deepseek.com/api/create-chat-completion/).
