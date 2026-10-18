@@ -22,11 +22,14 @@ _PENDING = "_pending_provider_data"
 def capture_response_replay(provider: str, data: JsonDict, history: JsonDict) -> None:
     """Capture complete output items, including empty-summary encrypted reasoning."""
     history.pop(_PENDING, None)
-    if provider not in {"codex", "openai_responses"}:
-        return
-    output = data.get("output") or []
-    if any(isinstance(item, dict) and item.get("type") == "reasoning" for item in output):
-        history[_PENDING] = {"provider": "responses", "items": deepcopy(output)}
+    if provider in {"codex", "openai_responses"}:
+        output = data.get("output") or []
+        if any(isinstance(item, dict) and item.get("type") == "reasoning" for item in output):
+            history[_PENDING] = {"provider": "responses", "items": deepcopy(output)}
+    elif provider == "anthropic":
+        blocks = data.get("content") or []
+        if any(isinstance(block, dict) and block.get("type") in {"thinking", "redacted_thinking"} for block in blocks):
+            history[_PENDING] = {"provider": "anthropic", "items": deepcopy(blocks)}
 
 
 def take_response_replay(history: JsonDict) -> JsonDict:

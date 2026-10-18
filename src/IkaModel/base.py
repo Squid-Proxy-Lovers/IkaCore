@@ -100,6 +100,7 @@ class BareBoneModel:
         reasoning_effort: Optional[str] = None,
         use_responses_api: bool = True,
         force_control_tool_on_max_tool_calls: bool = True,
+        thinking_budget_tokens: Optional[int] = None,
         ):
 
         # User MUST provide the following:
@@ -125,6 +126,7 @@ class BareBoneModel:
         self.agent_name = agent_name
         self.agent_hierarchy = agent_hierarchy or []
         self.reasoning_effort = reasoning_effort
+        self.thinking_budget_tokens = thinking_budget_tokens
         self.use_responses_api = use_responses_api
         self.force_control_tool_on_max_tool_calls = force_control_tool_on_max_tool_calls
         self.forced_tool_name: Optional[str] = None

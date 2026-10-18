@@ -9,6 +9,7 @@ from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict,
 
 from ..base import BareBoneModel
 from ..model_metadata import is_anthropic_haiku_model
+from ..reasoning_replay import take_response_replay
 from ..request_interface import agent_tools_for_payload
 from .claude import anthropic_fill_payload
 
@@ -67,7 +68,8 @@ def parse_anthropic_response(data: JsonDict, model_id: str) -> ProviderRound:
             })
     
     tokens = 0
-    reasoning_content = None
+    reasoning_content = "\n".join(string_value(json_dict(block).get("thinking")) for block in content_blocks
+                                  if json_dict(block).get("type") == "thinking") or None
     
     return content, reasoning_content, tool_calls, tokens
 
@@ -101,6 +103,9 @@ def append_anthropic_tool_messages(
             "name": tool_call.get("name"),
             "input": _decode_tool_args_object(function_payload.get("arguments", "{}")),
         })
+    provider_data = take_response_replay(message_history)
+    if provider_data.get("provider") == "anthropic":
+        content_blocks = provider_data["items"]
     assistant_msg: JsonDict = {"role": "assistant", "content": content_blocks}
     messages.append(assistant_msg)
     messages.extend(tool_messages)

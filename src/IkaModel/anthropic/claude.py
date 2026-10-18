@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from ..history_replay import is_user_entry, plan_history_replay
 from ..model_metadata import is_anthropic_haiku_model, supports_anthropic_parallel_tool_use
+from ..reasoning_replay import replay_items
 from ..tool_schema import build_provider_tool_payload
 
 _PARALLEL_TOOL_PROMPT = "\n\n<use_parallel_tool_calls>\nFor maximum efficiency, whenever you perform multiple independent operations, invoke all relevant tools simultaneously rather than sequentially. Prioritize calling tools in parallel whenever possible. For example, when reading 3 files, run 3 tool calls in parallel to read all 3 files into context at the same time. When running multiple read-only commands like `ls` or `list_dir`, always run all of the commands in parallel. Err on the side of maximizing parallel tool calls rather than running too many tools sequentially.\n</use_parallel_tool_calls>"
@@ -68,7 +69,8 @@ def _append_anthropic_history(api_messages: List[Dict[str, Any]], entries: List[
             except (json.JSONDecodeError, TypeError):
                 continue
         else:
-            api_messages.append({"role": "assistant", "content": raw if isinstance(raw, str) else str(raw)})
+            blocks = replay_items(msg, "anthropic")
+            api_messages.append({"role": "assistant", "content": blocks if blocks is not None else raw if isinstance(raw, str) else str(raw)})
 
 
 def _append_anthropic_live_messages(api_messages: List[Dict[str, Any]], messages: List[Dict[str, Any]], first_input_content: str) -> None:
@@ -125,7 +127,27 @@ def _anthropic_tool_choice(model: Any, tool_payload: Any) -> Dict[str, Any]:
 def _apply_anthropic_tools(payload: Dict[str, Any], model: Any, agent_tools: list[Any]) -> None:
     tool_payload = build_provider_tool_payload("anthropic", agent_tools)
     payload["tools"] = tool_payload.tools
-    payload["tool_choice"] = _anthropic_tool_choice(model, tool_payload)
+    choice = _anthropic_tool_choice(model, tool_payload)
+    if payload.get("thinking") and choice["type"] not in {"auto", "none"}:
+        choice = {"type": "auto"}
+        if not getattr(model, "parallel_tool_calls", False) and supports_anthropic_parallel_tool_use(model.model_id):
+            choice["disable_parallel_tool_use"] = True
+    payload["tool_choice"] = choice
+
+
+
+def _apply_thinking_config(payload: Dict[str, Any], model: Any) -> None:
+    budget = getattr(model, "thinking_budget_tokens", None)
+    if budget is None:
+        return
+    if type(budget) is not int or budget < 1024:
+        raise ValueError("Anthropic thinking_budget_tokens must be an integer of at least 1024")
+    if budget >= payload["max_tokens"]:
+        raise ValueError("Anthropic thinking_budget_tokens must be less than max_tokens (after model caps)")
+    payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
+    # Manual thinking is incompatible with temperature/top_k overrides. Neither
+    # top_k nor top_p is exposed by this adapter; omit temperature explicitly.
+    payload.pop("temperature", None)
 
 
 def anthropic_fill_payload(
@@ -155,6 +177,7 @@ def anthropic_fill_payload(
         "messages": api_messages,
     }
 
+    _apply_thinking_config(payload, model)
     agent_tools = model.agent_tools if agent_tools is None else agent_tools
     if agent_tools:
         _apply_anthropic_tools(payload, model, agent_tools)

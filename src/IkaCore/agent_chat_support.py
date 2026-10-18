@@ -65,6 +65,7 @@ class AgentChat:
             suppress_init_output=suppress_init_output,
             reasoning_effort=overrides.get("reasoning_effort") or getattr(agent, "reasoning_effort", None),
             use_responses_api=getattr(agent, "use_responses_api", True),
+            thinking_budget_tokens=override(overrides, "thinking_budget_tokens", agent.config.provider.thinking_budget_tokens),
         )
         model.agent_tools = agent_tools
         model._current_step = 0

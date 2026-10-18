@@ -145,3 +145,11 @@ V2 intentionally breaks compatibility with v1. See the
   output items in order, including reasoning IDs and empty summaries. Preserve
   Codex's streaming-only request shape. Update only its three reasoning-model
   benchmark hashes for the added include; the other 18 payload hashes are unchanged.
+
+### Reasoning replay: Anthropic
+
+- Add explicit ProviderConfig/BareBoneModel thinking_budget_tokens. Manual extended
+  thinking validates the budget against effective max_tokens, omits temperature,
+  and adjusts forced tool choice to auto. Default behavior stays opt-out.
+- Preserve complete signed thinking and redacted_thinking blocks in assistant
+  turns before tool results. Opaque signatures/data stay out of display output.

@@ -20,6 +20,7 @@ class ProviderConfig:
     temperature: float = 0.0
     use_responses_api: bool = True
     reasoning_effort: str | None = None
+    thinking_budget_tokens: int | None = None
 
 
 @dataclass(frozen=True)

@@ -41,3 +41,29 @@ including the three non-reasoning OpenAI Responses fixtures, remain unchanged.
 Sources: the OpenAI Responses references above and the existing Codex endpoint
 request contract in codex_responses.py. Endpoint compatibility is checked separately
 by the bounded live replay probe when local login and network are available.
+
+## Anthropic manual extended thinking
+
+Opt in with ProviderConfig(thinking_budget_tokens=1024, max_tokens=4096).
+BareBoneModel accepts the same thinking_budget_tokens option; per-model overrides
+can set it too. The default None preserves ordinary non-thinking behavior.
+Budgets must be integers at least 1024 and strictly less than the effective
+max_tokens, including the existing Haiku cap. Invalid values raise before any
+network call.
+
+When enabled, requests send thinking: {type: "enabled", budget_tokens: N}, omit
+temperature (top_k/top_p are not exposed), and adjust forced/required tool choices
+to auto. Tool requirements and completion remain enforced by the agent loop.
+This adjustment includes the framework's forced control tools. Supported modern
+models may prefer adaptive thinking; this option explicitly selects manual mode.
+
+Complete assistant blocks, including thinking with its signature and
+redacted_thinking with its opaque data, are replayed verbatim in their original
+positions before tool results. Signed blocks survive JSON history persistence.
+Only readable thinking text is returned as reasoning_content.
+
+The only Core wiring additions are the ProviderConfig field and the conversion in
+AgentChat.get_barebone; clone_for_run already preserves it through dataclasses.replace.
+
+Sources: [manual budget rules](https://platform.claude.com/docs/en/build-with-claude/extended-thinking),
+[thinking, tool choice, sampling and block preservation](https://platform.claude.com/docs/en/build-with-claude/thinking).
