@@ -185,7 +185,7 @@ def test_staged_human_input_snapshot_resumes_with_user_answer(tmp_path, monkeypa
     store = agent.enable_snapshots(str(tmp_path / 'runtime.db'))
     messages_seen = []
     def chat(model, messages, history, **kwargs):
-        messages_seen.append(messages[0]['content'])
+        messages_seen.append(messages[-1]['content'])
         if len(messages_seen) == 1:
             return {'interrupted': True, 'status': 'awaiting_user_input', 'content': 'Question?',
                     'tool_calls': [], 'executed_tool_calls': [], 'usage': {}, 'cost': {},

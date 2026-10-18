@@ -151,7 +151,8 @@
         "src/IkaTest/test_agent_snapshots.py::test_pause_configuration_is_isolated_and_preserves_replay_policy",
         "src/IkaTest/test_agent_snapshots.py::test_historical_resume_requires_approval_for_repeated_tool_effects",
         "src/IkaTest/test_agent_snapshots.py::test_resume_does_not_require_approval_for_effects_before_snapshot",
-        "src/IkaTest/test_agent_snapshots.py::test_nested_agent_snapshots_belong_to_child_and_support_frame_restart"
+        "src/IkaTest/test_agent_snapshots.py::test_nested_agent_snapshots_belong_to_child_and_support_frame_restart",
+        "src/IkaTest/test_snapshot_resume_state.py::test_hitl_resume_consumes_saved_transcript_before_entering_next_stage"
       ],
       "known_gap": "In-process mocked models; mid-tool replay restarts execution rather than restoring Python stacks.",
       "min_lines": 95,

@@ -55,4 +55,6 @@ def stage_initial_messages(
             "tokens": 0,
             "type": "hitl_input",
         }
-    return [{"role": "user", "content": resume_input}]
+    messages = restore_messages(self, [])
+    messages.append({"role": "user", "content": resume_input})
+    return messages

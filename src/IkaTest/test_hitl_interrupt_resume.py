@@ -179,7 +179,7 @@ class TestHitlResume:
             calls.append(args[1])
             if len(calls) == 1:
                 return interrupt_response
-            assert args[1][0]["content"] == "User answer"
+            assert args[1][-1]["content"] == "User answer"
             return final_response
 
         agent.chat_wrapper = MagicMock(side_effect=chat_wrapper_side_effect)
@@ -197,4 +197,4 @@ class TestHitlResume:
         second = agent.resume_from_snapshot(first["snapshot_id"], resume_input="User answer")
         assert second["final_message"] == "All done"
         assert second.get("status") != "awaiting_user_input"
-        assert calls[1][0]["content"] == "User answer"
+        assert calls[1][-1]["content"] == "User answer"
