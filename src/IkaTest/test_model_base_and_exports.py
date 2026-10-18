@@ -8,7 +8,7 @@ import IkaCore
 import IkaMem
 import IkaModel
 from IkaModel import base
-from IkaModel.base import AgentEndException, BareBoneModel, HumanInputRequired, load_gemini_payload
+from IkaModel.base import AgentEndException, BareBoneModel, HumanInputRequired
 
 
 class DummyCli:
@@ -96,10 +96,6 @@ def test_lazy_package_exports_cache_values_and_reject_unknowns():
     assert "IkaStage" in IkaCore.__dir__()
     with pytest.raises(AttributeError):
         IkaCore.__getattr__("missing")
-
-
-def test_load_gemini_payload_success_path():
-    assert load_gemini_payload() is importlib.import_module("IkaModel.gemini.google").gemini_fill_payload
 
 
 @pytest.mark.parametrize("package", [IkaCore, IkaModel, IkaMem])

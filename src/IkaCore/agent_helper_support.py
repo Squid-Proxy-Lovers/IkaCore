@@ -22,10 +22,6 @@ FinalAnswerCheck = Callable[[JsonDict], bool]
 RawFinalAnswerCheck = Callable[[JsonDict], object]
 
 
-class _FinalAnswerValidationState(Protocol):
-    message_history: MessageHistory
-
-
 class _RuntimeUtilityState(Protocol):
     name: str
     use_async: bool
@@ -84,9 +80,6 @@ def validate_final_answer_checks_for_history(
             )
 
     return cast(list[FinalAnswerCheck], final_answer_check)
-
-
-_validate_final_answer_checks_for_history = validate_final_answer_checks_for_history
 
 
 def validate_required_fields(fields: dict[str, object]) -> None:
@@ -185,18 +178,6 @@ class AgentConfigDefaultsMixin:
         return get_api_url_for_model(model_id, use_responses_api)
 
 
-class AgentFinalAnswerValidationMixin(AgentConfigDefaultsMixin):
-    @staticmethod
-    def _return_type_allows_bool(return_type: object) -> bool:
-        return _return_type_allows_bool(return_type)
-
-    def _validate_final_answer_checks(
-        self: _FinalAnswerValidationState,
-        final_answer_check: Optional[list[RawFinalAnswerCheck]],
-    ) -> list[FinalAnswerCheck]:
-        return validate_final_answer_checks_for_history(self.message_history, final_answer_check)
-
-
 class AgentRuntimeUtilityMixin:
     def _reset_tool_call_counts(self: Any):
         self._tool_call_counts = {}
@@ -257,7 +238,7 @@ class AgentRuntimeUtilityMixin:
 
 class AgentHelperSupportMixin(
     AgentAttributeDeclarationsMixin,
-    AgentFinalAnswerValidationMixin,
+    AgentConfigDefaultsMixin,
     AgentRuntimeUtilityMixin,
 ):
     pass
