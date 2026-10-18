@@ -165,7 +165,7 @@ def test_silent_workflow_scopes_preserve_silent_and_observed_callers(capsys):
     observed = []
     for parent in (RuntimeOutput(), RuntimeOutput((observed.append,))):
         with output_scope(parent):
-            result = workflow.run(use_async=True)
+            result = workflow.run(parallel=True)
             assert result['fixture'].final == 'done' and current_output() is parent
     assert observed == [] and capsys.readouterr().out == ''
     workflow.async_executor.shutdown()

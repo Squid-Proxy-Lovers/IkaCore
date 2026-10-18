@@ -146,6 +146,6 @@ def workflow_case(case):
     workflow = IkaWorkflow('benchmark', 'diamond', nodes, edges, compress_hook=lambda contexts, agent: '\n'.join(contexts),
                            max_parallel_workers=4, output=_BENCHMARK_OUTPUT)
     def operation():
-        if set(workflow.run(use_async=case == 'workflow_parallel')) != {'root', 'left', 'right', 'join'}:
+        if set(workflow.run(parallel=case == 'workflow_parallel')) != {'root', 'left', 'right', 'join'}:
             raise AssertionError('workflow lost a node')
     return operation, workflow.async_executor.shutdown

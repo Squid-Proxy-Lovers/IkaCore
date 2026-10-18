@@ -31,7 +31,7 @@ def scenario(monkeypatch):
         defaults = {'maxsteps': 3, 'max_step_extensions': 0, 'max_stage_extensions': 0}
         defaults.update(options)
         agent = IkaBaseAgent('fixture', 'fixture', 'test task', model_id='gpt-4o', api_key='fixture',
-                            Stages=[IkaStage('phase', 'stage task', [])] if staged else [],
+                            stages=[IkaStage('phase', 'stage task', [])] if staged else [],
                             output=OutputConfig(show_usage_level0=False), **agent_kwargs(defaults))
         agents.append(agent)
         calls = []

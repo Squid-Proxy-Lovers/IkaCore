@@ -32,7 +32,7 @@ def agent_factory(tmp_path, monkeypatch):
 
 
 def test_hitl_resume_consumes_saved_transcript_before_entering_next_stage(agent_factory, monkeypatch):
-    agent = agent_factory(Stages=[IkaStage('first', 'ask for approval', [], hitl=True),
+    agent = agent_factory(stages=[IkaStage('first', 'ask for approval', [], hitl=True),
                                   IkaStage('second', 'write final report', [])])
     seen = []
     def chat(model, messages, history, **kwargs):
@@ -55,7 +55,7 @@ def test_hitl_resume_consumes_saved_transcript_before_entering_next_stage(agent_
 
 @pytest.mark.parametrize('failed_replay', [False, True])
 def test_fresh_execution_starts_at_first_stage_after_replay(agent_factory, monkeypatch, failed_replay):
-    agent = agent_factory(Stages=[IkaStage('first', 'first phase', []), IkaStage('second', 'second phase', [])])
+    agent = agent_factory(stages=[IkaStage('first', 'first phase', []), IkaStage('second', 'second phase', [])])
     calls = []
     def chat(model, messages, history, **kwargs):
         index = kwargs['current_stage_index']
@@ -86,7 +86,7 @@ def test_fresh_execution_starts_at_first_stage_after_replay(agent_factory, monke
 @pytest.mark.parametrize('boundary', ['pre_model', 'post_model', 'step_entry'])
 @pytest.mark.parametrize('extensions', [0, 1])
 def test_mid_stage_resume_preserves_consumed_steps_limit_and_extensions(agent_factory, monkeypatch, boundary, extensions):
-    agent = agent_factory(Stages=[IkaStage('phase', 'work', [], stage_max_step=2)],
+    agent = agent_factory(stages=[IkaStage('phase', 'work', [], stage_max_step=2)],
                           max_stage_extensions=extensions, extend_stage_steps_by=2)
     calls = []
     trigger = 2 + extensions if boundary == 'post_model' else 1 + 2 * extensions
@@ -108,7 +108,7 @@ def test_mid_stage_resume_preserves_consumed_steps_limit_and_extensions(agent_fa
 
 
 def test_mid_stage_resume_does_not_double_charge_steps_to_following_stage(agent_factory, monkeypatch):
-    agent = agent_factory(maxsteps=4, Stages=[IkaStage('first', 'work', [], stage_max_step=2),
+    agent = agent_factory(maxsteps=4, stages=[IkaStage('first', 'work', [], stage_max_step=2),
                                              IkaStage('second', 'finish', [], stage_max_step=0)])
     calls = []
     def chat(model, messages, history, **kwargs):
@@ -145,7 +145,7 @@ def test_loop_budget_survives_resume_in_a_new_agent(agent_factory, monkeypatch, 
 
 
 def test_hitl_resume_preserves_the_stage_budget_already_consumed(agent_factory, monkeypatch):
-    agent = agent_factory(Stages=[IkaStage('phase', 'ask then finish', [], hitl=True, stage_max_step=2)])
+    agent = agent_factory(stages=[IkaStage('phase', 'ask then finish', [], hitl=True, stage_max_step=2)])
     calls = []
     def chat(model, messages, history, **kwargs):
         calls.append(deepcopy(messages))
@@ -161,7 +161,7 @@ def test_hitl_resume_preserves_the_stage_budget_already_consumed(agent_factory, 
 def test_exhausted_hitl_resume_extends_or_finalizes_before_stage_completion(
     agent_factory, monkeypatch, use_async, extensions,
 ):
-    agent = agent_factory(Stages=[IkaStage('approval', 'ask approval', [], hitl=True, stage_max_step=1)],
+    agent = agent_factory(stages=[IkaStage('approval', 'ask approval', [], hitl=True, stage_max_step=1)],
                           max_stage_extensions=extensions, extend_stage_steps_by=2, use_async=use_async)
     calls, summaries = [], []
     def chat(model, messages, history, **kwargs):
@@ -216,7 +216,7 @@ def test_snapshot_without_loop_state_uses_only_remaining_budget(agent_factory, m
 
 
 def test_snapshot_without_loop_state_subtracts_only_current_stage_steps(agent_factory, monkeypatch):
-    agent = agent_factory(maxsteps=6, Stages=[IkaStage('first', 'start', [], stage_max_step=1),
+    agent = agent_factory(maxsteps=6, stages=[IkaStage('first', 'start', [], stage_max_step=1),
                                              IkaStage('second', 'finish', [], stage_max_step=3)])
     calls = []
     def chat(*args, **kwargs):

@@ -1,13 +1,16 @@
 """Dependency-aware synchronous graph execution."""
 
-# pyright: strict
+# pyright: strict, reportPrivateUsage=false
 
 from typing import Any, Optional
 
 from IkaModel.request_control import check_request_controls
+from IkaModel.runtime_errors import IkaRequestControlError
 
+from .runtime_control import RuntimePauseRequested
+from .workflow_async_executor import _run_async_workflow_agent
 from .workflow_snapshot_execution import wrap_snapshot_instance
-from .workflow_types import WorkflowResult
+from .workflow_types import WorkflowError, WorkflowNodeError, WorkflowResult
 
 
 def run_sync_dataflow(workflow: Any, initial_context: Optional[str]) -> dict[str, WorkflowResult]:
@@ -23,7 +26,13 @@ def run_sync_dataflow(workflow: Any, initial_context: Optional[str]) -> dict[str
         for name in ready:
             check_request_controls()
             node = workflow._node_index[name]
-            context = workflow._prepare_context(node, upstream.get(name, []))
+            try:
+                context = workflow._prepare_context(node, upstream.get(name, []))
+            except IkaRequestControlError:
+                raise
+            except Exception as error:
+                raise WorkflowError([WorkflowNodeError(name, None, type(error).__name__, str(error))],
+                                    stored_results) from error
             inputs = workflow._instance_inputs_for_node(node)
             results: list[dict[str, Any]] = []
             for instance in range(node.instances):
@@ -33,7 +42,14 @@ def run_sync_dataflow(workflow: Any, initial_context: Optional[str]) -> dict[str
                     agent.apply_workflow_stage_wiring(node.stage_wiring)
                 if context:
                     agent.inject_workflow_context(context)
-                results.append({"node_name": name, "instance_id": instance, "result": agent.execution(), "success": True})
+                result = _run_async_workflow_agent(name, agent, "", instance)
+                if result.get("interrupted"):
+                    raise RuntimePauseRequested("workflow_instance", result["result"].get("snapshot_id"))
+                if not result["success"]:
+                    error = result["result"]
+                    raise WorkflowError([WorkflowNodeError(name, instance, error["error_type"], error["error"])],
+                                        stored_results)
+                results.append(result)
             for result in results:
                 workflow._record_async_success(result)
                 summary = result["result"].get("summary") or result["result"].get("final_message") or ""

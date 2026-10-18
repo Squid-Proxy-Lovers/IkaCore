@@ -128,7 +128,7 @@ def test_chat_context_recovery_error_contracts(monkeypatch, asynchronous, phase)
     req = AsyncMock(side_effect=first) if asynchronous else Mock(side_effect=first)
     monkeypatch.setattr(requests, "async_api_request_retry" if asynchronous else "api_request_retry", req)
     summary = IkaRequestCancelled("stop") if phase == "summary_cancel" else ValueError("summary") if phase == "summary" else None
-    summarizer = AsyncMock(side_effect=summary) if asynchronous else Mock(side_effect=summary)
+    summarizer = AsyncMock(side_effect=summary, return_value="summary") if asynchronous else Mock(side_effect=summary, return_value="summary")
     monkeypatch.setattr(chat._summaries, "async_summarise_message_history" if asynchronous else "summarise_message_history", summarizer)
     build = Mock(side_effect=[("url", {}, {}), ValueError("rebuild")])
     expected = IkaRequestCancelled if phase in {"cancel", "summary_cancel"} else requests.IkaAPIError if phase == "other_http" else IkaContextWindowError

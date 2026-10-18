@@ -1,5 +1,8 @@
 # New-user application dogfood report
 
+Current status: all findings are addressed in the [Resolution section](#resolution--ergonomics-implementation).
+The original observations and validation numbers below are retained as historical evidence.
+
 Date: 2026-10-18. Runtime: unreleased IkaCore 2.0.0, wheel built from
 `aca8c53a57332c0e5ab225628ac7b29bae99d23b`, Python 3.13.15, HTTPX 0.28.1.
 Worktree: `/private/tmp/ikacore-w-dogfood`, branch `v2-dogfood`.
@@ -13,7 +16,7 @@ per-app live outcomes and limitations are in [LIVE_RESULTS.md](../../examples/ap
 
 ## Bugs for runtime owners
 
-All three reproductions are strict expected failures under
+At the original `aca8c53` revision, all three reproductions were strict expected failures under
 `src/IkaTest/dogfood_findings/`. They need no credentials. The first two are in
 `test_validation_contract.py`; the third is in `test_chat_prompt.py`.
 
@@ -143,3 +146,67 @@ checks passed. No existing tests or gates were weakened.
 Implementation commit: `1f667520889de190ef7848769935bea332b102b7`.
 The documentation/live-evidence follow-up commit is reported in the handoff; its own SHA
 cannot be embedded in the file it commits.
+
+## Resolution — ergonomics implementation
+
+The observations and 980-test/74-call evidence above describe the original dogfood
+revision. The following resolutions supersede its API limitations. Implementation starts
+from `49dbeb3` on `v2-ergonomics`; current verification and rerun evidence are recorded in
+[the application results](../../examples/apps/LIVE_RESULTS.md). No original regression
+assertion was weakened. All three strict xfail markers were removed; their HTTPX fixtures
+now carry request metadata so `raise_for_status()` reaches the runtime assertions.
+
+| Item | Resolution |
+| --- | --- |
+| DOGFOOD-1: construction invokes final check | Fixed. Construction checks synchronous callability/signature only. `AgentResult` is the single typed final mapping; callbacks return an actual bool at execution. No docstring or annotation is required. |
+| DOGFOOD-2: staged final checks bypassed | Fixed. Simple/staged completion share validation and bounded correction, including snapshot-resumed corrections. Corrections use existing evidence and expose only `agent_end`, avoiding repeated application side effects. The research app validates its staged answer directly. |
+| DOGFOOD-3: stale prompt replay | Fixed. Prompt assignment replaces the task and clears transcript/pending continuation. `send(message)` appends an ordered user turn with fresh configured steps; final answers are retained. Seven mocked routes verify turn ordering and no duplication. |
+| Exhausted validation returns invalid output silently | Every result reports `validation.status`, `attempts`, `failed_checks`. `fail_closed=True` raises `FinalAnswerValidationError` retaining `.result`. Tests cover both modes, exhaustion, successful correction and correction pause/resume. |
+| Fresh-wheel installation hidden by editable setup | README/USAGE/apps retain clean-wheel setup. Offline and live reruns use a newly built non-editable wheel. Quality verifies its complete module/data inventory and isolated imports. |
+| Callback shape undocumented | USAGE demonstrates `def has_answer(result: AgentResult) -> bool`; generated API reference lists the result fields and policy signatures. |
+| No documented chat-turn API | `agent.send(message)` and `.transcript` replace the app history-editing workaround. `execution()` runs the current task. The long-chat app uses public APIs for every turn and resumed process. |
+| Compaction budget outside grouped config; no observability | `ExecutionLimits(context_budget=N)` uses tokens; `compaction_count` and `compaction` RuntimeEvents report successful summaries. Counters persist in snapshots. `post_compaction` snapshots remain available. |
+| Completed vs pending snapshot semantics unclear | Completed restore loads transcript, usage/cost and counters, returns saved output without a call, and permits a subsequent `send()`. `resume_input` on a completed agent snapshot is rejected. Pending restore consumes the saved turn/answer first. USAGE and API explain both. |
+| Memory lifetime wording misleading | USAGE explicitly ties lifetime to the caller-owned backend. Snapshots do not serialize arbitrary memory stores. The chat app persists JsonStorage separately and recalls it in a fresh process. |
+| Agent fork lacks answer; workflow fork undocumented | Agent and workflow `fork_from_snapshot(..., resume_input=...)` fork and answer in one call. Workflow mappings handle multiple interrupted instances. Approval app forks its rejection through this convenience. |
+| Workflow use_async means blocking threads | Canonical `run(parallel=True, concurrency=N)` is documented as blocking. Dependencies, fan-in, completion ordering and separate context-preparation workers are explained. `use_async` remains a deprecated alias. Default instance workers decrease to four. |
+| Clones discard clients; shutdown closes borrowed client | `ProviderConfig(client=...)` and direct client assignment borrow. Clones retain borrowed references; shutdown leaves them open. `client_factory` creates a distinct owned client per instance. Workers shut down clones. The pipeline subclass/detach workaround is removed. |
+| WorkflowResult.history is output, not transcript | Canonical `.output`, `.transcript`, `.instance_outputs` and `.instance_transcripts` separate the contracts and preserve every fan-out instance. `.history` is a deprecated output alias. Transcript survives cached workflow replay. |
+| Worker errors become missing results/KeyError | `WorkflowError.errors` has node/instance/type/message identity; `.partial_results` retains completed nodes. Dependents stay blocked. Cancellation/deadline exceptions keep their types. Tests cover both scheduling modes and snapshot failures. |
+| No supported mock seam | Public `IkaCore.testing.MockProvider` supports native envelopes/dicts, a responder, scoped/nested sync/async use and workflow workers. `provider_response` builds provider-native envelopes. Apps and executable docs tests use this seam. |
+| Large defaults require many bounds | Three `.bounded()` config presets supply 1,024 output tokens, six steps, 30-second steps, three tool rounds, twelve tool calls, no extensions and one correction with two extra steps. Existing unrestricted defaults are retained by design. Whole-operation deadlines and extra extension/forced-answer/summary/compaction calls are explained. |
+| cli=False still prints warnings/tracebacks | Library loggers use NullHandler and do not configure root logging; presentation is scoped. Python logging explicitly controls diagnostics. The timeout app stays quiet by default. |
+| Control-tool argument names missing | USAGE documents `agent_end(input=...)`, `stage_end(input=...)`, `ask_user(question=...)`, `change_stage(stage_index=..., reason=...)`, including availability. |
+| Default prompt demands verbose answers | Default model prompt now asks for clear, concise answers. `PromptConfig(system_prompt=...)` is documented for style overrides. |
+| Capitalized Stages and missing API reference | Canonical `stages=`/`.stages`; capitalized compatibility aliases remain so existing v2 callers can migrate incrementally. `docs/API.md` is generated from all package exports, testing adapters and maintained extension entry points; pytest asserts exact export/signature agreement. |
+| Source lookups forced by missing docs | The generated API reference supplies signatures/imports/methods and USAGE covers grouped defaults, validation, tools, lifecycle, chat, snapshots, ownership and scheduling. Runtime implementation lookup is no longer required for these documented operations. |
+
+Intentional behavior changes are listed individually in `CHANGELOG.md` 2.0.0 and the
+v2 migration table. Two deliberate compatibility choices are retained: unrestricted
+configuration defaults remain available alongside the bounded presets, and the old
+`Stages`, workflow `use_async`, and result `history` spellings remain documented aliases.
+Text-only corrections replace the suggested repeated staged execution to avoid replaying
+application tools with side effects.
+
+
+### Historical ergonomics-only verification (`ed55da5`)
+
+Implementation commit: `ed55da5928451a26e600d59b3266fef33bc92d17`.
+The [handoff report](ergonomics-handoff.md) includes API before/after examples and every
+intentional behavior change. Fresh-wheel offline apps: **7 passed** (six apps plus SIGINT);
+Codex live apps: **6/6 passed**, **44 request boundaries**, four live chat turns with three
+compactions (twelve turns remain covered offline). Historical evidence is retained separately.
+
+Final `pytest -q`: **1,075 passed / 1 skipped**, **19.37 s**, no xfails.
+`python scripts/quality.py`: **passed**, including the same **1,075 passed / 1 skipped**
+under coverage, Ruff, Pyright (zero errors), compilation, wheel data/module inventory and
+isolated imports. Combined coverage **94.80%**, line **96.46%**, branch **88.82%**;
+**127 modules / 16 areas**, zero coverage gate failures, all floors intact.
+
+## Integrated verification
+
+The ergonomics merge reruns these assertions alongside reasoning replay, crash durability,
+soak, generative tests and the raised hardening floors. Current numbers and revision labels
+are in [merge-validation.md](merge-validation.md); installed-wheel app outcomes are in
+[LIVE_RESULTS.md](../../examples/apps/LIVE_RESULTS.md). The three reproductions are ordinary
+passing tests; there are no dogfood xfail markers.

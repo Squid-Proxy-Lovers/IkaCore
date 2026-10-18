@@ -25,11 +25,12 @@ import itertools
 from typing import Any, Dict, List, Optional, Set
 
 from IkaModel.request_control import check_request_controls, request_lifecycle_active
+from IkaModel.runtime_errors import IkaRequestControlError
 from IkaModel.runtime_policy import current_runtime_options
 from IkaModel.worker_context import submit_with_controls
 
 from .workflow_snapshot_execution import wrap_snapshot_instance
-from .workflow_types import WorkflowStateProtocol
+from .workflow_types import WorkflowError, WorkflowNodeError, WorkflowStateProtocol
 
 _CONTEXT = "context"
 _INSTANCE = "instance"
@@ -76,6 +77,12 @@ class _DataflowNodePhases:
     def _complete_node(self, node_name: str) -> None:
         results = self.instance_results.pop(node_name)
         blocked = any(not result.get("success") for result in results)
+        if blocked:
+            errors = [WorkflowNodeError(node_name, r.get("instance_id"),
+                        r["result"].get("error_type", "Exception"), r["result"].get("error", "Worker failed"))
+                      for r in results if not r.get("success") and not r.get("interrupted")]
+            if errors:
+                raise WorkflowError(errors, self.workflow._results)
         if not blocked:
             for result in results:
                 self.workflow._record_async_success(result)
@@ -123,6 +130,8 @@ class DataflowRun(_DataflowNodePhases):
                     self._on_done(future)
             check_request_controls()
         finally:
+            for future in self.inflight:
+                future.cancel()
             self.context_pool.shutdown(wait=not request_lifecycle_active(), cancel_futures=True)
 
     def _track(self, future: concurrent.futures.Future[Any], kind: str, node_name: str) -> None:
@@ -143,7 +152,14 @@ class DataflowRun(_DataflowNodePhases):
     def _on_done(self, future: concurrent.futures.Future[Any]) -> None:
         _, kind, node_name = self.inflight.pop(future)
         if kind == _CONTEXT:
-            self._schedule_instances(node_name, future.result())
+            error = future.exception()
+            if isinstance(error, IkaRequestControlError):
+                raise error
+            if error is not None:
+                raise WorkflowError([WorkflowNodeError(node_name, None, type(error).__name__, str(error))],
+                                    self.workflow._results) from error
+            context = future.result()
+            self._schedule_instances(node_name, context)
             return
         result = self.workflow.async_executor.wait_for_completion([future])[0]
         self.instance_results[node_name].append(result)

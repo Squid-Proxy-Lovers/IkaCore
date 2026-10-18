@@ -19,7 +19,9 @@ def test_execution_parity_with_dc9efbd(staged, tmp_path):
     for index, (name, maxsteps, extensions, pause) in enumerate(module.cases()):
         folder = tmp_path / str(index)
         folder.mkdir()
-        trace = module.normalize(module.run_case(folder, staged, name, maxsteps, extensions, pause))
+        raw = module.run_case(folder, staged, name, maxsteps, extensions, pause)
+        assert raw["result"].pop("validation") == {"status": "not_run", "attempts": 0, "failed_checks": []}
+        trace = module.normalize(raw)
         actual = hashlib.sha256(json.dumps(trace, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         case = f'{"stage" if staged else "simple"}:{name}'
         assert actual == baseline['sha256'][case], f'execution diverged from dc9efbd: {case}\n{trace}'

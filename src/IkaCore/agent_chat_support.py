@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from uuid import uuid4
 
 from IkaCore.events import current_output as get_cli_output
 from IkaModel.async_runner import run_async
@@ -67,6 +68,12 @@ class AgentChat:
             use_responses_api=getattr(agent, "use_responses_api", True),
             thinking_budget_tokens=override(overrides, "thinking_budget_tokens", agent.config.provider.thinking_budget_tokens),
         )
+        model.context_budget = agent.context_budget
+        def compacted() -> None:
+            agent.state.compaction_count += 1
+            agent.events.publish("compaction", {"agent_name": agent.name, "count": agent.compaction_count,
+                                                 "context_budget": agent.context_budget})
+        model._on_compaction = compacted
         model.agent_tools = agent_tools
         model._current_step = 0
         return model
@@ -201,12 +208,18 @@ class AgentChat:
         if not final_message or final_message.strip() == "":
             final_message = summary
         check_request_controls()
+        bucket = agent.message_history.setdefault("messages", {})
+        last = next(reversed(bucket.values()), {}) if bucket else {}
+        if last.get("message") != final_message or last.get("type", "assistant") != "assistant":
+            bucket[str(uuid4())] = {"type": "assistant", "message": final_message,
+                                    "tokens": max(1, len(final_message) // 4)}
         return {
             "final_message": final_message,
             "summary": summary,
             "usage": getattr(agent, "_total_usage", {}),
             "cost": getattr(agent, "_total_cost", {}),
             "model_id": barebone_model.model_id,
+            "validation": {"status": "not_run", "attempts": 0, "failed_checks": []},
         }
 
     def _reset_tool_call_counts(self):
@@ -224,6 +237,7 @@ class AgentChat:
             if current_runtime_options().reuse_connections:
                 return None
             agent.client = new_sync_client(agent.step_timeout)
+            agent._client_owned = True
         return agent.client
 
     def _enforce_rate_limit(self, per_minute: Optional[float], last_ts_attr: str) -> None:

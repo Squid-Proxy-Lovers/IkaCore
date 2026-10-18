@@ -61,28 +61,25 @@ class TestFinalAnswerCheckValidation:
         with pytest.raises(ValueError, match="callable"):
             _minimal_agent(policy=ExecutionPolicy(final_answer_checks=("not-callable",)))
 
-    def test_rejects_check_without_docstring(self):
-        def no_docstring(_history) -> bool:
-            return True
+    def test_accepts_check_without_docstring_without_executing_it(self):
+        check = MagicMock(return_value=True)
+        a = _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(check,)))
+        assert a.final_answer_checks == [check]
+        check.assert_not_called()
 
-        with pytest.raises(ValueError, match="docstring"):
-            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(no_docstring,)))
+    def test_rejects_check_with_wrong_signature(self):
+        def wrong_signature(first, second):
+            raise AssertionError("Must not execute at construction")
+        with pytest.raises(ValueError, match="one positional AgentResult"):
+            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(wrong_signature,)))
 
-    def test_rejects_check_with_non_bool_annotation(self):
-        def wrong_annotation(_history) -> str:
-            """Return the validation result."""
+    def test_rejects_check_returning_non_bool_at_execution(self):
+        def wrong_result(_result):
             return "yes"
-
-        with pytest.raises(ValueError, match="return type annotation"):
-            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(wrong_annotation,)))
-
-    def test_rejects_check_returning_non_bool(self):
-        def wrong_result(_history):
-            """Return the validation result."""
-            return "yes"
-
-        with pytest.raises(ValueError, match="must return a boolean"):
-            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(wrong_result,)))
+        a = _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(wrong_result,)))
+        a.execution_runtime._run_simple_final_output = MagicMock(return_value={"final_message": "answer"})
+        with pytest.raises(TypeError, match="must return a boolean"):
+            a.execution()
 
     def test_accepts_valid_check(self):
         def valid_check(_history) -> bool:
@@ -134,7 +131,7 @@ class TestFinalPrompt:
             temperature=0.4,
             stage_max_step=2,
         )
-        agent = _minimal_agent(Stages=[stage0, stage1])
+        agent = _minimal_agent(stages=[stage0, stage1])
 
         prompt = build_stage_content_prompt(agent.prompt, agent.Stages, stage1, 1)
         overrides = resolve_stage_model_overrides(agent, stage1)
@@ -156,7 +153,7 @@ class TestFinalPrompt:
         stage0 = IkaStage("S0", "Stage 0 prompt", [])
         stage1 = IkaStage("S1", "Stage 1 prompt", [])
         subagent = _minimal_agent(name="Sub")
-        a = _minimal_agent(Stages=[stage0, stage1])
+        a = _minimal_agent(stages=[stage0, stage1])
         a.message_history["first_input"]["message"] = "original"
 
         a.inject_workflow_context("")
@@ -171,7 +168,7 @@ class TestFinalPrompt:
 
     def test_clone_for_run_copies_selected_runtime_overrides(self):
         stage = IkaStage("S", "Prompt", [])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         a.message_history["first_input"]["message"] = "history"
         a.context_budget = 123
         a._base_prompt = "base"
@@ -193,7 +190,7 @@ class TestFinalPrompt:
     def test_execute_stage_refreshes_first_input_for_each_stage(self):
         stage0 = IkaStage("S0", "Stage 0 prompt", [])
         stage1 = IkaStage("S1", "Stage 1 prompt", [])
-        a = _minimal_agent(Stages=[stage0, stage1])
+        a = _minimal_agent(stages=[stage0, stage1])
         a.logger = MagicMock(level=0)
         a.message_history["first_input"]["message"] = "original stage prompt"
 
@@ -271,7 +268,7 @@ class TestExecutionRuntimeHelpers:
 
     def test_prepare_stage_runtime_records_resume_input_and_stage_prompt(self):
         stage = IkaStage("Review", "Review prompt", [])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         a.logger = MagicMock(level=0)
 
         runtime = a.preparation._prepare_stage_runtime(0, remaining_steps=4, resume_input="human answer")
@@ -330,7 +327,7 @@ class TestExecutionRuntimeHelpers:
     def test_handle_stage_interrupt_captures_hitl_state(self, tmp_path):
         stage = IkaStage("Review", "Review prompt", [])
         a = _minimal_agent(
-            Stages=[stage],
+            stages=[stage],
         )
         a.logger = MagicMock(level=2)
         turn = self._turn(
@@ -359,7 +356,7 @@ class TestExecutionRuntimeHelpers:
 
     def test_handle_stage_interrupt_ignores_non_interrupted_turn(self):
         stage = IkaStage("Review", "Review prompt", [])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         a._last_interrupt = {"status": "previous"}
         turn = self._turn(response={"interrupted": False, "usage": {}, "cost": {}})
 
@@ -561,7 +558,7 @@ class TestExecutionRuntimeHelpers:
     )
     def test_execute_stage_returns_stage_control_targets(self, target_stage, expected_next):
         stage = IkaStage("Review", "Review prompt", [])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         runtime = StageRuntimeContext(
             stage=stage,
             system_prompt="system",
@@ -587,7 +584,7 @@ class TestExecutionRuntimeHelpers:
 
     def test_execute_stage_logs_and_forces_final_when_extensions_exhaust(self):
         stage = IkaStage("Review", "Review prompt", [])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         a.logger = MagicMock()
         messages = []
         runtime = StageRuntimeContext(
@@ -665,7 +662,7 @@ class TestExecutionRuntimeHelpers:
 
     def test_staged_dispatch_resumes_stage_checkpoint_and_builds_final_output(self):
         stage = IkaStage("Review", "Review prompt", [])
-        a = _minimal_agent(Stages=[stage], limits=ExecutionLimits(maxsteps=10))
+        a = _minimal_agent(stages=[stage], limits=ExecutionLimits(maxsteps=10))
         resume_history = _minimal_agent().message_history
         resume_cp = {
             "scope": "stage",
@@ -698,7 +695,7 @@ class TestExecutionRuntimeHelpers:
             "interrupt_status": "awaiting_user_input",
             "interrupt_data": {"question": "Proceed?"},
         }
-        a = _minimal_agent(Stages=[stage], limits=ExecutionLimits(maxsteps=10))
+        a = _minimal_agent(stages=[stage], limits=ExecutionLimits(maxsteps=10))
         a.execute_stage = MagicMock()
 
         replay = a.execution_runtime._run_staged_execution("", resume_cp, last_content="")
@@ -707,7 +704,7 @@ class TestExecutionRuntimeHelpers:
         assert replay["interrupt_data"]["question"] == "Proceed?"
         a.execute_stage.assert_not_called()
 
-        b = _minimal_agent(Stages=[stage], limits=ExecutionLimits(maxsteps=10))
+        b = _minimal_agent(stages=[stage], limits=ExecutionLimits(maxsteps=10))
         b.execute_stage = MagicMock(return_value=StageExecutionResult(1, "done", True, "done", 1))
         b.get_barebone = MagicMock(return_value=SimpleNamespace())
         b.chat._build_final_output = MagicMock(return_value={"final_message": "done"})
@@ -719,7 +716,7 @@ class TestExecutionRuntimeHelpers:
 
     def test_staged_dispatch_returns_current_interrupt_after_stage_execution(self):
         stage = IkaStage("Review", "Review prompt", [])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         a._last_interrupt = {"last_content": "Need input", "interrupt_data": {"question": "Proceed?"}}
         a.execute_stage = MagicMock(return_value=StageExecutionResult(0, "Need input", False, None, 1))
 
@@ -795,7 +792,8 @@ class TestExecutionRuntimeHelpers:
         ):
             out = a.policy_runtime._run_validated_simple_execution()
 
-        assert out == {"final_message": "good"}
+        assert out == {"final_message": "good",
+                       "validation": {"status": "passed", "attempts": 2, "failed_checks": []}}
         assert a.execution_runtime._run_simple_final_output.call_count == 2
         assert a.maxsteps == 3
         assert a.prompt == "original prompt"
@@ -828,7 +826,7 @@ class TestExecutionRuntimeHelpers:
         a.logger.log_action.assert_called_once()
 
     def test_execution_dispatches_stages_next_agent_checkpoint_and_validation_paths(self):
-        staged = _minimal_agent(Stages=[IkaStage("S", "P", [])])
+        staged = _minimal_agent(stages=[IkaStage("S", "P", [])])
         staged.execution_runtime._run_staged_execution = MagicMock(return_value={"final_message": "staged"})
         assert staged.execution() == {"final_message": "staged"}
         staged.execution_runtime._run_staged_execution.assert_called_once_with(None, None, "")
@@ -976,7 +974,7 @@ class TestParseControlCalls:
 
     def test_stage_end_sets_target_next(self):
         stage = IkaStage("S", "P", [])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         calls = [{"function": {"name": "stage_end", "arguments": "{}"}}]
         target, ended, _text = a.parse_control_calls(calls, stage)
         assert target == "next"
@@ -984,7 +982,7 @@ class TestParseControlCalls:
 
     def test_change_stage_parsed(self):
         stage = IkaStage("S", "P", [], allowed_back_to=[0])
-        a = _minimal_agent(Stages=[stage, IkaStage("S1", "P1", [])])
+        a = _minimal_agent(stages=[stage, IkaStage("S1", "P1", [])])
         calls = [{"function": {"name": "change_stage", "arguments": '{"stage_index": 0, "reason": "Redo"}'}}]
         target, ended, _text = a.parse_control_calls(calls, stage, current_stage_idx=1)
         assert not ended
@@ -992,7 +990,7 @@ class TestParseControlCalls:
 
     def test_change_stage_ignores_forward_or_unallowed_targets(self):
         stage = IkaStage("S", "P", [], allowed_back_to=[0])
-        a = _minimal_agent(Stages=[stage, IkaStage("S1", "P1", []), IkaStage("S2", "P2", [])])
+        a = _minimal_agent(stages=[stage, IkaStage("S1", "P1", []), IkaStage("S2", "P2", [])])
 
         forward_target, _, _ = a.parse_control_calls(
             [{"function": {"name": "change_stage", "arguments": '{"stage_index": 2}'}}],

@@ -9,7 +9,7 @@ python -m examples.apps.long_chat.main --offline
 python -m examples.apps.long_chat.main --live --use-local-login --model gpt-5.6-sol
 ```
 
-Memory tools save and recall blue, at least one post_compaction snapshot exists, and a fresh process resumes the saved turn. Each execution is one chat turn; first_input is refreshed explicitly because changing prompt alone replays the first request (DOGFOOD-3). Previous user turns are retained using the existing stage_input history entry type. This is a finite scripted chat loop, with CLI input replaceable by an application UI.
+Memory tools save and recall blue, at least one post_compaction snapshot exists, and a fresh process resumes the saved turn. Each `send()` appends a user turn. `ExecutionLimits(context_budget=700)` sets the token budget and `compaction_count` reports compactions. Snapshot restore retains the conversation before the next `send()`; assigning `prompt` explicitly starts a fresh task. This is a finite scripted chat loop, with CLI input replaceable by an application UI.
 
 Offline mode runs real agent/tool/workflow/snapshot code against scripted provider-native HTTP response envelopes. It blocks accidental HTTP transport access and needs no credentials. Live mode opts in to the local Codex CLI login (or CODEX_BEARER); prompts and files are synthetic. Request scopes allow one attempt; chat sessions expire after 180 seconds, with nested 30-second turn deadlines; per-request agent timeouts are at most 45 seconds. Each subprocess session owns its own scope. The apps print only check results, never model answers or credentials.
 

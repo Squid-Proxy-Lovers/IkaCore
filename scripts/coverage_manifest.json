@@ -84,14 +84,17 @@
       "area": "Retries / request errors",
       "sources": [
         "src/IkaModel/request_interface.py",
-        "src/IkaModel/retry_policy.py"
+        "src/IkaModel/retry_policy.py",
+        "src/IkaModel/request_adapter.py",
+        "src/IkaCore/testing.py"
       ],
       "required_tests": [
         "src/IkaTest/test_retry_policy.py::test_permanent_errors_fail_on_first_attempt_without_sleeping",
         "src/IkaTest/test_retry_policy.py::test_rate_limit_honours_millisecond_hint",
         "src/IkaTest/test_retry_policy.py::test_programmer_errors_are_not_retried",
         "src/IkaTest/test_retry_policy.py::test_default_context_overflow_still_reaches_summary_recovery",
-        "src/IkaTest/test_hardening_requests.py::test_retry_transport_failures_recover_and_exhaust_with_typed_error"
+        "src/IkaTest/test_hardening_requests.py::test_retry_transport_failures_recover_and_exhaust_with_typed_error",
+        "src/IkaTest/test_dogfood_ergonomics.py::test_mock_provider_native_envelopes_nested_scopes_and_async"
       ],
       "known_gap": "Offline responses; provider rate-limit behavior must also be checked live.",
       "min_lines": 99,
@@ -228,7 +231,9 @@
       "required_tests": [
         "src/IkaTest/test_workflow_dataflow.py::test_dependent_starts_when_its_own_dependencies_finish_not_when_the_wave_does",
         "src/IkaTest/test_workflow_semantics.py::TestWorkflowAsyncSemantics::test_failed_instance_blocks_its_dependents_even_when_a_sibling_succeeds",
-        "src/IkaTest/test_workflow_semantics.py::TestWorkflowValidationDisplayAndContext::test_sync_run_propagates_initial_and_upstream_context_and_detects_cycles"
+        "src/IkaTest/test_workflow_semantics.py::TestWorkflowValidationDisplayAndContext::test_sync_run_propagates_initial_and_upstream_context_and_detects_cycles",
+        "src/IkaTest/test_ergonomics_merge_contracts.py::test_borrowed_client_config_reaches_deadline_private_pool_through_clone",
+        "src/IkaTest/test_ergonomics_merge_contracts.py::test_worker_cancellation_preserves_type_and_cancels_other_inflight_work"
       ],
       "known_gap": "Small deterministic graphs; large graphs and sustained resource growth require benchmark/stress evidence.",
       "min_lines": 99,
@@ -298,7 +303,9 @@
         "src/IkaCore/stages.py",
         "src/IkaCore/config.py",
         "src/IkaCore/agent_state.py",
-        "src/IkaCore/agent_policy.py"
+        "src/IkaCore/agent_policy.py",
+        "src/IkaCore/agent_conversation.py",
+        "src/IkaCore/results.py"
       ],
       "required_tests": [
         "src/IkaTest/test_agent_helpers.py::TestFinalPrompt::test_execute_stage_refreshes_first_input_for_each_stage",
@@ -314,7 +321,11 @@
         "src/IkaTest/test_snapshot_resume_state.py::test_hitl_resume_preserves_the_stage_budget_already_consumed",
         "src/IkaTest/test_snapshot_resume_state.py::test_exhausted_hitl_resume_extends_or_finalizes_before_stage_completion",
         "src/IkaTest/test_execution_parity.py::test_execution_parity_with_dc9efbd[False]",
-        "src/IkaTest/test_execution_parity.py::test_execution_parity_with_dc9efbd[True]"
+        "src/IkaTest/test_execution_parity.py::test_execution_parity_with_dc9efbd[True]",
+        "src/IkaTest/test_dogfood_ergonomics.py::test_staged_correction_preserves_evidence_without_replaying_tools",
+        "src/IkaTest/test_dogfood_ergonomics.py::test_completed_snapshot_restores_conversation_before_send",
+        "src/IkaTest/test_ergonomics_merge_contracts.py::test_validation_waits_for_staged_human_answer",
+        "src/IkaTest/test_dogfood_ergonomics.py::test_staged_correction_preserves_evidence_without_replaying_tools"
       ],
       "known_gap": "Model behavior, task success and downstream application semantics are outside offline unit coverage.",
       "min_lines": 99,
@@ -332,7 +343,8 @@
         "src/IkaTest/test_compaction_retention.py::test_controlled_compaction_contains_facts_and_keeps_pending_structure",
         "src/IkaTest/test_compaction_retention.py::test_compaction_also_bounds_the_live_request_buffer",
         "src/IkaTest/test_compaction_retention.py::test_context_overflow_retry_uses_compacted_live_buffer",
-        "src/IkaTest/test_reasoning_merge_contracts.py::test_compaction_keeps_every_reasoning_item_in_a_native_call_group"
+        "src/IkaTest/test_reasoning_merge_contracts.py::test_compaction_keeps_every_reasoning_item_in_a_native_call_group",
+        "src/IkaTest/test_ergonomics_merge_contracts.py::test_latest_send_instruction_survives_compaction_before_old_pending_exchange"
       ],
       "known_gap": "Controlled fact fixtures, pairing, reasoning and live-buffer bounds are checked offline. Four bounded Codex fixtures scored 19/20 strict follow-up facts; one constraint answer missed the strict scorer. This does not establish general task retention.",
       "min_lines": 99,

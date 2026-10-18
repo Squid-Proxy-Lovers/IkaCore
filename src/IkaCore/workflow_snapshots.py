@@ -77,7 +77,16 @@ class WorkflowSnapshotMixin:
         _reuse_resumed_children(session)
         session.results = dict(session.replay_cache)
         session.last_snapshot_id, session.replaying = snapshot_id, True
-        return self.run(state["initial_context"], use_async=state["use_async"])
+        return self.run(state["initial_context"], parallel=state["use_async"])
+
+    def fork_from_snapshot(self: Any, snapshot_id: str, *, allow_unsafe_replay: bool = False,
+                           resume_input: str | dict[str, str] | None = None) -> Any:
+        session: Optional[WorkflowSnapshotSession] = self._workflow_snapshot
+        if session is None:
+            raise ValueError("enable_snapshots must be called before workflow replay")
+        fork = session.store.fork_run_from_snapshot(snapshot_id, allow_unsafe_replay=allow_unsafe_replay)
+        return self.resume_from_snapshot(fork["snapshot_id"], allow_unsafe_replay=allow_unsafe_replay,
+                                         resume_input=resume_input)
 
     def _snapshot_run(self: Any, execute: Any, initial: Optional[str], asynchronous: bool) -> Any:
         return execute_workflow(self._workflow_snapshot, execute, initial, asynchronous)

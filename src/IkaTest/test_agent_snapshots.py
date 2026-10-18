@@ -72,7 +72,7 @@ def test_post_model_resume_reuses_pending_response_without_double_usage(tmp_path
 
 def test_staged_execution_records_stage_frames(tmp_path, monkeypatch):
     monkeypatch.setattr("IkaCore.agent_chat_support.chat", lambda *args, **kwargs: _finished())
-    agent = _agent(tmp_path, Stages=[IkaStage(name="phase", prompt="do this phase", tools=[])])
+    agent = _agent(tmp_path, stages=[IkaStage(name="phase", prompt="do this phase", tools=[])])
     store = agent.enable_snapshots(str(tmp_path / "runtime.db"))
     result = agent.execution()
     frames = store.list_frames(result["runtime"]["run_id"])
@@ -182,7 +182,7 @@ def test_agent_replay_requires_explicit_snapshot_enablement(tmp_path):
 
 
 def test_staged_human_input_snapshot_resumes_with_user_answer(tmp_path, monkeypatch):
-    agent = _agent(tmp_path, Stages=[IkaStage('phase', 'ask then finish', [], hitl=True)])
+    agent = _agent(tmp_path, stages=[IkaStage('phase', 'ask then finish', [], hitl=True)])
     store = agent.enable_snapshots(str(tmp_path / 'runtime.db'))
     messages_seen = []
     def chat(model, messages, history, **kwargs):
@@ -231,7 +231,7 @@ def test_historical_resume_requires_approval_for_repeated_tool_effects(tmp_path,
     tool = IkaTools('external', 'test', {'type': 'object'},
                     execute_function=lambda args: effects.append(True), replay_policy='deny')
     agent = _agent(tmp_path, tools=[] if staged else [tool],
-                   Stages=[IkaStage('phase', 'task', [tool])] if staged else [])
+                   stages=[IkaStage('phase', 'task', [tool])] if staged else [])
     store = agent.enable_snapshots(str(tmp_path / 'runtime.db'), RuntimeControl(pause_points={'pre_model'}))
     def chat(model, messages, history, **kwargs):
         execute_tool('external', {}, kwargs['tool_executors'])

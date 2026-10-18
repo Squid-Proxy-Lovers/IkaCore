@@ -41,7 +41,7 @@ pytest
 ## Quick Start
 
 ```python
-from IkaCore import IkaBaseAgent
+from IkaCore import ExecutionLimits, ExecutionPolicy, IkaBaseAgent, ProviderConfig
 
 agent = IkaBaseAgent(
     name="assistant",
@@ -49,6 +49,9 @@ agent = IkaBaseAgent(
     prompt="Answer the user request in a short paragraph.",
     model_id="gpt-4o-mini",
     api_key="...",
+    provider=ProviderConfig.bounded(),
+    limits=ExecutionLimits.bounded(),
+    policy=ExecutionPolicy.bounded(),
 )
 
 result = agent.execution()
@@ -70,7 +73,22 @@ agent = IkaBaseAgent("helper", prompt="Summarize the task", model_id="gpt-4o-min
 `agent.config` holds configured defaults; `agent.state` holds run budgets, history and
 usage. `OutputConfig(subscribers=(callback,))` receives structured `RuntimeEvent`
 values. Memory backends are explicitly adapted with `IkaMem.agent_tools.MemoryTools`.
-See the [usage guide](docs/USAGE.md) for executable setup examples.
+See the [usage guide](docs/USAGE.md) and tested [API reference](docs/API.md) for signatures,
+configuration defaults and executable examples. The bounded presets use 1,024 output tokens,
+six steps, 30-second steps, no extensions and one validation correction. Tool rounds,
+compaction, forced answers and summaries can add model calls; scope the whole operation
+with a request deadline.
+
+Final checks receive one typed `AgentResult` and run on both simple and staged answers.
+Inspect `result["validation"]["status"]`, or set `ExecutionPolicy(fail_closed=True, ...)`
+to raise on exhaustion. Continue a conversation with `agent.send("Next message")`;
+assigning `agent.prompt` starts a fresh task. Completed-snapshot restore returns the saved
+answer and restores the conversation before the next `send()`.
+
+Use `workflow.run(parallel=True, concurrency=2)` for blocking thread execution;
+results expose `.output` and `.transcript`. Borrow caller clients with
+`ProviderConfig(client=client)`; clones preserve them and shutdown leaves them open.
+`IkaCore.testing.MockProvider` supplies offline provider-native response scripts.
 
 Bound provider requests across retries with a scoped deadline:
 

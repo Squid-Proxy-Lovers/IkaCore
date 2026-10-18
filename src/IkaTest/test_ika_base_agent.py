@@ -82,7 +82,7 @@ class TestIkaBaseAgentInit:
     def test_init_stages_with_subagents_raises(self):
         stage = IkaStage("s1", "Prompt", [])
         with pytest.raises(ValueError, match="Subagents or next_agent are not allowed when stages are defined"):
-            _minimal_agent(Stages=[stage], topology=AgentTopology(subagents=[_minimal_agent(name="Sub")]))
+            _minimal_agent(stages=[stage], topology=AgentTopology(subagents=[_minimal_agent(name="Sub")]))
 
     def test_init_no_stages_both_subagents_and_next_raises(self):
         sub = _minimal_agent(name="Sub")
@@ -96,18 +96,19 @@ class TestIkaBaseAgentInit:
         with pytest.raises(TypeError):
             _minimal_agent(Batch=True)
 
-    def test_logging_level_three_configures_debug_logging(self):
+    def test_logging_level_three_leaves_application_logging_configuration_untouched(self):
         logger = MagicMock()
 
         with patch("logging.basicConfig") as basic_config:
             with patch("logging.getLogger", return_value=logger) as get_logger:
                 _minimal_agent(output=OutputConfig(logging_level=3))
 
-        basic_config.assert_called_once()
-        get_logger.assert_called_once_with("IkaModel.chat_interface.chat_interface")
-        logger.setLevel.assert_called_once()
+        basic_config.assert_not_called()
+        get_logger.assert_called_once_with("IkaCore")
+        logger.debug.assert_called_once()
+        logger.setLevel.assert_not_called()
 
-    def test_shutdown_awaits_async_client_close_and_closes_logger(self):
+    def test_shutdown_borrows_attached_async_client_and_closes_logger(self):
         class AsyncClient:
             def __init__(self):
                 self.closed = False
@@ -122,7 +123,7 @@ class TestIkaBaseAgentInit:
 
         a.shutdown()
 
-        assert client.closed is True
+        assert client.closed is False
         assert a.client is None
         a.logger.shutdown.assert_called_once()
 
@@ -231,7 +232,7 @@ class TestBuildStage:
     def test_stage_tools_plus_agent_end_on_last_stage(self):
         ika_tool = IkaTools("stage_tool", "Stage tool", {"x": "string"}, execute_function=lambda p: "ok")
         stage = IkaStage("Stage0", "Do step", [ika_tool])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         agent_tools = a.build_stage(stage)
         names = [t.name for t in agent_tools]
         assert "agent_end" in names
@@ -240,7 +241,7 @@ class TestBuildStage:
 
     def test_stage_end_removed_on_last_stage(self):
         stage = IkaStage("Last", "Final", [])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         agent_tools = a.build_stage(stage)
         names = [t.name for t in agent_tools]
         assert "agent_end" in names
@@ -249,7 +250,7 @@ class TestBuildStage:
     def test_non_last_stage_keeps_stage_end(self):
         s0 = IkaStage("S0", "Step 0", [])
         s1 = IkaStage("S1", "Step 1", [])
-        a = _minimal_agent(Stages=[s0, s1])
+        a = _minimal_agent(stages=[s0, s1])
         tools_s0 = a.build_stage(s0)
         stage_end = next(t for t in tools_s0 if t.name == "stage_end")
         assert stage_end.required is False
@@ -258,7 +259,7 @@ class TestBuildStage:
     def test_change_stage_is_optional_when_available(self):
         s0 = IkaStage("S0", "Step 0", [], allowed_back_to=[0])
         s1 = IkaStage("S1", "Step 1", [])
-        a = _minimal_agent(Stages=[s0, s1])
+        a = _minimal_agent(stages=[s0, s1])
         tools_s0 = a.build_stage(s0)
         change_stage = next(t for t in tools_s0 if t.name == "change_stage")
         assert change_stage.required is False

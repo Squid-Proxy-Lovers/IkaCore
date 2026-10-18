@@ -1,80 +1,107 @@
 # Codex application usage results
 
-Date: **2026-10-18 UTC**. Model: **gpt-5.6-sol**, local ChatGPT login loaded only with
-`--use-local-login`. Runtime: fresh non-editable IkaCore 2.0.0 wheel from revision
-`aca8c53a57332c0e5ab225628ac7b29bae99d23b`, Python 3.13.15 / HTTPX 0.28.1.
-Application implementation: `1f667520889de190ef7848769935bea332b102b7`.
-The initial chat draft predates that commit's stale-prompt workaround; the successful rerun
-used the committed Python application code. Runtime code did not change between attempts.
+Measured **2026-10-18T06:43:01.531513+00:00** on the integrated ergonomics/reasoning/hardening source
+(merge parents `7c410f3` and `a2b7984`, with integration fixes).
+Model: **gpt-5.6-sol**, explicitly using `--live --use-local-login --model gpt-5.6-sol`.
+Runtime: fresh non-editable IkaCore 2.0.0 wheel, CPython 3.13.15 / HTTPX 0.28.1.
+Imports were verified under `artifacts/installed-runtime/.../site-packages`, without
+editable imports or PYTHONPATH.
 
-Wheel SHA-256: `b864484f9173841568f92a5c6a823b9b29f244771983295e807137f5bd43d226`.
-Detailed sanitized checks are in [live-results.json](live-results.json).
-No credentials, prompts, raw responses or model answer text are included in these records.
+Wheel SHA-256: `afd623a0087f6fd2b86a4b9841a6f3523c3d7b4101f72354a7b7b62070c767fb`.
+Runtime Python-content SHA-256: `72a19681dbe20599ee4d96d945fc697cfa36c6215196a231acc687d975256759`.
+[Sanitized JSON evidence](live-results.json) retains every app attempt and the earlier
+ergonomics-only and original dogfood runs. No credentials, raw responses or model answers
+are stored in that report. Nothing was pushed or posted.
 
-**Latest outcome: six applications passed.** The failed initial chat attempt is retained
-below; it was not discarded from the request budget.
+**Six of six live applications passed: 39 request boundaries /
+101.76 seconds.** All runs were sequential. Live chat uses four turns;
+offline chat covers twelve turns. No failed app attempts were discarded.
 
-| Application / attempt | Outcome | Request boundary invocations | Wall time (s) |
+| Application | Outcome | Request boundaries | Seconds |
 | --- | --- | ---: | ---: |
-| research_assistant | passed | 6 | 16.76 |
-| code_reviewer | passed | 6 | 14.86 |
-| approval_workflow | passed | 11 | 30.99 |
-| long_chat | failed; 90-second first-session budget exhausted | 13 | 90.19 |
-| parallel_pipeline | passed | 5 | 6.81 |
-| provider_switch | passed | 1 | 2.04 |
-| long_chat (rerun) | passed | 32 | 115.25 |
+| research_assistant | passed | 5 | 12.39 |
+| code_reviewer | passed | 6 | 14.60 |
+| approval_workflow | passed | 11 | 33.54 |
+| long_chat | passed | 11 | 35.25 |
+| parallel_pipeline | passed | 5 | 4.50 |
+| provider_switch | passed | 1 | 1.48 |
 
-**Total: 74 request boundary invocations**, including the failed initial chat and one
-expired-deadline probe rejected before dispatch. Actual live HTTP attempts are therefore
-at most 74; retries were set to one attempt. Non-Codex providers incurred no live calls.
-These are observed application request counts, not provider billing records.
+The counts are observed model/summary request-boundary invocations, not billing records.
+One attempt is allowed per boundary. The pipeline includes one expired-deadline probe
+rejected before dispatch, so live model HTTP attempts are at most **38**. Credential refresh
+is not a model call. Only Codex ran live; the other six provider-switch routes stayed mocked.
 
-## What passed
+## Behaviors verified
 
-- **research_assistant:** synthetic search and fetch tools executed; the separate final
-  writer met both citation checks and recommended a pilot. A one-step research stage is
-  configured for extension; extension summary invocation is asserted offline. Its live
-  extension counter is unavailable and is reported as null rather than inferred.
-- **code_reviewer:** both disposable files were read and the structured submission identified
-  the empty-input problem. A synthetic lint tool timed out at 5 ms without stopping review;
-  1,200-character tool output caps were configured. Offline payload checks verify the cap
-  and timeout feedback specifically.
-- **approval_workflow:** dependencies blocked preparation at HITL, a process exited after
-  saving the question, another process answered YES, and an independent fork answered NO.
-  READY and HOLD results were both verified; nothing was published.
-- **long_chat:** the corrected app completed twelve turns, verified **11 compaction
-  snapshots**, restored its saved post-model turn in a new process, and recalled the
-  preference through an IkaMem search tool. The initial draft reached its 90-second
-  session bound after 13 invocations. Source investigation also found stale prompt replay
-  (DOGFOOD-3). The application now refreshes turn history explicitly and uses a 180-second
-  session scope with nested 30-second turn scopes; the successful full demo took 115.25 s.
-- **parallel_pipeline:** two-worker fan-out/fan-in retained both cost and risk values, an
-  already expired deadline was rejected, and the shared caller-owned HTTPX client remained
-  open through clone shutdown. Cooperative SIGINT pre-dispatch cancellation passed offline;
-  live in-flight cancellation is not claimed by this application run.
-- **provider_switch:** Codex completed its task and consumed its post-model snapshot.
-  OpenAI Responses, OpenAI Chat, Anthropic, Gemini, DeepSeek and OpenRouter passed mocked
-  route checks with the same agent contract and configuration-only provider selection.
+- **research_assistant:** synthetic search/fetch tools ran; the staged agent's own typed
+  validator accepted citations and its pilot recommendation under fail-closed validation.
+  No separate writer is needed. Extension summaries are asserted offline; live extension
+  count remains uninstrumented (`null`).
+- **code_reviewer:** read both disposable files, submitted a structured empty-input finding,
+  handled a 5 ms lint timeout and applied 1,200-character output caps.
+- **approval_workflow:** saved a pending question, resumed YES in a new process, and forked
+  an independent NO rejection. READY/HOLD outcomes and blocked dependents passed.
+- **long_chat:** four `send()` turns, three observed compactions, fresh-process pending
+  response resume and memory recall passed. Grouped context budgets and public counters
+  replace direct history edits. Offline verification covers twelve turns.
+- **parallel_pipeline:** blocking `run(parallel=True, concurrency=2)` preserved both fan-in
+  inputs. Borrowed HTTPX client configuration survived clones and shutdown left it open.
+  Expired-deadline and offline pre-dispatch SIGINT checks passed.
+- **provider_switch:** Codex completed and resumed its saved post-model response without
+  an extra request. Six other routes used provider-native mocked envelopes.
+
+## Offline, quality and parity
+
+- All six installed-wheel apps passed offline; the subprocess app suite plus cancellation
+  reports **7 passed in 2.01 s**.
+- Final source `pytest`: **1,386 passed, 2 opt-in skips**, no xfails or warnings.
+- `python scripts/quality.py`: passed Ruff, compilation, Pyright (zero errors/warnings),
+  the same full suite, coverage inventory/matrix, fresh wheel package data and isolated imports.
+- **100% lines (9,772/9,772)**, **97.1816% branches (2,655/2,732)**,
+  **99.3842% combined**. All **129 modules / 16 areas** pass every raised hardening floor.
+  Global 99% line / 95% branch / 99% combined floors and every per-area floor are unchanged.
+- All three original DOGFOOD reproductions are assertive passing tests.
+- All 42 execution-parity traces and seven offline provider reasoning probes pass.
+  Current detailed evidence is in [merge-validation.md](../../docs/v2/merge-validation.md).
+
+## Codex matrix
+
+The subsequent installed-wheel matrix passed **14 cases**, failed none, and skipped
+`reasoning_tools` with `reasoning_not_exposed`. Its runtime fingerprint matches the app
+wheel. Live reasoning replay is not established by that skip; seven provider routes are
+covered offline. Each case has a 60-second limit.
 
 ## Reproduce
 
-Follow [clean-wheel setup](README.md), then from the repository root run each module:
+Use the [clean installed-wheel setup](README.md). The measured app environment was
+`artifacts/installed-runtime`; invoke its Python for these commands:
 
 ```bash
-python -m examples.apps.research_assistant.main --live --use-local-login --model gpt-5.6-sol
-python -m examples.apps.code_reviewer.main --live --use-local-login --model gpt-5.6-sol
-python -m examples.apps.approval_workflow.main --live --use-local-login --model gpt-5.6-sol
-python -m examples.apps.long_chat.main --live --use-local-login --model gpt-5.6-sol
-python -m examples.apps.parallel_pipeline.main --live --use-local-login --model gpt-5.6-sol
-python -m examples.apps.provider_switch.main --live --use-local-login --model gpt-5.6-sol
+export PATH="$PWD/.venv/bin:$PATH" VIRTUAL_ENV="$PWD/.venv"
+WHEEL_PYTHON="$PWD/artifacts/installed-runtime/bin/python"
+"$WHEEL_PYTHON" -m pytest -q src/IkaTest/test_dogfood_apps.py
+"$WHEEL_PYTHON" -m examples.apps.research_assistant.main --live --use-local-login --model gpt-5.6-sol
+"$WHEEL_PYTHON" -m examples.apps.code_reviewer.main --live --use-local-login --model gpt-5.6-sol
+"$WHEEL_PYTHON" -m examples.apps.approval_workflow.main --live --use-local-login --model gpt-5.6-sol
+"$WHEEL_PYTHON" -m examples.apps.long_chat.main --live --use-local-login --model gpt-5.6-sol --turns 4
+"$WHEEL_PYTHON" -m examples.apps.parallel_pipeline.main --live --use-local-login --model gpt-5.6-sol
+"$WHEEL_PYTHON" -m examples.apps.provider_switch.main --live --use-local-login --model gpt-5.6-sol
+python scripts/live_matrix.py --provider codex --use-local-login --model gpt-5.6-sol
 ```
 
-Every invocation defaults to offline without `--live`. The shared session bounds ordinary
-apps to 90 seconds and one request attempt; chat sessions use 180 seconds with 30-second
-turn bounds. Approval/chat child processes have separate scopes. Individual tool/model
-limits also apply. `IKACORE_APP_METRICS=/absolute/path/to/file.jsonl` optionally records only
-one boolean request-start row per boundary invocation, including compaction requests.
+Use `--offline` for synthetic responses. Ordinary apps have 90-second operation scopes
+and one request attempt; chat has 180-second sessions with 30-second turn scopes.
+Approval/chat child processes have their own scopes; the app runner bounded each whole
+live application to 240 seconds. `IKACORE_APP_METRICS=/absolute/path/file.jsonl` records
+boolean request-start rows, including model, summary and compaction boundaries.
 
-This is one provider/model/account sample. It does not establish other-provider live
-compatibility, in-flight cancellation guarantees, or suitability for untrusted tools.
-See [the friction and bug report](../../docs/v2/dogfood-report.md) before adopting v2.
+## Historical evidence and limits
+
+The ergonomics-only run at `ed55da5` used 44 boundaries / 126.00 seconds. The original
+dogfood run at `aca8c53` included workarounds and an initial failed chat attempt, totaling
+74 boundaries. Both histories remain in the JSON. Model choices and call sequences vary;
+these runs are not a performance benchmark.
+
+This is one provider/model/account sample. See the [resolution table](../../docs/v2/dogfood-report.md#resolution--ergonomics-implementation),
+[migration guide](../../docs/v2/README.md#breaking-changes-and-migration) and
+[API reference](../../docs/API.md) for the final supported contracts.

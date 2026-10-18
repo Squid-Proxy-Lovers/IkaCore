@@ -11,7 +11,7 @@ import pytest
 
 from IkaCore.agents import IkaBaseAgent
 from IkaCore.stages import IkaStage
-from IkaCore.workflow import AsyncWorkflowExecutor, IkaWorkflow, WorkflowEdge, WorkflowNode
+from IkaCore.workflow import AsyncWorkflowExecutor, IkaWorkflow, WorkflowEdge, WorkflowError, WorkflowNode
 
 
 def _agent(name: str, stages=None):
@@ -21,7 +21,7 @@ def _agent(name: str, stages=None):
         prompt=f"{name} prompt",
         model_id="gpt-4o",
         api_key="test-key",
-        Stages=stages or [],
+        stages=stages or [],
     )
 
     agent._test_clones = []
@@ -147,7 +147,7 @@ class TestWorkflowChildEdges:
             compress_hook=_compress_hook,
         )
 
-        results = workflow.run(use_async=True)
+        results = workflow.run(parallel=True)
 
         assert "parent" in results
         assert "follower" in results
@@ -286,7 +286,7 @@ class TestWorkflowValidationDisplayAndContext:
                              [WorkflowEdge("root", "follower"), WorkflowEdge("follower", "root")])
         for asynchronous in (False, True):
             with pytest.raises(ValueError, match="cyclic"):
-                cyclic.run(use_async=asynchronous)
+                cyclic.run(parallel=asynchronous)
 
 
 class TestWorkflowAsyncSemantics:
@@ -316,7 +316,7 @@ class TestWorkflowAsyncSemantics:
         )
 
         with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-            results = workflow.run(use_async=True)
+            results = workflow.run(parallel=True)
 
         assert [item["prompt"] for item in executor.scheduled] == ["first prompt", "second prompt"]
         assert "[Instance 0]: first final" in results["worker"].summary
@@ -341,7 +341,7 @@ class TestWorkflowAsyncSemantics:
         )
 
         with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-            results = workflow.run(initial_context="initial context", use_async=True)
+            results = workflow.run(initial_context="initial context", parallel=True)
 
         scheduled_by_node = {item["node_name"]: item for item in executor.scheduled}
         assert scheduled_by_node["root"]["context"] == "initial context"
@@ -367,9 +367,11 @@ class TestWorkflowAsyncSemantics:
         )
 
         with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-            results = workflow.run(use_async=True)
+            with pytest.raises(WorkflowError) as caught:
+                workflow.run(parallel=True)
 
-        assert results == {}
+        assert caught.value.partial_results == {}
+        assert caught.value.errors[0].node_name == "root"
         assert [item["node_name"] for item in executor.scheduled] == ["root"]
         follower.execution.assert_not_called()
 
@@ -397,9 +399,11 @@ class TestWorkflowAsyncSemantics:
         )
 
         with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-            results = workflow.run(use_async=True)
+            with pytest.raises(WorkflowError) as caught:
+                workflow.run(parallel=True)
 
-        assert results == {}
+        assert caught.value.partial_results == {}
+        assert caught.value.errors[0].node_name == "root"
         assert [item["node_name"] for item in executor.scheduled] == ["root", "root"]
         follower.execution.assert_not_called()
 
@@ -438,7 +442,7 @@ class TestWorkflowAsyncSemantics:
         )
 
         with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-            results = workflow.run(initial_context="initial context", use_async=True)
+            results = workflow.run(initial_context="initial context", parallel=True)
 
         scheduled = {}
         for item in executor.scheduled:
@@ -515,7 +519,7 @@ class TestWorkflowAsyncSemantics:
         executor = InlineWorkflowExecutor()
         workflow = IkaWorkflow("instances", "test", [WorkflowNode("root", root, instances=2,
                               instance_inputs=["first"])], [], compress_hook=_compress_hook, async_executor=executor)
-        result = workflow.run("initial", use_async=True)
+        result = workflow.run("initial", parallel=True)
         assert [row["prompt"] for row in executor.scheduled] == ["first", "root prompt"]
         assert all(row["context"] == "initial" for row in executor.scheduled)
         assert "[Instance 0]: summary" in result["root"].summary
@@ -528,7 +532,10 @@ class TestWorkflowAsyncSemantics:
         workflow = IkaWorkflow("failure", "test", [WorkflowNode("root", root, instances=2),
                               WorkflowNode("follower", follower)], [WorkflowEdge("root", "follower")],
                               compress_hook=_compress_hook, async_executor=InlineWorkflowExecutor())
-        assert workflow.run(use_async=True) == {}
+        with pytest.raises(WorkflowError) as caught:
+            workflow.run(parallel=True)
+        assert caught.value.partial_results == {}
+        assert caught.value.errors[0].instance_id == 1
         follower.execution.assert_not_called()
 
     def test_clone_isolated_instance_names_and_task_overrides(self):

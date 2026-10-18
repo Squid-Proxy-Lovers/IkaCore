@@ -131,7 +131,7 @@ def test_memory_integration_uses_ordinary_tools_and_stage_permissions():
     tools = integration.tools(access={'short_term_save': False})
     assert [tool.name for tool in tools] == ['short_term_search']
     stage = IkaStage('review', 'remember notes', tools)
-    agent = IkaBaseAgent('A', 'description', 'task', model_id='gpt-4o', api_key='key', Stages=[stage])
+    agent = IkaBaseAgent('A', 'description', 'task', model_id='gpt-4o', api_key='key', stages=[stage])
     exposed = {tool.name for tool in agent.build_stage(stage)}
     assert 'short_term_search' in exposed and 'short_term_save' not in exposed
     executors = agent.build_tool_executors(stage.tools, stage=stage)

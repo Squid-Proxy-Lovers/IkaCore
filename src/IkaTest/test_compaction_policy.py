@@ -10,7 +10,7 @@ from IkaModel.execution_hooks import ExecutionHooks, execution_hooks
 def test_default_compaction_boundary_stays_at_eighty_percent(monkeypatch):
     model = BareBoneModel("gpt-4o", "test", "system", [])
     model.context_budget = 100
-    summarize = Mock()
+    summarize = Mock(return_value="compacted")
     monkeypatch.setattr(chat_request._summaries, "summarise_message_history", summarize)
     monkeypatch.setattr(chat_request, "get_total_tokens", lambda history: 80)
     chat_request._summarize_sync_if_near_budget(model, {}, None)
@@ -23,8 +23,8 @@ def test_default_compaction_boundary_stays_at_eighty_percent(monkeypatch):
 def test_opt_in_compaction_threshold_and_snapshot_boundaries_sync_and_async(monkeypatch):
     model = BareBoneModel("gpt-4o", "test", "system", [])
     model.context_budget = 100
-    sync = Mock()
-    asynchronous = AsyncMock()
+    sync = Mock(return_value="compacted")
+    asynchronous = AsyncMock(return_value="compacted")
     events = []
     hooks = ExecutionHooks(lambda label, payload: events.append(label), lambda: {}, lambda *args: "frame", lambda *args: None)
     monkeypatch.setattr(chat_request, "get_total_tokens", lambda history: 65)

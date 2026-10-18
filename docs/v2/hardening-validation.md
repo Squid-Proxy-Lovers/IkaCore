@@ -109,3 +109,12 @@ Retained ignored evidence: `artifacts/hardening/{baseline.log,baseline-compact.j
 - `e488f97ee331e063270f96bc14b0965d8606c1f2`: compaction, failure propagation, generative tests, soak and live evaluation.
 - `e22fdcfc3f2ec004cc7dd42cb552afedb479ab60`: request/provider/memory/presentation edge contracts.
 - The documentation/coverage-floor commit containing this report follows those area commits. Every commit ends with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+
+## Integrated ergonomics merge
+
+The integrated runtime (parents `7c410f3` / `a2b7984`, runtime fingerprint
+`72a19681dbe20599ee4d96d945fc697cfa36c6215196a231acc687d975256759`) passes **1,386 tests / 2 opt-in skips**,
+**100% lines / 97.1816% branches / 99.3842% combined** with all raised floors retained.
+All six live Codex apps pass; the matrix reports **14 passed / 0 failed / 1
+reasoning_not_exposed skip**. See [merge-validation.md](merge-validation.md) for current
+revision labels, soak metrics, semantic integration checks and live limits.

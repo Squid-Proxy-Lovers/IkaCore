@@ -59,10 +59,12 @@ class AgentLifecycle:
             "model_id": agent.model_id,
             "api_key": agent.api_key,
             "tools": list(agent.tools),
-            "Stages": [agent.lifecycle._clone_stage_for_run(stage) for stage in agent.Stages],
+            "stages": [agent.lifecycle._clone_stage_for_run(stage) for stage in agent.Stages],
             "provider": replace(config.provider, api_url=agent.api_url, max_tokens=agent.max_tokens,
                                 temperature=agent.temperature, use_responses_api=agent.use_responses_api,
-                                reasoning_effort=agent.reasoning_effort),
+                                reasoning_effort=agent.reasoning_effort,
+                                client=None if agent._client_owned else agent.client,
+                                client_factory=config.provider.client_factory if agent._client_owned else None),
             "prompts": replace(config.prompts, system_prompt=agent.system_prompt,
                                start_prompt=agent.start_prompt, end_prompt=agent.end_prompt),
             "limits": replace(config.limits, maxsteps=agent.maxsteps, step_timeout=agent.step_timeout,
@@ -71,7 +73,7 @@ class AgentLifecycle:
                               per_tool_rate_limit=agent.per_tool_rate_limit),
             "policy": replace(config.policy, final_answer_checks=(), use_async=agent.use_async),
             "topology": AgentTopology(tuple(agent.subagents), agent.next_agent),
-            "output": replace(config.output, logging_level=0, summarize_final=agent.summarize_final),
+            "output": replace(config.output, cli=False, subscribers=(), logging_level=0, summarize_final=agent.summarize_final),
         }
 
     def _sync_clone_runtime_state(self, clone: "IkaBaseAgent", include_history: bool) -> None:
@@ -84,7 +86,7 @@ class AgentLifecycle:
         clone.message_history = (
             deepcopy(agent.message_history) if include_history else agent._initial_message_history(clone.system_prompt)
         )
-        clone.client = None
+        clone._owns_events = False
 
     def _copy_clone_overrides(self, clone: "IkaBaseAgent") -> None:
         agent = self.agent

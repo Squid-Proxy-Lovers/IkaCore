@@ -75,7 +75,14 @@ def test_thousands_of_turns_compact_snapshot_cancel_without_resource_growth(tmp_
             with pytest.raises(IkaRequestCancelled):
                 obj.execution()
             assert turns == 1100
-            saved = obj._snapshot_runtime.last_snapshot_id
+            # Compaction frequency follows the actual token estimate. A tool
+            # checkpoint may now be the most recent boundary when cancellation
+            # lands; recover the latest exact model/compaction checkpoint rather
+            # than implicitly approving a mid-tool replay.
+            session = obj._snapshot_runtime
+            checkpoint = session.store.get_latest_snapshot_for_frame(session.root_frame_id)
+            assert checkpoint["resume_strategy"] == "exact"
+            saved = checkpoint["snapshot_id"]
             assert obj.resume_from_snapshot(saved)["final_message"] == "done"
             assert turns == tool_count == 2201
             complete = obj._snapshot_runtime.last_snapshot_id

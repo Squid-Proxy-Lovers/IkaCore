@@ -52,8 +52,33 @@ class WorkflowResult:
     name: str
     final: str
     summary: str
-    history: dict[str, Any]
+    output: dict[str, Any]
+    transcript: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    instance_outputs: dict[int, dict[str, Any]] = field(default_factory=lambda: dict[int, dict[str, Any]]())
+    instance_transcripts: dict[int, dict[str, Any]] = field(default_factory=lambda: dict[int, dict[str, Any]]())
     child_summaries: dict[str, str] = field(default_factory=lambda: {})
+
+
+    @property
+    def history(self) -> dict[str, Any]:
+        """Deprecated alias for output. Use transcript for replayable conversation."""
+        return self.output
+
+
+@dataclass(frozen=True)
+class WorkflowNodeError:
+    node_name: str
+    instance_id: int | None
+    error_type: str
+    message: str
+
+
+class WorkflowError(RuntimeError):
+    def __init__(self, errors: list[WorkflowNodeError], partial_results: dict[str, WorkflowResult]):
+        self.errors = tuple(errors)
+        self.partial_results = dict(partial_results)
+        super().__init__("; ".join(f"Node {e.node_name!r} instance {e.instance_id}: {e.error_type}: {e.message}"
+                                  for e in errors))
 
 
 class WorkflowStateProtocol(Protocol):

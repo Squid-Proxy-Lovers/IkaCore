@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional
@@ -31,13 +32,7 @@ class HumanInputRequired(RuntimeError):
         self.payload: dict[str, Any] = payload or {}
 
 
-DEFAULT_SYSTEM_PROMPT = """
-You are a member in a complex Agentic system, every behavior you take is to help the system achieve its goals.
-
-IMPORTANT: When you have completed your assigned task, you MUST call the agent_end tool with your final answer. 
-Do not continue making tool calls after the task is complete. The agent_end tool signals that you have finished and provides your final output.
-CRITICAL: MAKE SURE YOUR FINAL ANSWER IS ANSWER THE ORGINAL TASK, MAKE SURE YOUR RESPONSE IS VERY DETAILED AND COMPLETE!
-"""
+DEFAULT_SYSTEM_PROMPT = """Answer the assigned task clearly and concisely. When finished, call agent_end(input=...) with your complete answer."""
 
 @dataclass(init=False)
 class ToolArgs:
@@ -82,6 +77,7 @@ class AgentTool:
 
 @dataclass
 class BareBoneModel:
+    _on_compaction: Callable[[], None] | None
     _tool_call_counts: dict[str, int]
     context_budget: int | None
     def __init__(

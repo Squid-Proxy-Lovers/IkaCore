@@ -150,7 +150,7 @@ def workflow_run(args):
         return mocked_chat(*a, **kw) if effects else finished()
     with patch("IkaCore.agent_chat_support.chat", chat):
         if crashing:
-            wf.run(use_async=True)
+            wf.run(parallel=True)
             raise AssertionError("workflow crash hook not reached")
         with closing(sqlite3.connect(args.path)) as conn:
             assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"

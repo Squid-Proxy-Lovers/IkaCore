@@ -20,7 +20,7 @@ def approval_workflow(tmp_path, monkeypatch):
         nodes = []
         for name in names:
             stages = [IkaStage('approve', 'ask approval', [tool] if tool else [], hitl=True)] if name in approvals else []
-            agent = IkaBaseAgent(name, 'test', 'task', model_id='gpt-4o', api_key='test', Stages=stages,
+            agent = IkaBaseAgent(name, 'test', 'task', model_id='gpt-4o', api_key='test', stages=stages,
                                 limits=ExecutionLimits(maxsteps=6), policy=ExecutionPolicy(max_stage_extensions=0, use_async=use_async), output=OutputConfig(show_usage_level0=False))
             agent._test_version_root = version_root
             agents.append(agent)
@@ -59,7 +59,7 @@ def approval_workflow(tmp_path, monkeypatch):
 @pytest.mark.parametrize('answer_child', [False, True])
 def test_workflow_resume_answers_saved_instance_and_continues_dependents(approval_workflow, asynchronous, answer_child):
     workflow, store, calls = approval_workflow(use_async=asynchronous)
-    assert workflow.run(use_async=asynchronous) == {}
+    assert workflow.run(parallel=asynchronous) == {}
     info = workflow.snapshot_runtime_info()
     interrupted = info['interrupted_instances']
     assert list(interrupted) == ['approval:0']
@@ -89,7 +89,7 @@ def test_workflow_resume_answers_saved_instance_and_continues_dependents(approva
 
 def test_parallel_resume_keeps_each_interruption_and_completed_siblings(approval_workflow):
     workflow, store, calls = approval_workflow(parallel=True)
-    assert set(workflow.run(use_async=True)) == {'root'}
+    assert set(workflow.run(parallel=True)) == {'root'}
     info = workflow.snapshot_runtime_info()
     assert set(info['interrupted_instances']) == {'left:0', 'right:0'}
     saved = store.load_snapshot(info['last_snapshot_id'])['state_json']
@@ -122,7 +122,7 @@ def test_workflow_resume_preserves_effects_before_child_interruption(approval_wo
 @pytest.mark.parametrize('source_completed', [False, True])
 def test_workflow_fork_does_not_mutate_source_child(approval_workflow, parallel, use_async, source_completed):
     workflow, store, _ = approval_workflow(use_async=use_async)
-    workflow.run(use_async=parallel)
+    workflow.run(parallel=parallel)
     info = workflow.snapshot_runtime_info()
     child_id = info['interrupted_instances']['approval:0']
     child_root = store.load_snapshot(child_id)['state_json']['root_frame_id']
@@ -163,9 +163,9 @@ def test_workflow_rejects_child_snapshot_from_another_run(approval_workflow):
 @pytest.mark.parametrize('parallel', [False, True])
 def test_rejected_workflow_fork_leaves_no_partial_records(approval_workflow, parallel):
     workflow, store, _ = approval_workflow(parallel=True)
-    workflow.run(use_async=parallel)
+    workflow.run(parallel=parallel)
     saved = store.load_snapshot(workflow.snapshot_runtime_info()['last_snapshot_id'])
-    workflow.run(use_async=parallel)
+    workflow.run(parallel=parallel)
     foreign = next(iter(workflow.snapshot_runtime_info()['interrupted_instances'].values()))
     interrupted = saved['state_json']['interrupted_instances']
     interrupted[list(interrupted)[-1]] = foreign
@@ -184,7 +184,7 @@ def test_rejected_workflow_fork_leaves_no_partial_records(approval_workflow, par
 @pytest.mark.parametrize('reuse', [False, True])
 def test_selective_replay_invalidates_interrupted_descendant(approval_workflow, parallel, reuse):
     workflow, _, calls = approval_workflow(parallel=True, version_root=True)
-    workflow.run(use_async=parallel)
+    workflow.run(parallel=parallel)
     old = workflow.snapshot_runtime_info()
     control = workflow._workflow_snapshot.control
     control.parallel_replay = {'root': [0]} if reuse else {}
@@ -217,7 +217,7 @@ def test_restarting_interrupted_descendant_checks_replay_safety(approval_workflo
     effects = []
     tool = IkaTools('effect', 'test', {'type': 'object'}, execute_function=lambda args: effects.append(1), replay_policy='deny')
     workflow, _, calls = approval_workflow(parallel=True, version_root=True, tool=tool)
-    workflow.run(use_async=parallel)
+    workflow.run(parallel=parallel)
     old = workflow.snapshot_runtime_info()
     before = len(calls)
     workflow._workflow_snapshot.control.parallel_replay = {'root': [0]}
@@ -231,7 +231,7 @@ def test_restarting_interrupted_descendant_checks_replay_safety(approval_workflo
 
 def test_selecting_interrupted_instance_restarts_only_that_continuation(approval_workflow):
     workflow, store, calls = approval_workflow(parallel=True)
-    workflow.run(use_async=True)
+    workflow.run(parallel=True)
     old = workflow.snapshot_runtime_info()
     workflow._workflow_snapshot.control.parallel_replay = {'left': [0]}
     workflow.resume_from_snapshot(old['last_snapshot_id'], resume_input={'left:0': 'ANSWER-STALE'})

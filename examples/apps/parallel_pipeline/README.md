@@ -1,6 +1,6 @@
 # Parallel cost/risk pipeline
 
-Uses the workflow parallel scheduler (worker threads) for seed → [cost, risk] → join. Both upstream values must reach the join compression hook. A shared caller-owned synchronous HTTPX client is injected into workflow clones using a small subclass; shutdown detaches it so only the outer context closes it.
+Uses the workflow parallel scheduler (worker threads) for seed → [cost, risk] → join. Both upstream values must reach the join compression hook. A shared caller-owned synchronous HTTPX client is lent with `ProviderConfig(client=client)`. Clones retain it and shutdown never closes it. `run(parallel=True, concurrency=2)` names the scheduling policy explicitly.
 
 From the repository root, after following [wheel setup](../README.md):
 

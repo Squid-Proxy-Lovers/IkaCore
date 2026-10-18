@@ -70,30 +70,12 @@ class AgentSnapshots:
             raise ValueError("enable_snapshots must be called before snapshot replay")
         info = session.store.resume_from_snapshot(snapshot_id)
         state = info["state"]
-        if "completed_output" in state:
-            # A process can die after committing the completion boundary but
-            # before finalizing frame/run metadata. Restore saved accounting and
-            # finish that metadata without repeating the model or tool effects.
-            agent.message_history = deepcopy(state.get("message_history", agent.message_history))
-            agent._total_usage = deepcopy(state.get("total_usage", agent._total_usage))
-            agent._total_cost = deepcopy(state.get("total_cost", agent._total_cost))
-            root = state.get("root_frame_id", info["frame_id"])
-            session.run_id, session.root_frame_id = info["run_id"], root
-            session.last_snapshot_id = snapshot_id
-            with session.store.transaction():
-                session.store.update_frame(info["frame_id"], status="completed")
-                session.store.update_frame(root, status="completed", outputs=state["completed_output"])
-                run = session.store.get_run(info["run_id"])
-                if run is not None and run["root_frame_id"] == root:
-                    session.store.update_run_status(info["run_id"], "completed", ended=True)
-            return {
-                **state["completed_output"],
-                "runtime": {"run_id": info["run_id"], "frame_id": info["frame_id"], "last_snapshot_id": snapshot_id},
-            }
+        if "completed_output" in state and resume_input is not None:
+            raise ValueError("A completed snapshot has no pending input; restore it, then send(message)")
         if state.get("tool_checkpoint") and (not allow_unsafe_replay):
             raise ValueError("mid-tool snapshots require an explicit unsafe-replay decision")
         root_frame = state.get("root_frame_id", info["frame_id"])
-        if not allow_unsafe_replay and (
+        if "completed_output" not in state and not allow_unsafe_replay and (
             not session.store.assess_frame_replay(root_frame, after_snapshot_id=snapshot_id)["safe"]
         ):
             raise ValueError(
@@ -116,17 +98,43 @@ class AgentSnapshots:
         session.loop_state = ExecutionLoopState(**state["loop_state"]) if state.get("loop_state") else None
         session.live_messages = state.get("chat_messages")
         agent._snapshot_resume_messages = deepcopy(session.live_messages)
+        agent.state.prompt = state.get("prompt", agent.prompt)
+        agent.state.compaction_count = state.get("compaction_count", 0)
+        agent.state.validation_attempts = state.get("validation_attempts", 0)
+        agent.state.validation_maxsteps = state.get("validation_maxsteps")
+        if "completed_output" in state:
+            # A process can die after committing the completion boundary but
+            # before finalizing frame/run metadata. Restore saved accounting and
+            # finish that metadata without repeating the model or tool effects.
+            root = state.get("root_frame_id", info["frame_id"])
+            session.run_id, session.root_frame_id = info["run_id"], root
+            session.last_snapshot_id = snapshot_id
+            with session.store.transaction():
+                session.store.update_frame(info["frame_id"], status="completed")
+                session.store.update_frame(root, status="completed", outputs=state["completed_output"])
+                run = session.store.get_run(info["run_id"])
+                if run is not None and run["root_frame_id"] == root:
+                    session.store.update_run_status(info["run_id"], "completed", ended=True)
+            agent._resume_state = None
+            agent._snapshot_resume_messages = None
+            agent._last_interrupt = None
+            session.replaying = False
+            return {**state["completed_output"], "runtime": {
+                "run_id": info["run_id"], "frame_id": info["frame_id"], "last_snapshot_id": snapshot_id}}
         session.replaying = True
         return agent.execution(resume_input=resume_input)
 
-    def fork_from_snapshot(self, snapshot_id: str, *, allow_unsafe_replay: bool = False) -> dict[str, Any]:
+    def fork_from_snapshot(
+        self, snapshot_id: str, *, allow_unsafe_replay: bool = False, resume_input: str | None = None
+    ) -> dict[str, Any]:
         agent = self.agent
         if agent._snapshot_runtime is None:
             raise ValueError("enable_snapshots must be called before snapshot replay")
         fork = agent._snapshot_runtime.store.fork_run_from_snapshot(
             snapshot_id, allow_unsafe_replay=allow_unsafe_replay
         )
-        return agent.resume_from_snapshot(fork["snapshot_id"], allow_unsafe_replay=allow_unsafe_replay)
+        return agent.resume_from_snapshot(
+            fork["snapshot_id"], allow_unsafe_replay=allow_unsafe_replay, resume_input=resume_input)
 
     def restart_from_frame(self, frame_id: str, *, allow_unsafe_replay: bool = False) -> dict[str, Any]:
         agent = self.agent

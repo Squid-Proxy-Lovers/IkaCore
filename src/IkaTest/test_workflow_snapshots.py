@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from IkaCore import IkaBaseAgent
+from IkaCore import IkaBaseAgent, WorkflowError
 from IkaCore.runtime_control import RuntimeControl
 from IkaCore.workflow import IkaWorkflow, WorkflowEdge, WorkflowNode
 
@@ -32,7 +32,7 @@ def workflow(tmp_path, *, asynchronous=False, control=None):
 def test_workflow_snapshots_store_instances_and_reuse_completed_outputs(tmp_path, asynchronous):
     wf, store, calls = workflow(tmp_path)
     with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-        first = wf.run("brief", use_async=asynchronous)
+        first = wf.run("brief", parallel=asynchronous)
         info = wf.snapshot_runtime_info()
         second = wf.resume_from_snapshot(info["last_snapshot_id"])
     assert set(first) == set(second) == {"root", "left", "right", "join"}
@@ -96,7 +96,10 @@ def test_worker_failures_are_recorded_and_dependents_are_blocked(tmp_path):
         return agent
     wf.nodes[0].agent.clone_for_run = clone
     with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-        assert wf.run(use_async=True) == {}
+        with pytest.raises(WorkflowError) as caught:
+            wf.run(parallel=True)
+        assert caught.value.partial_results == {}
+        assert caught.value.errors[0].node_name == "root"
     info = wf.snapshot_runtime_info()
     instances = store.list_workflow_node_instances(info["run_id"], "root")
     assert instances[0]["status"] == "failed"
@@ -106,7 +109,7 @@ def test_worker_failures_are_recorded_and_dependents_are_blocked(tmp_path):
 def test_parallel_snapshot_results_remain_complete(tmp_path):
     wf, store, _calls = workflow(tmp_path)
     with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-        wf.run(use_async=True)
+        wf.run(parallel=True)
     info = wf.snapshot_runtime_info()
     snapshot = store.load_snapshot(info["last_snapshot_id"])
     assert set(snapshot["state_json"]["instance_results"]) == {"root:0", "left:0", "left:1", "right:0", "join:0"}
@@ -128,7 +131,7 @@ def test_human_input_interrupt_blocks_workflow_dependents_and_completed_reuse(tm
     wf.nodes[0].agent.clone_for_run = clone
     try:
         with patch('IkaCore.workflow_async.get_cli_output', return_value=MagicMock()):
-            assert wf.run(use_async=asynchronous) == {}
+            assert wf.run(parallel=asynchronous) == {}
             info = wf.snapshot_runtime_info()
             assert info['paused'] and store.get_run(info['run_id'])['status'] == 'paused'
             assert calls == ['root']

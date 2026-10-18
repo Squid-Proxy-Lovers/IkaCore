@@ -1,52 +1,30 @@
 # pyright: strict
 from __future__ import annotations
 
-import typing
+import inspect
 from collections.abc import Callable
-from typing import Any, Optional, cast, get_type_hints
+from typing import Any, Optional, cast
+
+from .results import AgentResult
 
 JsonDict = dict[str, Any]
 MessageHistory = dict[str, Any]
-FinalAnswerCheck = Callable[[JsonDict], bool]
-RawFinalAnswerCheck = Callable[[JsonDict], object]
-
-
-def _return_type_allows_bool(return_type: object) -> bool:
-    get_origin = getattr(typing, "get_origin", None)
-    get_args = getattr(typing, "get_args", None)
-    origin = get_origin(return_type) if get_origin else None
-    args = get_args(return_type) if origin and get_args else ()
-    return return_type is bool or (origin is not None and bool in args)
+FinalAnswerCheck = Callable[[AgentResult], bool]
+RawFinalAnswerCheck = Callable[[AgentResult], object]
 
 
 def validate_final_answer_checks_for_history(
     message_history: MessageHistory, final_answer_check: Optional[list[RawFinalAnswerCheck]]
 ) -> list[FinalAnswerCheck]:
-    if final_answer_check is None:
-        return []
-    for check in final_answer_check:
-        if not callable(check):
-            raise ValueError("final_answer_check must be a list of callable functions")
-        func_name = getattr(check, "__name__", "unknown")
-        docstring = (check.__doc__ or "").strip()
-        if not docstring:
-            raise ValueError(f"final_answer_check function '{func_name}' must have a docstring explaining what it does")
+    """Check the calling convention without executing user code or annotations."""
+    for check in final_answer_check or []:
+        if not callable(check) or inspect.iscoroutinefunction(check):
+            raise ValueError("final_answer_checks must contain synchronous callable functions")
         try:
-            hints = get_type_hints(check)
-            return_type = hints.get("return")
-        except (TypeError, AttributeError):
-            return_type = None
-        if return_type is not None:
-            if not _return_type_allows_bool(return_type):
-                raise ValueError(
-                    f"final_answer_check function '{func_name}' must have return type annotation of bool, got {return_type}"
-                )
-        result: object = check(message_history)
-        if not isinstance(result, bool):
-            raise ValueError(
-                f"final_answer_check function '{func_name}' must return a boolean, got {type(result).__name__}"
-            )
-    return cast(list[FinalAnswerCheck], final_answer_check)
+            inspect.signature(check).bind(object())
+        except (TypeError, ValueError) as error:
+            raise ValueError("final_answer_checks must accept one positional AgentResult") from error
+    return cast(list[FinalAnswerCheck], list(final_answer_check or []))
 
 
 def validate_required_fields(fields: dict[str, object]) -> None:

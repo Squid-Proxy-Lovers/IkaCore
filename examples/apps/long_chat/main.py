@@ -35,19 +35,6 @@ class JsonStorage:
 
 
 
-def set_turn(helper, prompt: str, key: str) -> None:
-    """Application workaround for stale prompt replay; preserve the previous user turn.
-
-    V2 recognizes stage_input as a persisted plain user entry. There is currently no
-    documented generic chat-turn entry or append-user API (see the friction report).
-    """
-    previous = helper.message_history["first_input"].get("message", "")
-    if previous:
-        helper.message_history["messages"][key] = {
-            "type": "stage_input", "message": previous, "tokens": max(1, len(previous) // 4)}
-    helper.prompt = prompt
-    helper.message_history["first_input"] = {"message": prompt, "tokens": 0}
-
 def worker(args) -> dict:
     args.state.mkdir(parents=True, exist_ok=True)
     storage = JsonStorage(args.state / "memory.json")
@@ -58,11 +45,10 @@ def worker(args) -> dict:
         access={"short_term_save": True, "short_term_search": True,
                 "long_term_save": False, "long_term_search": False})
     helper = agent(args, "chat", "You are a concise preference assistant. Call agent_end after answering each turn.", tools=tools,
-                   limits=ExecutionLimits(maxsteps=2, max_tool_rounds=2, max_tool_calls=4, step_timeout=30),
+                   limits=ExecutionLimits(maxsteps=2, max_tool_rounds=2, max_tool_calls=4, step_timeout=30, context_budget=700),
                    prompts=PromptConfig(system_prompt="Be concise. Call agent_end with input containing your answer."))
     # A deliberately small budget makes compaction reproducible with short synthetic turns.
-    helper.context_budget = 700
-    store = helper.enable_snapshots(str(args.state / "chat.db"))
+    helper.enable_snapshots(str(args.state / "chat.db"))
     scripts = {"chat": ([call("short_term_save", input="Preferred color: blue"), end("Remembered blue.")] +
                         [end("Acknowledged blue.")] * (args.turns - 1)) if args.phase == "first" else
                        [call("short_term_search", query="blue"), end("Your preferred color is blue.")]}
@@ -75,10 +61,8 @@ def worker(args) -> dict:
                 helper.clear_pause_requests()
                 old = helper.resume_from_snapshot(saved["snapshot_id"])
                 assert old["final_message"]
-                set_turn(helper, "TASK:chat\nUse short_term_search to recall my preferred color, then agent_end with it.",
-                         "previous-session-turn")
                 with request_controls(timeout=30):
-                    result = helper.execution()
+                    result = helper.send("TASK:chat\nUse short_term_search to recall my preferred color, then agent_end with it.")
                 assert "blue" in result["final_message"].lower() and "short_term_search" in calls
                 return {"memory_recalled": True, "fresh_process_resume": True}
             compactions = 0
@@ -90,12 +74,10 @@ def worker(args) -> dict:
                                  "Reply briefly using agent_end.")
                 if turn == args.turns - 1:
                     helper.request_pause_at("post_model")
-                set_turn(helper, prompt, f"previous-user-{turn}")
                 with request_controls(timeout=30):
-                    result = helper.execution()
+                    result = helper.send(prompt)
                 assert result.get("status") == "paused" if turn == args.turns - 1 else result["final_message"]
-                rows = store.list_snapshots(result["runtime"]["run_id"])
-                compactions += sum(row["snapshot_kind"] == "post_compaction" for row in rows)
+                compactions = helper.compaction_count
             assert "short_term_save" in calls and compactions > 0
             (args.state / "session.json").write_text(json.dumps({"snapshot_id": result["snapshot_id"]}))
             return {"turns": args.turns, "compactions": compactions, "memory_saved": True}

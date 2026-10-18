@@ -123,7 +123,7 @@ class Probe:
     def staged_agent(self):
         stages = [IkaStage('first', 'Call stage_end immediately to advance to the second stage. Do not call agent_end.', [], stage_max_step=2),
                   IkaStage('second', 'Call agent_end with input exactly STAGED_OK immediately.', [], stage_max_step=2)]
-        agent = self.agent('Follow each stage instruction exactly.', Stages=stages)
+        agent = self.agent('Follow each stage instruction exactly.', stages=stages)
         with tempfile.TemporaryDirectory() as directory:
             store = agent.enable_snapshots(str(Path(directory) / 'stages.db'))
             try:
@@ -366,7 +366,7 @@ def workflow_hitl(probe):
     from IkaCore.workflow import IkaWorkflow, WorkflowEdge, WorkflowNode
     from IkaModel.chat_interface import chat_request
     sentinel = 'upstream_' + uuid4().hex[:12]
-    first = probe.agent('Follow the approval stage.', name='approval', Stages=[IkaStage(
+    first = probe.agent('Follow the approval stage.', name='approval', stages=[IkaStage(
         'approve', 'If no approval was supplied, call ask_user with question exactly Approve? '
         'When the user says YES, call agent_end with input exactly ' + sentinel + '.', [], hitl=True, stage_max_step=2)])
     second = probe.agent('Find SYNTHETIC_UPSTREAM_VALUE in the upstream context. Call agent_end with input '

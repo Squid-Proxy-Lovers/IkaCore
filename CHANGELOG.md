@@ -5,6 +5,50 @@
 V2 intentionally breaks compatibility with v1. See the
 [migration guide](docs/v2/README.md#breaking-changes-and-migration).
 
+### Application ergonomics and intentional behavior changes
+
+- Final validators are never called at construction; only the callable signature is checked.
+  Their single typed contract is `IkaCore.AgentResult -> bool`. Docstrings/return annotations
+  are optional; non-bool results raise `TypeError` at execution. Staged and simple answers
+  share validation, explicit `validation` status and bounded text correction. Correction
+  passes expose only `agent_end`, preventing replay of application tools. Opt-in
+  `ExecutionPolicy(fail_closed=True)` raises `FinalAnswerValidationError` on exhaustion.
+- Assigning `agent.prompt` now clears transcript and pending continuation and starts a fresh
+  task. `agent.send(message)` appends a conversation turn with a fresh configured step
+  allowance. Ordered user turns and final answers persist across snapshots; completed restore
+  loads conversation before returning saved output. `resume_input` on completed agent snapshots
+  now raises `ValueError`; restore then `send()`. Pending restore continues the saved turn.
+- `ExecutionLimits.context_budget` uses tokens. Successful compaction increments the persisted
+  `agent.compaction_count` and emits `compaction`. Agent/workflow `fork_from_snapshot` accepts
+  `resume_input`, including workflow mappings for multiple interrupted instances.
+- Prefer blocking workflow `run(parallel=True, concurrency=N)`; `use_async` remains a
+  deprecated alias. Default instance workers decrease from 30 to four; context preparation
+  has its own bounded pool. Worker failures now raise `WorkflowError` with structured node/
+  instance identity and partial results instead of returning incomplete mappings silently.
+  Context-preparation failures follow this contract in both synchronous and parallel runs.
+- Use keyword fields when constructing extended grouped config/result dataclasses; inserted
+  context/validation/transcript fields can shift positional arguments. In particular, use
+  `WorkflowResult(..., output=..., child_summaries=...)` instead of `history=` or positional
+  child summaries.
+- `WorkflowResult.output` replaces the misleading `.history` name (deprecated alias retained).
+  `.transcript` and per-instance output/transcript maps expose the actual conversation.
+- Direct client assignment and `ProviderConfig(client=...)` borrow rather than transfer
+  ownership. Clones preserve borrowed clients; shutdown never closes them. Use `client_factory`
+  for one owned client per instance. Workflow workers close owned clone resources.
+- Public `IkaCore.testing.MockProvider` supports native response dictionaries/envelopes,
+  task routing, sync/async requests, nested scopes and workflow workers. Six example apps
+  now use it and the new APIs without runtime workarounds.
+- `ProviderConfig.bounded()`, `ExecutionLimits.bounded()` and `ExecutionPolicy.bounded()`
+  provide small-app defaults; unrestricted defaults otherwise remain available. Documentation
+  explains additional tool, extension, finalization, compaction and summary requests.
+- Default model instructions now request concise answers. Named library loggers use
+  NullHandler; logging level three no longer configures global/root logging. `cli=False`
+  suppresses presentation; applications explicitly configure Python diagnostic logging.
+- Canonical `stages=`/`.stages` replace the capitalized spelling; compatibility aliases remain.
+  Exact control-tool arguments, client/memory lifetimes and pending/completed restore are
+  documented. `docs/API.md` is generated from every public export and signature and checked
+  by pytest. See the v2 migration table for every intentional contract change.
+
 - Removed `CheckpointStore`, `load_checkpoint()`, constructor `checkpoint` and
   `checkpoint_db_path`, stage `checkpoint`, and `execution(checkpoint_uid=...)`.
   Enable the SQLite `SnapshotStore` with `enable_snapshots()` and resume using
@@ -35,7 +79,7 @@ V2 intentionally breaks compatibility with v1. See the
   `ExecutionPolicy`, `AgentTopology`, and `OutputConfig` values. Pass them using
   `provider=`, `prompts=`, `limits=`, `policy=`, `topology=`, and `output=`.
   The corresponding flat constructor keywords are removed. Name, description,
-  prompt, model_id, api_key, Stages, and tools remain flat.
+  prompt, model_id, api_key, stages, and tools remain flat (Stages is a deprecated alias).
 - `agent.config` retains configured defaults; `agent.state` owns mutable run budgets,
   transcripts, usage, counters and replay state. Extensions do not mutate config.
   Final checks and automatic continuation settings are one explicit execution policy;
@@ -161,8 +205,9 @@ V2 intentionally breaks compatibility with v1. See the
 - Recover completed-snapshot history, usage, cost and run/frame status after process death.
   Propagate cancellation through forced completion and wrap malformed provider failures
   in typed errors. Reject malformed native replay items before persisting them.
-- Compaction retains system constraints, latest input, complete/pending tool exchanges
-  and their reasoning, including consecutive native reasoning items. Empty summaries
+- Compaction retains system constraints, latest input (including send() user turns), complete/pending tool exchanges
+  and their reasoning, including consecutive native reasoning items. Compaction estimates
+  count a recorded opening user turn once even when first_input mirrors it. Empty summaries
   preserve history; successful compaction bounds the live request buffer as well.
 - Move opt-in chat diagnostics into its own module and remove superseded Responses/Codex
   context helpers, keeping production modules below the existing 600-line limit.
@@ -170,5 +215,5 @@ V2 intentionally breaks compatibility with v1. See the
   The [hardening report](docs/v2/hardening-validation.md) labels its historical runs;
   [merge-validation.md](docs/v2/merge-validation.md) records the integrated results.
 - Add six runnable [example apps](examples/apps/README.md) and offline application checks.
-  Three strict expected failures retain documented prompt/final-validation findings;
-  [the dogfood report](docs/v2/dogfood-report.md) records their reproductions and scope.
+  All three original dogfood reproductions now pass as assertive regressions;
+  [the dogfood report](docs/v2/dogfood-report.md) records the fixes and historical evidence.

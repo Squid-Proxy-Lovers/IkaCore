@@ -36,14 +36,20 @@ def wrap_snapshot_instance(workflow: Any, node_name: str, instance: int, agent: 
             return agent.resume_from_snapshot(session.interrupted_instances[key],
                 resume_input=session.resume_inputs.get(key), allow_unsafe_replay=session.allow_unsafe_replay)
         execute = resume if key in session.interrupted_instances else original
-        return execute_instance(session, node_name, instance, execute, args, kwargs)
+        result = execute_instance(session, node_name, instance, execute, args, kwargs,
+                                  transcript=lambda: agent.transcript)
+        saved_transcript = result.pop("_workflow_transcript", None)
+        if saved_transcript is not None:
+            agent.message_history = saved_transcript
+        return result
     agent.execution = wrapped
     agent._workflow_snapshot_instance = True
     return agent
 
 
 def execute_instance(session: WorkflowSnapshotSession, node: str, instance: int, execute: Callable[..., Any],
-                     args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
+                     args: tuple[Any, ...], kwargs: dict[str, Any],
+                     transcript: Callable[[], dict[str, Any]] | None = None) -> dict[str, Any]:
     key = f"{node}:{instance}"
     frame = session.store.create_frame(str(session.run_id), "workflow_node", node,
         parent_frame_id=session.root_frame_id, metadata={"workflow_node_name": node, "workflow_instance_id": instance})
@@ -51,12 +57,15 @@ def execute_instance(session: WorkflowSnapshotSession, node: str, instance: int,
         return {"run_id": session.run_id, "frame_id": frame, "store_path": session.store.db_path, "store": session.store, "control": session.control}
     hooks = ExecutionHooks(lambda label, payload: None, context, lambda name, args, meta: frame, lambda frame, result, error: None)
     status = "failed"
+    result: dict[str, Any]
     try:
         if key in session.replay_cache:
             result = deepcopy(session.replay_cache[key])
         else:
             with execution_hooks(hooks):
                 result = execute(*args, **kwargs)
+            if transcript is not None:
+                result = {**result, "_workflow_transcript": transcript()}
         if result.get("status") in INTERRUPTED_STATUSES:
             status, session.paused = "paused", True
             with session.lock:
@@ -71,7 +80,7 @@ def execute_instance(session: WorkflowSnapshotSession, node: str, instance: int,
             session.results[key] = deepcopy(result)
             session.store.update_frame(frame, outputs=result)
             save_workflow_boundary(session, "workflow_instance_completed")
-        return result
+        return deepcopy(result)
     finally:
         session.store.update_frame(frame, status=status)
 

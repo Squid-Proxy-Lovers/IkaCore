@@ -1,154 +1,205 @@
-# Reasoning / dogfood / hardening merge validation
+# Integrated v2 ergonomics / reasoning / hardening validation
 
-Measured on 2026-10-18 at runtime/test revision **`8efd65803e5d2a55c8039ee67ce18c4f9c4e5464`**,
-following merge `4dda845` on `ikacore-v2`. Work was confined to
-`/private/tmp/ikacore-dedupe`; agent APIs were left for the concurrent ergonomics work.
+Measured **2026-10-18** in `/private/tmp/ikacore-dedupe`, branch `ikacore-v2`,
+while resolving the merge of **`7c410f3d90cf7f8721967930caa85fb9754477d8`**
+with **`a2b7984ac563f4326c2f20ea4035198df5513f54`**.
+This report describes the integrated source with the fixes below, rather than either parent.
 Version 2.0.0 remains unreleased. Nothing was pushed or posted.
 
-## Sequential final checks
+Runtime Python-content SHA-256:
+`72a19681dbe20599ee4d96d945fc697cfa36c6215196a231acc687d975256759`.
+Installed app wheel SHA-256:
+`afd623a0087f6fd2b86a4b9841a6f3523c3d7b4101f72354a7b7b62070c767fb`.
+The separate fresh wheel built by `live_matrix.py` has the same runtime fingerprint.
+Its driver records Git HEAD `7c410f3` because the merge was still uncommitted at measurement;
+that field is the parent revision, not the integrated runtime identity.
 
-Using the worktree `.venv`, CPython 3.13.15, HTTPX 0.28.1 and Hypothesis 6.170.1:
+Historical results remain labeled separately:
+[pre-ergonomics merge at 8efd658](merge-validation-before-ergonomics.md),
+[hardening at dba0e05](hardening-validation.md),
+[reasoning branch](REASONING_REPLAY.md), and
+[ergonomics-only at ed55da5](ergonomics-handoff.md).
 
-1. `pytest`: **1,320 passed, 2 skipped, 3 xfailed**, 31.18 seconds.
-2. `python scripts/quality.py`: **PASS**. Its coverage run also reports **1,320 passed,
-   2 skipped, 3 xfailed**, 44.23 seconds. Ruff, compilation, Pyright (**0 errors /
-   0 warnings**), coverage matrix, fresh wheel inventory/package data and isolated
-   installed-wheel imports pass.
+## Final sequential gates
 
-The skips are the opt-in installed-wheel live smoke entry point and sustained soak.
-The three strict expected failures are the existing DOGFOOD-1/2/3 final-validation
-and prompt-update findings in [dogfood-report.md](dogfood-report.md). This integration
-keeps those failures visible; it does not claim to resolve their agent API contracts.
-The normal full suite includes all **46 process-kill/concurrent-writer cases**.
-No additional live provider requests or opt-in soak were run for this revision.
+Environment: worktree `.venv`, CPython 3.13.15, HTTPX 0.28.1, Hypothesis 6.170.1.
 
-The first restricted coverage run failed 59 socket-dependent cases with
-`PermissionError: [Errno 1] Operation not permitted` at loopback server bind.
-The final sequential runs used sandbox escalation for those local HTTP/HTTPS tests.
-No tests or coverage floors were disabled.
+1. `pytest`: **1,386 passed, 2 skipped**, **31.59 seconds**, no xfails or warnings.
+2. `python scripts/quality.py`: **PASS**. Ruff, all-source compilation, Pyright
+   (**0 errors / 0 warnings**), the same full suite under coverage, coverage matrix,
+   fresh wheel inventory/package data and isolated wheel imports pass.
+3. `python scripts/execution_parity.py --output artifacts/execution-parity-integrated.json`:
+   **42 traces** generated. The permanent tests compare model-call sequences, budgets
+   and snapshot boundaries against `dc9efbd`, asserting the new validation status before
+   comparing the historical trace.
+4. `python scripts/live_replay_repro.py`: **seven provider reasoning replay probes pass**.
+5. A fresh wheel was built after parity, installed non-editably into
+   `artifacts/installed-runtime`, and its Python files compared byte-for-byte with source.
+   All six apps passed offline; the installed-wheel subprocess suite plus cancellation
+   reports **7 passed in 2.01 seconds**.
+6. All six apps ran sequentially with `--live --use-local-login --model gpt-5.6-sol`:
+   **6/6 passed, 39 request boundaries, 101.76 seconds**.
+7. `python scripts/live_matrix.py --provider codex --use-local-login --model gpt-5.6-sol`:
+   **14 passed / 0 failed / 1 skipped**, 60-second per-case limits, one live request attempt.
+8. The opt-in **2,200-completed-turn soak** was rerun on the final runtime and passed,
+   **22.10 seconds** (details below).
 
-## Measured coverage
+The normal skips are the opt-in live smoke entry point and sustained soak, both separate
+from the explicit installed-wheel/live/soak runs above. The ordinary suite includes all
+**46 process-kill/concurrent-writer cases**, generative tests and controlled summary tests.
+The three original DOGFOOD reproductions pass as ordinary assertions. No xfail remains.
 
-The pre-reconciliation coverage artifact at merge `4dda845` reported **99.6931% lines**,
-**96.0437% branches**, and **98.8929% combined**. The last number failed the 99%
-pytest-cov gate; it was not the separate line percentage.
+Socket-dependent tests require sandbox escalation for loopback HTTP/HTTPS servers.
+An initial restricted run failed only at those 59 bind operations; final gates used socket
+access. No tests, replay-safety checks or coverage floors were disabled.
 
-At `8efd658`:
+## Coverage
 
-- **100.0000% lines**: **9,439 / 9,439 statements**, no uncovered runtime lines.
-- **96.8608% branches**: **2,561 / 2,644 arcs**, 83 uncovered arcs.
-- **99.3131% combined** statement/branch coverage.
-- **194 pre-existing excluded lines**, unchanged; no new `no cover` or `no branch`
-  pragmas were added.
-- Global floors remain **99% lines / 95% branches / 99% combined**. Every raised
-  hardening area floor remains intact.
-- **125 runtime modules**, **16 areas**, **141 required area/scenario checks**
-  (139 unique selectors), **zero gate failures**. The new diagnostics module and
-  reasoning merge regressions are registered in the manifest.
+- **100.0000% lines**: **9,772 / 9,772 statements**.
+- **97.1816% branches**: **2,655 / 2,732 arcs**;
+  **77** uncovered arcs.
+- **99.3842% combined** statement/branch coverage.
+- **129 runtime modules / 16 areas**, **149 required area/scenario checks**
+  (**146 unique selectors**), **zero gate failures**.
+- Global floors remain **99% lines / 95% branches / 99% combined**.
+  Every per-area hardening floor was compared with `7c410f3` and preserved exactly.
+- **201 excluded lines**: the prior 194 plus seven automatically excluded type-only
+  imports/guards introduced by ergonomics. No `no cover` or `no branch` pragma was added.
 
 | Area | Modules | Lines | Branches | Floors L/B |
 | --- | ---: | ---: | ---: | ---: |
 | Public API / package imports | 4 | 100.00% | 95.00% | 99/95% |
 | Request controls / cancellation | 6 | 100.00% | 95.83% | 99/95% |
 | HTTP ownership / TLS / connection reuse | 5 | 100.00% | 98.75% | 99/98% |
-| Retries / request errors | 2 | 100.00% | 98.84% | 99/98% |
+| Retries / request errors | 4 | 100.00% | 99.09% | 99/98% |
 | Tools / schemas / output bounds | 11 | 100.00% | 97.34% | 99/97% |
 | Snapshot storage / privacy / replay rules | 8 | 100.00% | 100.00% | 99/99% |
-| Agent snapshots / human resume | 6 | 100.00% | 95.28% | 99/95% |
-| Workflow snapshots / selective replay | 3 | 100.00% | 96.88% | 99/96% |
-| Workflows / fan-in / instance isolation | 9 | 100.00% | 98.00% | 99/97% |
+| Agent snapshots / human resume | 6 | 100.00% | 95.37% | 99/95% |
+| Workflow snapshots / selective replay | 3 | 100.00% | 97.14% | 99/96% |
+| Workflows / fan-in / instance isolation | 9 | 100.00% | 98.30% | 99/97% |
 | Memory integration | 10 | 100.00% | 99.17% | 99/99% |
 | Logging / CLI | 5 | 100.00% | 93.75% | 99/93% |
-| Agent runtime / stages | 16 | 100.00% | 92.48% | 99/92% |
-| Summarization / compaction | 2 | 100.00% | 96.30% | 99/96% |
+| Agent runtime / stages | 18 | 100.00% | 93.84% | 99/92% |
+| Summarization / compaction | 2 | 100.00% | 97.22% | 99/96% |
 | Codex auth / streaming / payloads | 7 | 100.00% | 98.68% | 99/98% |
-| Provider payloads / metadata / history | 20 | 100.00% | 97.44% | 99/97% |
-| Chat loop / accounting / human interruption | 11 | 100.00% | 96.50% | 99/96% |
+| Provider payloads / metadata / history | 20 | 100.00% | 97.99% | 99/97% |
+| Chat loop / accounting / human interruption | 11 | 100.00% | 96.57% | 99/96% |
 
-Exact remaining line/branch locations and test contexts are retained in
-`artifacts/quality/coverage.json` and `coverage-matrix.json`. The older
-[hardening branch inventory](hardening-branches.md) is explicitly historical at
-`dba0e05`; its 81 arcs are not relabeled as this revision's 83 arcs.
+Exact branch locations and test contexts remain in `artifacts/quality/coverage.json`
+and `coverage-matrix.json`. The old [hardening branch inventory](hardening-branches.md)
+remains historical at `dba0e05`; its arcs are not relabeled as current.
 Coverage demonstrates exercised paths, not universal correctness.
 
-## Fixes and semantic merge checks
+## Conflict resolutions
 
-- **Defensive provider test port.** The removed OpenAI `_message_content` helper
-  was replaced by the actual message normalizer. Scalar wrapping, invalid history,
-  developer-role handling and required-tool selection assertions all run again.
-  Responses scalar wrapping is tested through the current item converter.
-- **Cohesive module split.** Opt-in request/response dump creation and its best-effort
-  filesystem handling now live in `chat_interface/debug_dump.py`. Request code and
-  tests call that owner directly; no private forwarding facade was introduced.
-  `chat_response.py` drops from **604 to 561 physical lines**, below the unchanged
-  600-line limit. The diagnostics module is 60 lines and has strict typing enabled.
-- **Dead context builders removed.** Five unused Responses/Codex scalar/context and
-  first-message helpers were superseded by `ordered_replay_messages`. No coverage
-  exclusions or floor changes were used to accommodate them.
-- **Semantic conflict: malformed native replay.** The display parsers could ignore
-  scalar items while replay capture stored the entire mixed collection next to valid
-  reasoning. Finalization then called `.get()` on those scalars, or the next payload
-  replayed malformed blocks. Replay capture now validates native collections and
-  objects before storing pending state; the existing parse boundary raises
-  `IkaProviderResponseError`. Twenty-eight new cases cover scalar collections and
-  scalar/null/list elements for Responses, Codex, Anthropic and Gemini, assert input
-  immutability, and assert that no invalid pending state is persisted.
-- **Semantic conflict: consecutive native reasoning items.** Compaction reset the
-  native group start on every reasoning item and dropped earlier items before a
-  tool call. It now preserves the start of the whole contiguous reasoning/call group.
-  The failing-before regression checks both encrypted items and the matching result.
-- **Compaction across the new persisted envelopes.** Fourteen new cases exercise all
-  seven provider routes with both a live buffer and a fresh buffer. They parse signed /
-  encrypted reasoning, append its tool exchange, compact persisted and live history,
-  and rebuild a provider payload. Assertions retain original exchange objects and
-  opaque values, preserve call/result pairing exactly once, and remove old noise.
-- **Snapshot accounting remains correct with reasoning history.** Seven public SQLite
-  regressions now use nonzero provider usage. Fresh-instance HITL resume preserves
-  opaque history and reaches exactly **8 input / 4 output tokens** after two requests.
-  A third fresh instance reopens the completed snapshot with identical usage/cost
-  and reasoning history, without a third provider request. Existing crash-recovery
-  tests also pass unchanged.
-- **Cancellation remains a control error.** Both sync and async forced-completion
-  regressions now carry pending encrypted reasoning. Cancellation propagates unchanged
-  and leaves the entire history, including pending replay state, unmodified.
+- **`scripts/coverage_manifest.json`:** retain both the hardening retry regression and
+  the new mock-provider scenario. Inventory all four new runtime modules and keep every
+  raised floor; register additional integration scenarios.
+- **`agent_snapshots.py`:** load saved conversation, prompt, counters and retry state
+  before returning completed output. Restore usage/cost and atomically finalize run/root
+  frame metadata after a completion-boundary crash, without repeating model/tool effects.
+  Reject `resume_input` for a completed snapshot; pending snapshots retain replay checks.
+- **`chat_request.py`:** retain hardening's successful-summary-only live-buffer trimming
+  and live messages at pre/post snapshot boundaries, while invoking ergonomics' successful
+  compaction callback/event exactly once. Preserve cancellation and typed malformed-response
+  handling in both sync/async proactive and overflow recovery paths.
 
-The semantic regressions initially produced **17 failures / 14 passes** before the
-production fixes. The final added regression module has **43 passing cases**.
-No agent configuration, constructor, prompt or validation policy implementation changed.
+## Semantic integration fixes and checks
 
-## Documentation and historical evidence
+1. **Conversation compaction:** structural retention previously recognized stage/HITL
+   inputs but omitted ergonomics' `user_input`. It now retains the latest `send()`
+   instruction alongside complete/pending tool exchanges and consecutive native reasoning.
+2. **Token budget estimation:** `first_input` can mirror a recorded opening user turn.
+   Count that input once, matching provider replay, while counting distinct instructions
+   independently. Malformed/unhashable history entry types preserve the defensive estimate.
+3. **Structured synchronous context errors:** synchronous `compress_hook` failures now
+   raise `WorkflowError` with node identity and completed partial results, matching parallel
+   preparation. Cancellation/deadline exceptions retain their original types. The explicit
+   exception-boundary inventory records this application-callback conversion.
+4. **Cancellation and worker cleanup:** regressions exercise worker-raised cancellation,
+   outstanding parallel work, and exception propagation through executor completion.
+   Dependent work remains blocked after errors.
+5. **Borrowed clients versus deadline pools:** high-level workflow tests pass injected
+   client headers, cookies and auth through clones and controlled requests; private request
+   cleanup and clone shutdown preserve the caller client. Late custom work after a deadline
+   is released before the test ends. Owned async clients close separately.
+6. **Reasoning across multi-turn restore:** all seven public SQLite provider fixtures now
+   restore a completed conversation and call `send()` again, verifying original opaque
+   state, exactly one new instruction, and one new usage charge. Existing malformed native
+   parsing and consecutive-reasoning compaction regressions remain intact.
+7. **Output scopes:** compaction events retain workflow instance IDs and stay in each
+   agent's event scope. Clone counters do not mutate the template; diagnostic loggers
+   remain separate from scoped runtime output.
+8. **Soak recovery and defaults:** sustained fixtures use explicit large budgets and
+   durability workflows retain explicit worker limits. The soak now selects the latest
+   exact root-frame checkpoint, rather than relying on incidental compaction timing or
+   implicitly replaying a mid-tool snapshot. Querying one frame also keeps fixture
+   inspection from materializing the entire append-only audit log during memory measurement.
+9. **Canonical APIs:** tests, durability workers, benchmarks, parity/live scripts and examples
+   use `stages=` and workflow `parallel=`. Explicit tests retain the compatibility aliases.
+   Workflow output/transcript/instance maps and fork-with-answer survive cached replay.
+   Validation correction and fail-closed behavior run without replaying application tools.
+10. **Fixture contracts:** summary mocks return actual strings, avoiding coroutine warnings
+    from unspecified AsyncMock values. The original dogfood assertions are retained without
+    their three xfail markers.
 
-[README.md](README.md) now distinguishes current integration measurements from the
-`179b52e` refactor, `01249f6` reasoning and `dba0e05` hardening results. The changelog
-consolidates provider replay entries and includes hardening/application work without
-claiming unchanged coverage floors. Historical live reasoning and compaction evidence
-retains its original scope: the bounded Codex high-effort replay probe passed; the
-four hardening compaction fixtures scored **19/20** strict follow-up facts. Neither
-result is presented as a live rerun of `8efd658`.
+## Sustained run on the integrated runtime
 
-## Reproduction and artifacts
+- **2,200 completed turns**, **2,201 provider attempts /
+  replayable read-tool calls**, **733 compactions**, **6 cancellations**.
+- Mid-loop cancellation resumes a safe exact snapshot. Completed replay adds no request,
+  effect or usage. Final accounting is **2,200 input + 2,200 output = 4,400 tokens**.
+- **14,678 snapshots**, **75,026,432 database bytes**;
+  SQLite integrity passes and disk growth remains within the per-turn/slope assertions.
+- Retained memory change after the third sample: **21,739 bytes**; traced peak
+  **15,595,554 bytes**. Threads **2 → 2**;
+  file descriptors **12 → 12**.
+- 220-turn batches range **2.139–2.266 seconds**,
+  within the late/early latency bound.
 
-Run sequentially from `/private/tmp/ikacore-dedupe`, with loopback access:
+This single mocked workload does not establish indefinite leak freedom or power-loss
+durability. The historical live fact-retention evaluation remains **19/20**, rather than
+being promoted to a perfect-retention claim.
 
-```bash
-export PATH="$PWD/.venv/bin:$PATH" VIRTUAL_ENV="$PWD/.venv"
-pytest
-python scripts/quality.py
-```
+## Installed-wheel Codex matrix
 
-Ignored evidence retained locally:
+Runtime fingerprint matches the six-app wheel. The reasoning case skipped because the
+backend exposed no reasoning item; this live run does not establish native reasoning replay.
+Seven-route signed/encrypted replay is verified offline, and older high-effort live evidence
+remains explicitly historical in [REASONING_REPLAY.md](REASONING_REPLAY.md).
 
-- `artifacts/quality/pytest-merge-final.log`, `quality-merge-final.log`, `tests.xml`.
-- `artifacts/quality/coverage.json`, `coverage-matrix.json`, `coverage-matrix.md`.
-- `artifacts/quality/ikacore-2.0.0-py3-none-any.whl`: **224,901 bytes**, SHA-256
-  `7c6d2fda4aae397fea5ea6306db3e20b6ec7e808a314b5974dd008948dccf9d3`.
-- `/private/tmp/ikacore-reasoning-before.log`: failing-before semantic regressions.
-- `/private/tmp/ikacore-dedupe-baseline.log`: restricted coverage run and socket errors.
+| Case | Result | Reason | Seconds |
+| --- | --- | --- | ---: |
+| sync_text | passed |  | 1.86 |
+| async_text | passed |  | 1.56 |
+| sync_tools | passed |  | 4.87 |
+| async_tools | passed |  | 3.68 |
+| simple_agent | passed |  | 1.60 |
+| staged_agent | passed |  | 3.59 |
+| fresh_process_resume | passed |  | 1.87 |
+| async_cancellation | passed |  | 1.17 |
+| reasoning_tools | skipped | reasoning_not_exposed | 2.88 |
+| streaming_sse | passed |  | 1.44 |
+| usage_accounting | passed |  | 1.70 |
+| deadline | passed |  | 0.15 |
+| transient_retry | passed |  | 0.15 |
+| compaction | passed |  | 6.70 |
+| workflow_hitl | passed |  | 5.51 |
 
-## Local commits
+The synthetic transient-retry probe uses a fixture transport; expired deadlines make no
+model request. Cancellation and skipped reasoning have incomplete observable usage, so
+reported token totals are not billing records. Only Codex was exercised live.
 
-- `8efd65803e5d2a55c8039ee67ce18c4f9c4e5464`: targeted runtime/test/manifest reconciliation.
-- The documentation-only commit containing this report follows that revision; it does
-  not change the measured runtime or tests.
+## Documentation and retained evidence
 
-Each commit ends with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+One coherent CHANGELOG 2.0.0 entry, the migration table, README/USAGE, generated API reference,
+dogfood/handoff history and [application results](../../examples/apps/LIVE_RESULTS.md) now
+describe the same public contracts. API completeness is checked by the full pytest suite.
+Historical measurements retain their own revisions rather than being relabeled.
+
+Ignored local evidence:
+`artifacts/{pytest-final.log,quality-final.log,sequential-checks.json,execution-parity-integrated.json,reasoning-replay-final.log,merge-soak.log,merge-soak.json}`,
+`artifacts/quality/{coverage.json,coverage-matrix.json,coverage-matrix.md,tests.xml,*.whl}`,
+`artifacts/integrated-apps-{offline,live}/`,
+`artifacts/installed-wheel/` and `artifacts/integrated-live-matrix/`.
+The committed sanitized app JSON retains all attempts and earlier histories.

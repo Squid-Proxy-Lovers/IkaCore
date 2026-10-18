@@ -7,6 +7,8 @@ from typing import Optional, cast
 
 from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
 
+from .history_replay import USER_ENTRY_TYPES
+
 
 def _history_message_object(entry: JsonDict) -> JsonDict:
     try:
@@ -63,7 +65,7 @@ def retained_compaction_entries(message_history: JsonDict) -> JsonDict:
         if previous_kind not in {"reasoning", "function_call"}:
             native_start = index
         previous_kind = native_kind
-        if entry.get("type") in {"stage_input", "hitl_input"}:
+        if entry.get("type") in USER_ENTRY_TYPES:
             latest_user = index
         if entry.get("type") == "assistant_with_tools":
             latest_round = native_start if native_kind == "function_call" else index

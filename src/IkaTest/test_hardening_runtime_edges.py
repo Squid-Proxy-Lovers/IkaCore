@@ -52,7 +52,7 @@ def test_agent_schema_fallbacks_and_structured_submission_policy():
 
 def test_stage_overrides_budget_and_clone_snapshot_settings(tmp_path):
     stage = IkaStage("phase", "step", [], api_url="https://proxy.test", api_key="other", model_id="other")
-    obj = agent(Stages=[stage])
+    obj = agent(stages=[stage])
     obj.context_budget = 1234
     obj.enable_snapshots(str(tmp_path / "state.db"))
     try:

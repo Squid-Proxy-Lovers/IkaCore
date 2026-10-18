@@ -118,7 +118,7 @@ class TestBuildToolExecutors:
 
     def test_change_stage_executor(self):
         stage = IkaStage("S", "P", [], allowed_back_to=[0])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         executors = a.build_tool_executors(stage.tools, stage=stage)
         assert "change_stage" in executors
         out = executors["change_stage"]({"reason": "Need to redo"})

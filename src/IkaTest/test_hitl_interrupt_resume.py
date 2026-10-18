@@ -128,7 +128,7 @@ class TestHitlResume:
             prompt="Do the task",
             model_id="gpt-4o",
             api_key="test-key",
-            Stages=[stage],
+            stages=[stage],
         )
         store = agent.enable_snapshots(str(tmp_path / "runtime.db"))
         agent.logger = MagicMock(level=0, use_colors=False)

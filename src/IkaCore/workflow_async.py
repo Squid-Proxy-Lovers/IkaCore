@@ -77,11 +77,16 @@ class WorkflowExecution(WorkflowCore):
                 name=node_name,
                 final=final_message,
                 summary=f"[Instance {instance_id}]: {summary}",
-                history=execution_output,
+                output=execution_output,
+                transcript=result.get("transcript", {}),
+                instance_outputs={instance_id: execution_output},
+                instance_transcripts={instance_id: result.get("transcript", {})},
                 child_summaries={},
             )
             return
 
+        self._results[node_name].instance_outputs[instance_id] = execution_output
+        self._results[node_name].instance_transcripts[instance_id] = result.get("transcript", {})
         existing = self._results[node_name].summary
         self._results[node_name].summary = f"{existing}\n\n[Instance {instance_id}]: {summary}"
 

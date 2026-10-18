@@ -55,7 +55,7 @@ def test_dependent_starts_when_its_own_dependencies_finish_not_when_the_wave_doe
         async_executor=AsyncWorkflowExecutor(max_workers=4),
     )
     with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-        results = workflow.run(initial_context="go", use_async=True)
+        results = workflow.run(initial_context="go", parallel=True)
 
     assert slow_saw_a2 == [True]
     assert set(results) == {"root", "a1", "a2", "slow"}
@@ -94,7 +94,7 @@ def test_context_is_prepared_once_per_node_and_shared_by_its_instances():
         async_executor=AsyncWorkflowExecutor(max_workers=4),
     )
     with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-        results = workflow.run(initial_context="go", use_async=True)
+        results = workflow.run(initial_context="go", parallel=True)
 
     assert calls.count(("root summary",)) == 1  # not once per instance
     assert seen_contexts == ["root summary"] * 4
@@ -127,7 +127,7 @@ def test_initial_context_reaches_start_node_verbatim_without_summarising():
         calls.clear()
         workflow = _chain_workflow(compress, AsyncWorkflowExecutor(max_workers=2) if use_async else None)
         with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-            workflow.run(initial_context="the user's own brief", use_async=use_async)
+            workflow.run(initial_context="the user's own brief", parallel=use_async)
         assert calls == [["root summary"]], (use_async, calls)  # only the real edge is summarised, once
 
 
@@ -176,7 +176,7 @@ def test_default_summaries_are_shared_only_between_identical_requests():
     for key_for_child, expected in ((lambda i: "same-key", 1), (lambda i: f"key-{i}", 3)):
         with patch.object(workflow_core, "summarise_message_history", return_value="shared") as summarise, \
              patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-            build(key_for_child).run(use_async=True)
+            build(key_for_child).run(parallel=True)
         assert summarise.call_count == expected
 
 
@@ -191,7 +191,7 @@ def test_custom_compress_hooks_are_never_shared():
         async_executor=AsyncWorkflowExecutor(max_workers=4),
     )
     with patch("IkaCore.workflow_async.get_cli_output", return_value=MagicMock()):
-        workflow.run(use_async=True)
+        workflow.run(parallel=True)
     assert sorted(calls) == ["kid0", "kid1", "kid2"]
 
 
@@ -222,7 +222,7 @@ def test_injected_context_reaches_the_model_alongside_the_agents_own_task():
     assert "You are the north analyst" in first_message and "Planner notes: focus on Q3." in first_message
 
     staged = IkaBaseAgent(name="staged", description="d", prompt="Audit the south region.", model_id="gpt-4o",
-                          api_key="k", Stages=[IkaStage("Gather", "Gather balances.", [])])
+                          api_key="k", stages=[IkaStage("Gather", "Gather balances.", [])])
     staged.inject_workflow_context("Planner notes: focus on Q3.")
     content = staged.preparation._prepare_stage_runtime(0, 10, None).content_prompt
     assert "Audit the south region." in content and "Planner notes: focus on Q3." in content

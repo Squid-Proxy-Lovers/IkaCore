@@ -182,5 +182,19 @@ disabled, and no production behavior was changed to accommodate the live harness
 the completed grouped-config port was brought in by the requested merge.
 
 The later hardening/dogfood integration is measured separately at `8efd658` in
-[merge-validation.md](merge-validation.md); its higher coverage floors supersede
+[merge-validation-before-ergonomics.md](merge-validation-before-ergonomics.md); its higher coverage floors supersede
 the historical floors above. The live Codex probe was not rerun for that integration.
+
+The subsequent ergonomics integration uses canonical `stages=`, multi-turn `send()`,
+restored completed conversation/accounting and compaction events without discarding native
+reasoning/tool exchanges. Current integrated gates and live results are labeled in
+[merge-validation.md](merge-validation.md).
+
+## Integrated ergonomics measurements
+
+The integrated runtime (parents `7c410f3` / `a2b7984`, runtime fingerprint
+`72a19681dbe20599ee4d96d945fc697cfa36c6215196a231acc687d975256759`) passes **1,386 tests / 2 opt-in skips**,
+**100% lines / 97.1816% branches / 99.3842% combined** with all raised floors retained.
+All six live Codex apps pass; the matrix reports **14 passed / 0 failed / 1
+reasoning_not_exposed skip**. See [merge-validation.md](merge-validation.md) for current
+revision labels, soak metrics, semantic integration checks and live limits.

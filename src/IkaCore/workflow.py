@@ -14,7 +14,14 @@ from .workflow_async import WorkflowExecution
 from .workflow_async_executor import AsyncWorkflowExecutor
 from .workflow_context_cache import reset_context_cache
 from .workflow_snapshots import WorkflowSnapshotMixin
-from .workflow_types import WorkflowCompressionHook, WorkflowEdge, WorkflowNode, WorkflowResult
+from .workflow_types import (
+    WorkflowCompressionHook,
+    WorkflowEdge,
+    WorkflowError,
+    WorkflowNode,
+    WorkflowNodeError,
+    WorkflowResult,
+)
 
 
 class IkaWorkflow(WorkflowSnapshotMixin, WorkflowExecution):
@@ -27,7 +34,7 @@ class IkaWorkflow(WorkflowSnapshotMixin, WorkflowExecution):
         compress_hook: Optional[WorkflowCompressionHook] = None,
         start_node: Optional[str] = None,
         async_executor: Optional[AsyncWorkflowExecutor] = None,
-        max_parallel_workers: int = 30,
+        max_parallel_workers: int = 4,
         output: Optional[OutputConfig] = None,
     ):
         if not nodes:
@@ -40,6 +47,7 @@ class IkaWorkflow(WorkflowSnapshotMixin, WorkflowExecution):
         self.compress_hook = compress_hook or self._default_compress_hook
         self.start_node = start_node or nodes[0].name
         self.async_executor = async_executor or AsyncWorkflowExecutor(max_workers=max_parallel_workers)
+        self._owns_executor = async_executor is None
 
         self._node_index: Dict[str, WorkflowNode] = {node.name: node for node in nodes}
         self._results: Dict[str, WorkflowResult] = {}
@@ -54,7 +62,23 @@ class IkaWorkflow(WorkflowSnapshotMixin, WorkflowExecution):
         self._build_dependency_graph()
         self._next_reachable_nodes: Set[str] = self._compute_next_reachable_nodes()
 
-    def run(self, initial_context: Optional[str] = None, use_async: bool = False) -> Dict[str, WorkflowResult]:
+    def run(self, initial_context: Optional[str] = None, parallel: bool = False, *,
+            concurrency: int | None = None, use_async: bool | None = None) -> Dict[str, WorkflowResult]:
+        """Block until completion; parallel uses worker threads, bounded by concurrency."""
+        if use_async is not None:
+            if parallel and not use_async:
+                raise ValueError("Conflicting parallel and deprecated use_async values")
+            parallel = use_async
+        if concurrency is not None:
+            if concurrency < 1:
+                raise ValueError("concurrency must be positive")
+            if concurrency != self.async_executor.max_workers:
+                if not self._owns_executor:
+                    raise ValueError("concurrency must match the caller-owned executor")
+                self.async_executor.shutdown()
+                self.async_executor = AsyncWorkflowExecutor(max_workers=concurrency)
+            parallel = True
+        use_async = parallel
         if can_inherit_silent_output(self.events):
             return self._run(initial_context, use_async)
         with output_scope(self.events, share_cli=True):
@@ -83,4 +107,6 @@ __all__ = [
     "WorkflowEdge",
     "WorkflowNode",
     "WorkflowResult",
+    "WorkflowError",
+    "WorkflowNodeError",
 ]

@@ -1,13 +1,15 @@
 {
-  "date_utc": "2026-10-18T05:57:01.772777+00:00",
-  "revision": "aca8c53a57332c0e5ab225628ac7b29bae99d23b",
-  "wheel_sha256": "b864484f9173841568f92a5c6a823b9b29f244771983295e807137f5bd43d226",
+  "date_utc": "2026-10-18T06:43:01.531513+00:00",
+  "source_revision": "merge of 7c410f3 and a2b7984 plus integration fixes",
+  "wheel_sha256": "afd623a0087f6fd2b86a4b9841a6f3523c3d7b4101f72354a7b7b62070c767fb",
+  "model": "gpt-5.6-sol",
+  "live_chat_turns": 4,
   "results": [
     {
       "app": "research_assistant",
       "passed": true,
-      "seconds": 16.76,
-      "request_attempts": 6,
+      "seconds": 12.39,
+      "request_attempts": 5,
       "checks": {
         "app": "research_assistant",
         "citations_valid": true,
@@ -22,7 +24,7 @@
     {
       "app": "code_reviewer",
       "passed": true,
-      "seconds": 14.86,
+      "seconds": 14.6,
       "request_attempts": 6,
       "checks": {
         "app": "code_reviewer",
@@ -36,7 +38,7 @@
     {
       "app": "approval_workflow",
       "passed": true,
-      "seconds": 30.99,
+      "seconds": 33.54,
       "request_attempts": 11,
       "checks": {
         "app": "approval_workflow",
@@ -48,15 +50,22 @@
     },
     {
       "app": "long_chat",
-      "passed": false,
-      "seconds": 90.19,
-      "request_attempts": 13,
-      "error_type": "subprocess_failed"
+      "passed": true,
+      "seconds": 35.25,
+      "request_attempts": 11,
+      "checks": {
+        "app": "long_chat",
+        "compactions": 3,
+        "fresh_process_resume": true,
+        "memory_recalled": true,
+        "status": "passed",
+        "turns": 4
+      }
     },
     {
       "app": "parallel_pipeline",
       "passed": true,
-      "seconds": 6.81,
+      "seconds": 4.5,
       "request_attempts": 5,
       "checks": {
         "app": "parallel_pipeline",
@@ -70,7 +79,7 @@
     {
       "app": "provider_switch",
       "passed": true,
-      "seconds": 2.04,
+      "seconds": 1.48,
       "request_attempts": 1,
       "checks": {
         "app": "provider_switch",
@@ -87,14 +96,65 @@
         "runtime_control_resume": true,
         "status": "passed"
       }
+    }
+  ],
+  "installed_identity": [
+    "/private/tmp/ikacore-dedupe/artifacts/installed-runtime/lib/python3.13/site-packages/IkaCore/__init__.py",
+    "3.13.15"
+  ],
+  "total_request_attempts": 39,
+  "total_seconds": 101.76,
+  "revision": "integrated merge of 7c410f3 and a2b7984",
+  "runtime_sha256": "72a19681dbe20599ee4d96d945fc697cfa36c6215196a231acc687d975256759",
+  "offline_results": [
+    {
+      "app": "research_assistant",
+      "passed": true,
+      "seconds": 0.1,
+      "request_attempts": null,
+      "checks": {
+        "app": "research_assistant",
+        "citations_valid": true,
+        "extension_observed": true,
+        "status": "passed",
+        "tools_used": [
+          "search",
+          "fetch"
+        ]
+      }
+    },
+    {
+      "app": "code_reviewer",
+      "passed": true,
+      "seconds": 0.14,
+      "request_attempts": null,
+      "checks": {
+        "app": "code_reviewer",
+        "output_cap": 1200,
+        "repository_read": true,
+        "status": "passed",
+        "structured_review": true,
+        "tool_timeout_seconds": 0.005
+      }
+    },
+    {
+      "app": "approval_workflow",
+      "passed": true,
+      "seconds": 0.48,
+      "request_attempts": null,
+      "checks": {
+        "app": "approval_workflow",
+        "dependent_blocked": true,
+        "fresh_process_resume": true,
+        "rejection_fork": true,
+        "status": "passed"
+      }
     },
     {
       "app": "long_chat",
       "passed": true,
-      "seconds": 115.25,
-      "request_attempts": 32,
-      "application_revision": "1f667520889de190ef7848769935bea332b102b7",
-      "attempt": 2,
+      "seconds": 0.43,
+      "request_attempts": null,
       "checks": {
         "app": "long_chat",
         "compactions": 11,
@@ -103,11 +163,491 @@
         "status": "passed",
         "turns": 12
       }
+    },
+    {
+      "app": "parallel_pipeline",
+      "passed": true,
+      "seconds": 0.1,
+      "request_attempts": null,
+      "checks": {
+        "app": "parallel_pipeline",
+        "caller_client_open": true,
+        "deadline_seconds": 70,
+        "fan_in": true,
+        "status": "passed",
+        "workers": 2
+      }
+    },
+    {
+      "app": "provider_switch",
+      "passed": true,
+      "seconds": 0.2,
+      "request_attempts": null,
+      "checks": {
+        "app": "provider_switch",
+        "grouped_config": true,
+        "routes": {
+          "anthropic": "mocked",
+          "codex": "mocked",
+          "deepseek": "mocked",
+          "gemini": "mocked",
+          "openai-chat": "mocked",
+          "openai-responses": "mocked",
+          "openrouter": "mocked"
+        },
+        "runtime_control_resume": true,
+        "status": "passed"
+      }
     }
   ],
-  "completed_at_utc": "2026-10-18T06:01:19.077992+00:00",
-  "application_commit": "1f667520889de190ef7848769935bea332b102b7",
-  "model": "gpt-5.6-sol",
-  "total_request_boundary_invocations": 74,
-  "count_note": "Upper bound on live HTTP attempts: includes one pre-dispatch expired-deadline probe; max_retries=1. Non-Codex routes were mocked."
+  "offline_app_tests": {
+    "passed": 7,
+    "seconds": 2.01
+  },
+  "quality": {
+    "passed": 1386,
+    "skipped": 2,
+    "xfail": 0,
+    "line_percent": 100.0,
+    "branch_percent": 97.18155197657394,
+    "combined_percent": 99.38419705694177,
+    "modules": 129,
+    "areas": 16,
+    "gate_failures": 0
+  },
+  "previous_ergonomics_run": {
+    "date_utc": "2026-10-18T06:21:34.181236+00:00",
+    "revision": "ed55da5928451a26e600d59b3266fef33bc92d17",
+    "wheel_sha256": "7d946996cbe3fbfebef67609860c5ca5713e644f37b3d39dc3330aef79ee451e",
+    "model": "gpt-5.6-sol",
+    "live_chat_turns": 4,
+    "results": [
+      {
+        "app": "research_assistant",
+        "passed": true,
+        "seconds": 17.14,
+        "request_attempts": 5,
+        "checks": {
+          "app": "research_assistant",
+          "citations_valid": true,
+          "extension_observed": null,
+          "status": "passed",
+          "tools_used": [
+            "search",
+            "fetch"
+          ]
+        }
+      },
+      {
+        "app": "code_reviewer",
+        "passed": true,
+        "seconds": 13.85,
+        "request_attempts": 6,
+        "checks": {
+          "app": "code_reviewer",
+          "output_cap": 1200,
+          "repository_read": true,
+          "status": "passed",
+          "structured_review": true,
+          "tool_timeout_seconds": 0.005
+        }
+      },
+      {
+        "app": "approval_workflow",
+        "passed": true,
+        "seconds": 30.65,
+        "request_attempts": 11,
+        "checks": {
+          "app": "approval_workflow",
+          "dependent_blocked": true,
+          "fresh_process_resume": true,
+          "rejection_fork": true,
+          "status": "passed"
+        }
+      },
+      {
+        "app": "long_chat",
+        "passed": true,
+        "seconds": 55.76,
+        "request_attempts": 16,
+        "checks": {
+          "app": "long_chat",
+          "compactions": 3,
+          "fresh_process_resume": true,
+          "memory_recalled": true,
+          "status": "passed",
+          "turns": 4
+        }
+      },
+      {
+        "app": "parallel_pipeline",
+        "passed": true,
+        "seconds": 6.87,
+        "request_attempts": 5,
+        "checks": {
+          "app": "parallel_pipeline",
+          "caller_client_open": true,
+          "deadline_seconds": 70,
+          "fan_in": true,
+          "status": "passed",
+          "workers": 2
+        }
+      },
+      {
+        "app": "provider_switch",
+        "passed": true,
+        "seconds": 1.73,
+        "request_attempts": 1,
+        "checks": {
+          "app": "provider_switch",
+          "grouped_config": true,
+          "routes": {
+            "anthropic": "mocked",
+            "codex": "live",
+            "deepseek": "mocked",
+            "gemini": "mocked",
+            "openai-chat": "mocked",
+            "openai-responses": "mocked",
+            "openrouter": "mocked"
+          },
+          "runtime_control_resume": true,
+          "status": "passed"
+        }
+      }
+    ],
+    "total_request_attempts": 44
+  },
+  "previous_dogfood_run": {
+    "date_utc": "2026-10-18T05:57:01.772777+00:00",
+    "revision": "aca8c53a57332c0e5ab225628ac7b29bae99d23b",
+    "wheel_sha256": "b864484f9173841568f92a5c6a823b9b29f244771983295e807137f5bd43d226",
+    "results": [
+      {
+        "app": "research_assistant",
+        "passed": true,
+        "seconds": 16.76,
+        "request_attempts": 6,
+        "checks": {
+          "app": "research_assistant",
+          "citations_valid": true,
+          "extension_observed": null,
+          "status": "passed",
+          "tools_used": [
+            "search",
+            "fetch"
+          ]
+        }
+      },
+      {
+        "app": "code_reviewer",
+        "passed": true,
+        "seconds": 14.86,
+        "request_attempts": 6,
+        "checks": {
+          "app": "code_reviewer",
+          "output_cap": 1200,
+          "repository_read": true,
+          "status": "passed",
+          "structured_review": true,
+          "tool_timeout_seconds": 0.005
+        }
+      },
+      {
+        "app": "approval_workflow",
+        "passed": true,
+        "seconds": 30.99,
+        "request_attempts": 11,
+        "checks": {
+          "app": "approval_workflow",
+          "dependent_blocked": true,
+          "fresh_process_resume": true,
+          "rejection_fork": true,
+          "status": "passed"
+        }
+      },
+      {
+        "app": "long_chat",
+        "passed": false,
+        "seconds": 90.19,
+        "request_attempts": 13,
+        "error_type": "subprocess_failed"
+      },
+      {
+        "app": "parallel_pipeline",
+        "passed": true,
+        "seconds": 6.81,
+        "request_attempts": 5,
+        "checks": {
+          "app": "parallel_pipeline",
+          "caller_client_open": true,
+          "deadline_seconds": 70,
+          "fan_in": true,
+          "status": "passed",
+          "workers": 2
+        }
+      },
+      {
+        "app": "provider_switch",
+        "passed": true,
+        "seconds": 2.04,
+        "request_attempts": 1,
+        "checks": {
+          "app": "provider_switch",
+          "grouped_config": true,
+          "routes": {
+            "anthropic": "mocked",
+            "codex": "live",
+            "deepseek": "mocked",
+            "gemini": "mocked",
+            "openai-chat": "mocked",
+            "openai-responses": "mocked",
+            "openrouter": "mocked"
+          },
+          "runtime_control_resume": true,
+          "status": "passed"
+        }
+      },
+      {
+        "app": "long_chat",
+        "passed": true,
+        "seconds": 115.25,
+        "request_attempts": 32,
+        "application_revision": "1f667520889de190ef7848769935bea332b102b7",
+        "attempt": 2,
+        "checks": {
+          "app": "long_chat",
+          "compactions": 11,
+          "fresh_process_resume": true,
+          "memory_recalled": true,
+          "status": "passed",
+          "turns": 12
+        }
+      }
+    ],
+    "completed_at_utc": "2026-10-18T06:01:19.077992+00:00",
+    "application_commit": "1f667520889de190ef7848769935bea332b102b7",
+    "model": "gpt-5.6-sol",
+    "total_request_boundary_invocations": 74,
+    "count_note": "Upper bound on live HTTP attempts: includes one pre-dispatch expired-deadline probe; max_retries=1. Non-Codex routes were mocked."
+  },
+  "live_matrix": {
+    "passed": 14,
+    "failed": 0,
+    "skipped": 1,
+    "reason": "reasoning_not_exposed",
+    "runtime": {
+      "package_version": "2.0.0",
+      "git_revision": "7c410f3d90cf7f8721967930caa85fb9754477d8",
+      "runtime_sha256": "72a19681dbe20599ee4d96d945fc697cfa36c6215196a231acc687d975256759",
+      "installation": "wheel",
+      "python": "3.13.15"
+    },
+    "results": [
+      {
+        "case": "sync_text",
+        "status": "passed",
+        "usage_reported": true,
+        "usage": {
+          "input_tokens": 25,
+          "output_tokens": 5,
+          "total_tokens": 30,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 1.86
+      },
+      {
+        "case": "async_text",
+        "status": "passed",
+        "usage_reported": true,
+        "usage": {
+          "input_tokens": 25,
+          "output_tokens": 5,
+          "total_tokens": 30,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 1.56
+      },
+      {
+        "case": "sync_tools",
+        "status": "passed",
+        "tool_result_replayed": true,
+        "tool_executions": 1,
+        "usage": {
+          "input_tokens": 222,
+          "output_tokens": 31,
+          "total_tokens": 253,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 4.87
+      },
+      {
+        "case": "async_tools",
+        "status": "passed",
+        "tool_result_replayed": true,
+        "tool_executions": 1,
+        "usage": {
+          "input_tokens": 224,
+          "output_tokens": 33,
+          "total_tokens": 257,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 3.68
+      },
+      {
+        "case": "simple_agent",
+        "status": "passed",
+        "completed": true,
+        "usage": {
+          "input_tokens": 382,
+          "output_tokens": 20,
+          "total_tokens": 402,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 1.6
+      },
+      {
+        "case": "staged_agent",
+        "status": "passed",
+        "stages_executed": 2,
+        "usage": {
+          "input_tokens": 1031,
+          "output_tokens": 49,
+          "total_tokens": 1080,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 3.59
+      },
+      {
+        "case": "fresh_process_resume",
+        "status": "passed",
+        "usage_preserved": true,
+        "network_blocked_during_resume": true,
+        "fresh_process": true,
+        "usage": {
+          "input_tokens": 383,
+          "output_tokens": 20,
+          "total_tokens": 403,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 1.87
+      },
+      {
+        "case": "async_cancellation",
+        "status": "passed",
+        "caller_client_open": true,
+        "live_response_closed": true,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": false,
+        "seconds": 1.17
+      },
+      {
+        "case": "reasoning_tools",
+        "status": "skipped",
+        "usage": {
+          "input_tokens": 222,
+          "output_tokens": 31,
+          "total_tokens": 253,
+          "input_cached_tokens": 0
+        },
+        "reason": "reasoning_not_exposed",
+        "usage_complete": false,
+        "seconds": 2.88
+      },
+      {
+        "case": "streaming_sse",
+        "status": "passed",
+        "usage_reported": true,
+        "sse_parsed": true,
+        "usage": {
+          "input_tokens": 25,
+          "output_tokens": 5,
+          "total_tokens": 30,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 1.44
+      },
+      {
+        "case": "usage_accounting",
+        "status": "passed",
+        "usage_reported": true,
+        "usage": {
+          "input_tokens": 25,
+          "output_tokens": 5,
+          "total_tokens": 30,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 1.7
+      },
+      {
+        "case": "deadline",
+        "status": "passed",
+        "deadline_enforced": true,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 0.15
+      },
+      {
+        "case": "transient_retry",
+        "status": "passed",
+        "synthetic_transport": true,
+        "attempts": 2,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 0.15
+      },
+      {
+        "case": "compaction",
+        "status": "passed",
+        "coherent_answer": true,
+        "compacted": true,
+        "compactions": 1,
+        "usage": {
+          "input_tokens": 1601,
+          "output_tokens": 286,
+          "total_tokens": 1887,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 6.7
+      },
+      {
+        "case": "workflow_hitl",
+        "status": "passed",
+        "dependency_preserved": true,
+        "hitl_resumed": true,
+        "usage": {
+          "input_tokens": 2003,
+          "output_tokens": 73,
+          "total_tokens": 2076,
+          "input_cached_tokens": 0
+        },
+        "usage_complete": true,
+        "seconds": 5.51
+      }
+    ]
+  }
 }

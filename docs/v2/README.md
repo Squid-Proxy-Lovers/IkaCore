@@ -1,8 +1,10 @@
-# IkaCore v2: simplification draft
+# IkaCore v2: runtime and migration
 
 V2 allows breaking changes. Its goal is a smaller, consistent runtime with explicit
 execution controls. Backward compatibility with v1 is no longer a release requirement.
 This branch remains a draft; applications should migrate deliberately before adopting it.
+See the [application ergonomics handoff](ergonomics-handoff.md), [usage guide](../USAGE.md),
+and generated/tested [API reference](../API.md).
 
 ## First simplification pass
 
@@ -35,7 +37,8 @@ The initial consolidation carried two generations of behavior at once. This pass
   whole-class line limits that encouraged tiny inheritance layers are removed.
 
 The latest merged validation is recorded in [merge-validation.md](merge-validation.md)
-at runtime/test revision `8efd658`, after reasoning, dogfood and hardening were merged.
+for the integrated reasoning, dogfood, hardening and ergonomics changes.
+The earlier merge's exact measurements remain in [the historical report](merge-validation-before-ergonomics.md).
 Earlier validation and benchmarks below retain their original revision labels.
 Version 2.0.0 is unreleased.
 
@@ -77,6 +80,22 @@ The permanent suite also checks these behaviors across both execution modes.
 
 | Previous call or behavior | V2 behavior / migration |
 | --- | --- |
+| Positional construction of grouped config/result dataclasses | Use keyword fields when migrating: new context/validation/transcript fields change positional bindings. In particular, construct `WorkflowResult(..., output=..., child_summaries=...)` rather than `history=` or a positional child-summary mapping. |
+| Validator receives an empty history at construction; docstring/return annotation required | Construction checks callability/signature only. A check receives `IkaCore.AgentResult` on completion and returns `bool`; runtime rejects non-bools. Docstrings are optional correction feedback. |
+| Staged completion skips final checks; simple correction reruns application tools | Both validate final answers. Bounded correction passes use the transcript and only `agent_end`, without repeating application side effects. |
+| Invalid output silently returned after retry exhaustion | Inspect `result["validation"]` (`status`, `attempts`, `failed_checks`); opt into `ExecutionPolicy(fail_closed=True)` and catch `FinalAnswerValidationError.result`. |
+| Assigning `agent.prompt` leaves stale first input | Assignment starts a fresh task and clears transcript/pending state. Use `agent.send(message)` for an appended conversation turn and fresh per-turn steps. |
+| Final tool completion may omit answer text from history | User turns and final answers are recorded in order; `.transcript` is a defensive, possibly compacted replay transcript. |
+| Completed-snapshot restore returns before loading conversation; ignores an answer | Restores transcript/usage/counters and returns saved output without a request. Use `send()` next. `resume_input` on completed agent snapshots now raises `ValueError`. |
+| Agent fork has no answer argument; workflow fork requires two calls | `agent.fork_from_snapshot(id, resume_input=...)` and `workflow.fork_from_snapshot(id, resume_input=...)` fork and continue independently. |
+| `agent.context_budget = N` is outside grouped config | Prefer `limits=ExecutionLimits(context_budget=N)` in tokens; `compaction_count` and `compaction` events are observable and snapshot-persisted. The direct attribute still works. |
+| `workflow.run(use_async=True)` means threads | Prefer blocking `run(parallel=True, concurrency=N)`. `use_async` remains a deprecated alias. Context preparation uses a separate bounded pool. Default instance workers decrease from 30 to 4. |
+| `.client = caller_client` is closed on shutdown; workflow clones discard it | Direct assignment and `ProviderConfig(client=...)` now borrow clients, preserve them across clones, and never close them. `client_factory` and internally created clients are owned; each clone gets its own. |
+| `WorkflowResult.history` misleadingly means output | Use `.output` for the execution result and `.transcript` for history; `.instance_outputs`/`.instance_transcripts` retain fan-out results. `.history` remains a deprecated output alias. |
+| Worker errors yield missing results and downstream KeyError | `WorkflowError.errors` identifies nodes/instances and `.partial_results` preserves completed nodes. Dependents are blocked; cancellation/deadline types remain unchanged. |
+| Global logging configuration and fallback stderr warnings | Named library loggers have NullHandler and never configure the root logger. `cli=False` silences presentation; configure Python logging explicitly for diagnostics. |
+| Verbose default model prompt; `Stages=` spelling | Default prompt is concise. Use `PromptConfig` for style and canonical `stages=`/`.stages`; `Stages=`/`.Stages` remain compatibility aliases. |
+| Small apps must override many unrestricted defaults; mocks patch internals | Use `ProviderConfig.bounded()`, `ExecutionLimits.bounded()`, `ExecutionPolicy.bounded()`, plus `request_controls(timeout=...)`. Use public `IkaCore.testing.MockProvider` for native fixtures. |
 | Agent `memory`, `memory_access`, backend fields/helpers and `MemoryConfig` | Construct `IkaMem.agent_tools.MemoryTools(name, short_term=..., long_term=...)`; pass `.tools(access=...)` using ordinary agent/stage `tools`. |
 | Stage `memory_access`, `long_term_filter` | Select `.tools(access=..., long_term_filter=...)` for that stage. |
 | `IkaModel.init_global_long_term_memory` / `get_global_long_term_memory` | Construct and explicitly share an `LTMemory` backend. No global backend is read. |
@@ -241,25 +260,19 @@ application workflows are separate release checks. Historical credential cleanup
 also separate: removing source copies or branches does not purge Git objects, PR refs,
 caches, forks, or other clones.
 
-## Current merged validation (`8efd658`)
+## Current integrated validation
 
-After integrating reasoning, dogfood and hardening, sequential `pytest` then
-`python scripts/quality.py` pass with **1,320 tests passed, 2 skipped and 3 expected
-failures**. The expected failures preserve the documented prompt/final-validation
-[dogfood findings](dogfood-report.md), whose agent API fixes are separate work.
+[merge-validation.md](merge-validation.md) records the final sequential pytest, quality,
+execution-parity, installed-wheel app and Codex matrix results for the ergonomics merge.
+The three original dogfood reproductions pass without xfail. Hardening's raised global
+floors remain **99% lines / 95% branches / 99% combined**, with every per-area floor retained;
+the implementation targets 100% lines.
 
-Coverage is **100% lines (9,439/9,439)**, **96.86% branches (2,561/2,644)** and
-**99.31% combined**. All **125 runtime modules / 16 areas** meet the raised hardening
-floors: **99% lines / 95% branches / 99% combined** globally, plus each area floor.
-The 194 pre-existing excluded lines are unchanged. Ruff, compilation, Pyright,
-coverage inventory and fresh-wheel/import checks pass.
-
-This merge also rejects malformed native replay items, preserves consecutive native
-reasoning during compaction, and verifies accounting with reasoning history across
-fresh-instance snapshot recovery. Chat diagnostics have a separate owner; the
-response module is now 561 lines. See [merge-validation.md](merge-validation.md)
-for exact per-area figures, regressions, evidence and limits. Historical benchmark,
-soak and live-provider results below retain their original revision labels.
+The integrated runtime preserves signed/encrypted reasoning, crash-safe completed-snapshot
+accounting and metadata, multi-turn conversations, bounded validation corrections, client
+ownership, output scopes, and structured workflow errors. New regressions check those
+contracts together. Historical benchmark, soak and live-provider evidence below retains
+its original revision labels.
 
 ## Live validation status
 

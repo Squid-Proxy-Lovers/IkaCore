@@ -16,6 +16,7 @@ from IkaCore.events import OutputType
 from IkaCore.events import current_output as get_cli_output
 from IkaCore.tools import ToolExecutor
 from IkaModel.execution_hooks import emit_boundary
+from IkaModel.history_replay import USER_ENTRY_TYPES
 from IkaModel.runtime_policy import current_runtime_options
 
 from .. import request_interface as _requests
@@ -71,10 +72,20 @@ def _history_entry_tokens(entry: JsonDict) -> int:
 
 def get_total_tokens(message_history: JsonDict) -> int:
     total = 0
+    entries = [json_dict(msg) for msg in history_section(message_history, "messages").values()]
     for key in ("system", "first_input", "summary"):
-        total += _history_entry_tokens(history_section(message_history, key))
-    for msg in history_section(message_history, "messages").values():
-        total += _history_entry_tokens(json_dict(msg))
+        section = history_section(message_history, key)
+        # first_input is a compatibility view of the recorded opening user turn.
+        # Provider replay sends that turn once; the compaction estimate must too.
+        if key == "first_input" and any(
+            isinstance(entry.get("type"), str) and entry["type"] in USER_ENTRY_TYPES
+            and entry.get("message") == section.get("message")
+            for entry in entries
+        ):
+            continue
+        total += _history_entry_tokens(section)
+    for entry in entries:
+        total += _history_entry_tokens(entry)
     return total
 
 
@@ -133,7 +144,7 @@ def _summarize_sync_if_near_budget(
         summary = _summaries.summarise_message_history(barebone_model, message_history, client=client)
         if messages is not None and summary.strip():
             _summaries.compact_live_messages(messages)
-        emit_boundary("post_compaction", {"messages": messages} if messages is not None else {})
+        _compaction_completed(barebone_model, bool(summary.strip()), messages)
 
 
 async def _summarize_async_if_near_budget(
@@ -150,7 +161,7 @@ async def _summarize_async_if_near_budget(
         summary = await _summaries.async_summarise_message_history(barebone_model, message_history, client)
         if messages is not None and summary.strip():
             _summaries.compact_live_messages(messages)
-        emit_boundary("post_compaction", {"messages": messages} if messages is not None else {})
+        _compaction_completed(barebone_model, bool(summary.strip()), messages)
 
 
 def _parse_provider_round(
@@ -261,7 +272,7 @@ def _api_request_with_context_fallback(
             summary = _summaries.summarise_message_history(barebone_model, message_history, client=client)
             if messages is not None and summary.strip():
                 _summaries.compact_live_messages(messages)
-            emit_boundary("post_compaction", {"messages": messages} if messages is not None else {})
+            _compaction_completed(barebone_model, bool(summary.strip()), messages)
         except _SUMMARY_FALLBACK_EXCEPTIONS as summary_error:
             if isinstance(summary_error, IkaRequestControlError):
                 raise
@@ -311,7 +322,7 @@ async def _api_request_with_context_fallback_async(
             summary = await _summaries.async_summarise_message_history(barebone_model, message_history, client=client)
             if messages is not None and summary.strip():
                 _summaries.compact_live_messages(messages)
-            emit_boundary("post_compaction", {"messages": messages} if messages is not None else {})
+            _compaction_completed(barebone_model, bool(summary.strip()), messages)
         except _SUMMARY_FALLBACK_EXCEPTIONS as summary_error:
             if isinstance(summary_error, IkaRequestControlError):
                 raise
@@ -329,3 +340,12 @@ async def _api_request_with_context_fallback_async(
         return resp
     except (TypeError, ValueError) as e:
         raise IkaContextWindowError(f"Failed to build or retry provider request: {e}") from e
+
+
+def _compaction_completed(
+    model: BareBoneModel, succeeded: bool, messages: Optional[list[JsonDict]] = None
+) -> None:
+    callback = getattr(model, "_on_compaction", None)
+    if succeeded and callback is not None:
+        callback()
+    emit_boundary("post_compaction", {"messages": messages} if messages is not None else {})

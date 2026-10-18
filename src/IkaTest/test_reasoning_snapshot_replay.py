@@ -68,7 +68,7 @@ def test_public_snapshot_resume_mid_tool_loop_preserves_reasoning(provider, tmp_
 
     def create():
         return IkaBaseAgent("snapshot_fixture", "fixture", "task", model_id=model_id, api_key="fixture",
-                            provider=options, Stages=[IkaStage("phase", "ask for approval", [], hitl=True)],
+                            provider=options, stages=[IkaStage("phase", "ask for approval", [], hitl=True)],
                             output=OutputConfig(show_usage_level0=False))
 
     path = str(tmp_path / "reasoning.db")
@@ -106,9 +106,17 @@ def test_public_snapshot_resume_mid_tool_loop_preserves_reasoning(provider, tmp_
         assert recovered._total_usage == usage
         assert recovered._total_cost == cost
         assert OPAQUE in json.dumps(recovered.message_history)
+        # The public conversation API must keep the recovered signed/encrypted
+        # exchange and start the next turn with exactly one new user instruction.
+        next_turn = recovered.send("NEXT_UNIQUE_TURN")
+        assert next_turn["final_message"] == "done"
+        assert OPAQUE in json.dumps(requests[2])
+        assert json.dumps(requests[2]).count("NEXT_UNIQUE_TURN") == 1
+        assert recovered._total_usage["input_tokens"] == usage["input_tokens"] + 4
+        assert recovered._total_usage["output_tokens"] == usage["output_tokens"] + 2
     finally:
         recovered.shutdown()
-    assert len(requests) == 2
+    assert len(requests) == 3
     assert OPAQUE in json.dumps(requests[1])
     if provider in {"codex", "openai_responses"}:
         replay = requests[1]["input"]
