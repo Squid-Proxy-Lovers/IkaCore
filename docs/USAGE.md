@@ -194,12 +194,8 @@ Consumed steps, step limits, extension counts, and the remaining overall stage b
 survive snapshot resume, including when a new agent opens the database. Resuming partway
 through a stage does not reset its allowance or charge prior steps twice to later stages.
 
-For a snapshot-enabled workflow, answer through the workflow's snapshot ID:
-
-```python
-info = workflow.snapshot_runtime_info()
-results = workflow.resume_from_snapshot(info["last_snapshot_id"], resume_input="YES")
-```
+For a snapshot-enabled workflow, read `info = workflow.snapshot_runtime_info()`, then
+answer with `workflow.resume_from_snapshot(info["last_snapshot_id"], resume_input="YES")`.
 
 A string answers the sole interrupted instance. When several instances need answers,
 use a mapping such as `resume_input={"review:0": "YES", "review:1": "Revise"}`.

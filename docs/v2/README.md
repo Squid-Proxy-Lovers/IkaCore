@@ -146,7 +146,10 @@ Staged human-input resume accepts `resume_input`, consumes the saved transcript 
 and appends the answer before continuing. Snapshots persist consumed steps, the current
 step limit, extension counts, and the remaining overall stage budget. Mid-stage resume
 preserves those limits even in a new agent and does not charge consumed steps twice to
-later stages. Fresh executions clear replay state, including after a failed resume.
+later stages. Exhausted human-input resumes apply extension or forced finalization
+before completing the stage. Earlier v2 snapshots without `loop_state` use their
+remaining budgets without a database migration. Fresh executions clear replay state,
+including after a failed resume.
 
 Workflow snapshots are enabled with `workflow.enable_snapshots(path, control)` and
 started with `workflow.run(...)`. `snapshot_runtime_info()` exposes the last snapshot.
@@ -211,18 +214,19 @@ offline coverage does not establish live compatibility. Reproduce the Codex run 
 
 ## Measured quality and footprint
 
-The full local quality run measured at `402d1ae` on CPython 3.13.15 passed **804 tests**,
-with **6 live-provider checks skipped**: **95.68% line coverage**, **87.16% branch
-coverage**, and **93.82% combined coverage**. Ruff, Pyright, compilation, and the isolated
+The full local quality run measured at runtime/test revision `d8c9b93` on CPython
+3.13.15 passed **834 tests**, with **6 live-provider checks skipped**:
+**95.74% line coverage**, **87.23% branch
+coverage**, and **93.87% combined coverage**. Ruff, Pyright, compilation, and the isolated
 wheel build/import check also passed. The matrix assigns all **121 runtime modules** to
-**16 areas** and passed all **82 required scenarios**, with zero gate failures. Coverage
+**16 areas** and passed all **93 required scenarios**, with zero gate failures. Coverage
 excludes 458 lines, including type-only and abstract declarations. Existing global and
 per-area coverage floors are unchanged.
 
-The fresh `ikacore-2.0.0-py3-none-any.whl` measured at `402d1ae` is **203.94 KiB**
-(208,832 bytes), with **664.07 KiB** of unpacked content (680,003 bytes). The runtime
+The fresh `ikacore-2.0.0-py3-none-any.whl` measured at `d8c9b93` is **205.81 KiB**
+(210,751 bytes), with **670.94 KiB** of unpacked content (687,039 bytes). The runtime
 retains **6 settings** and one direct dependency (`httpx`). The three runtime packages
-contain 17,041 physical Python lines, **1,989 more** than `origin/main` at `0f6234c`
+contain 17,180 physical Python lines, **2,128 more** than `origin/main` at `0f6234c`
 (15,052 lines); this count includes blank and comment lines and excludes tests/docs.
 
 The following historical benchmark results at `183ce24` have not been remeasured after
@@ -284,22 +288,22 @@ CI publishes package/runtime and all-provider reports. See the
 Persistence still dominates this trivial local agent fixture, and the runtime retains
 architectural complexity. Further removal should follow observed use and product needs.
 
-### Local coverage snapshot (`402d1ae`)
+### Local coverage snapshot (`d8c9b93`)
 
 | Area | Modules | Lines | Branches | Floors L/B | Tests observed | Excluded lines |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Public API / package imports | 4 | 98.00% | 90.91% | 95/90% | 342 | 12 |
-| Request controls / cancellation | 6 | 95.51% | 90.91% | 95/90% | 230 | 0 |
-| HTTP ownership / TLS / connection reuse | 5 | 95.21% | 91.67% | 95/90% | 159 | 2 |
-| Retries / request errors | 2 | 87.34% | 77.38% | 85/75% | 165 | 0 |
-| Tools / schemas / output bounds | 14 | 95.57% | 88.74% | 95/85% | 259 | 161 |
-| Snapshot storage / privacy / replay rules | 8 | 94.89% | 91.38% | 90/90% | 64 | 0 |
-| Agent snapshots / human resume | 6 | 98.57% | 93.14% | 95/90% | 85 | 0 |
-| Workflow snapshots / selective replay | 3 | 98.16% | 94.74% | 95/85% | 31 | 0 |
-| Workflows / fan-in / instance isolation | 9 | 98.25% | 93.24% | 95/90% | 73 | 66 |
+| Public API / package imports | 4 | 98.00% | 90.91% | 95/90% | 357 | 12 |
+| Request controls / cancellation | 6 | 95.51% | 90.91% | 95/90% | 260 | 0 |
+| HTTP ownership / TLS / connection reuse | 5 | 96.33% | 92.86% | 95/90% | 185 | 2 |
+| Retries / request errors | 2 | 87.34% | 77.38% | 85/75% | 175 | 0 |
+| Tools / schemas / output bounds | 14 | 95.57% | 88.74% | 95/85% | 274 | 161 |
+| Snapshot storage / privacy / replay rules | 8 | 94.89% | 91.38% | 90/90% | 79 | 0 |
+| Agent snapshots / human resume | 6 | 98.61% | 93.27% | 95/90% | 100 | 0 |
+| Workflow snapshots / selective replay | 3 | 98.56% | 91.38% | 95/85% | 37 | 0 |
+| Workflows / fan-in / instance isolation | 9 | 98.25% | 93.24% | 95/90% | 86 | 66 |
 | Memory integration | 9 | 93.30% | 77.27% | 90/75% | 19 | 10 |
-| Logging / CLI | 3 | 96.76% | 88.46% | 95/85% | 291 | 69 |
-| Agent runtime / stages | 15 | 98.16% | 87.31% | 95/80% | 404 | 138 |
+| Logging / CLI | 3 | 96.76% | 88.46% | 95/85% | 307 | 69 |
+| Agent runtime / stages | 15 | 98.17% | 87.41% | 95/80% | 419 | 138 |
 | Summarization / compaction | 1 | 97.81% | 84.62% | 95/80% | 34 | 0 |
 | Codex auth / streaming / payloads | 7 | 94.70% | 88.94% | 90/80% | 143 | 0 |
 | Provider payloads / metadata / history | 19 | 94.25% | 83.74% | 90/80% | 172 | 0 |
