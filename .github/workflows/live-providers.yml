@@ -1,0 +1,61 @@
+name: Manual live providers
+
+on:
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: 'Comma-separated provider IDs, or all-configured (credentials from secrets only)'
+        required: true
+        default: all-configured
+        type: string
+      models:
+        description: 'JSON provider-to-model mapping; omitted models use IKACORE_LIVE_*_MODEL repository variables'
+        required: true
+        default: '{}'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-providers-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    env:
+      LIVE_PROVIDERS: ${{ inputs.providers }}
+      LIVE_MODELS: ${{ inputs.models }}
+      CODEX_BEARER: ${{ secrets.CODEX_BEARER }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      IKACORE_LIVE_CODEX_MODEL: ${{ vars.IKACORE_LIVE_CODEX_MODEL }}
+      IKACORE_LIVE_OPENAI_RESPONSES_MODEL: ${{ vars.IKACORE_LIVE_OPENAI_RESPONSES_MODEL }}
+      IKACORE_LIVE_OPENAI_CHAT_MODEL: ${{ vars.IKACORE_LIVE_OPENAI_CHAT_MODEL }}
+      IKACORE_LIVE_ANTHROPIC_MODEL: ${{ vars.IKACORE_LIVE_ANTHROPIC_MODEL }}
+      IKACORE_LIVE_DEEPSEEK_MODEL: ${{ vars.IKACORE_LIVE_DEEPSEEK_MODEL }}
+      IKACORE_LIVE_GEMINI_MODEL: ${{ vars.IKACORE_LIVE_GEMINI_MODEL }}
+      IKACORE_LIVE_OPENROUTER_MODEL: ${{ vars.IKACORE_LIVE_OPENROUTER_MODEL }}
+      IKACORE_LIVE_ZAI_MODEL: ${{ vars.IKACORE_LIVE_ZAI_MODEL }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Install wheel build tools
+        run: python -m pip install 'setuptools>=77.0.3' wheel
+      - name: Run bounded installed-wheel live matrix
+        run: python scripts/live_matrix.py --providers "$LIVE_PROVIDERS" --models "$LIVE_MODELS"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: sanitized-live-reports
+          path: artifacts/live/
+          if-no-files-found: warn
+          retention-days: 7

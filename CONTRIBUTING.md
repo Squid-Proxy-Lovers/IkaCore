@@ -40,52 +40,127 @@ pytest src/IkaTest/test_provider_payload_builders.py
 pytest src/IkaTest/test_provider_edge_helpers.py
 ```
 
-Optional live provider smoke tests are skipped by default and require credentials. When `IKACORE_LIVE_PROVIDER_TESTS=1` is set, at least one provider must be fully configured or the smoke suite fails. OpenAI and DeepSeek have conservative default model ids; Anthropic, Gemini, and OpenRouter require explicit model env vars so the smoke command does not depend on stale defaults.
+### Live provider validation
+
+Normal CI is offline. To validate configured providers once, install build/test tools
+and run the wheel-backed matrix:
 
 ```bash
-IKACORE_LIVE_PROVIDER_TESTS=1 OPENAI_API_KEY=... pytest src/IkaTest/test_live_provider_smoke.py
+python -m venv .venv
+.venv/bin/pip install -e ".[test,dev]"
+PATH="$PWD/.venv/bin:$PATH" python scripts/live_matrix.py --all-configured
 ```
 
-Run this suite manually with the environment variables below. The repository does not schedule live-provider runs; normal CI is offline. For Codex, use the separate manual integration runner described below.
+The helper builds the current source into a wheel, installs it with **runtime dependencies
+only** in a temporary venv, runs the checks, and removes that venv. The underlying
+`scripts/live_provider_check.py` rejects editable/source installations. It can also be
+invoked with an existing runtime wheel installation. `live_codex_check.py` remains a
+thin compatibility entry point.
 
-Supported live smoke variables:
+Credentials come only from environment variables. Set a model for each configured
+provider using the variable below, `--model` for one provider, or `--models` with a JSON
+provider-to-model mapping. Models are explicit to avoid relying on changing provider
+defaults. A missing credential prints `not configured` and records all cases as skipped;
+a credential with no model prints `model required` and makes the command fail.
 
-- `OPENAI_API_KEY`, optional `IKACORE_LIVE_OPENAI_MODEL`
-- `ANTHROPIC_API_KEY`, required `IKACORE_LIVE_ANTHROPIC_MODEL`
-- `DEEPSEEK_API_KEY`, optional `IKACORE_LIVE_DEEPSEEK_MODEL`
-- `GEMINI_API_KEY`, required `IKACORE_LIVE_GEMINI_MODEL`
-- `OPENROUTER_API_KEY`, required `IKACORE_LIVE_OPENROUTER_MODEL`
+| Provider ID | Credential variable | Model variable | Runtime route |
+| --- | --- | --- | --- |
+| `codex` | `CODEX_BEARER` | `IKACORE_LIVE_CODEX_MODEL` | Codex Responses |
+| `openai-responses` | `OPENAI_API_KEY` | `IKACORE_LIVE_OPENAI_RESPONSES_MODEL` | OpenAI `/v1/responses` |
+| `openai-chat` | `OPENAI_API_KEY` | `IKACORE_LIVE_OPENAI_CHAT_MODEL` | OpenAI `/v1/chat/completions` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `IKACORE_LIVE_ANTHROPIC_MODEL` | Anthropic `/v1/messages` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `IKACORE_LIVE_DEEPSEEK_MODEL` | DeepSeek Chat |
+| `gemini` | `GEMINI_API_KEY` | `IKACORE_LIVE_GEMINI_MODEL` | Gemini `generateContent` |
+| `openrouter` | `OPENROUTER_API_KEY` | `IKACORE_LIVE_OPENROUTER_MODEL` | OpenRouter Chat |
+| `zai` | `ZAI_API_KEY` | `IKACORE_LIVE_ZAI_MODEL` | OpenAI adapter at `https://api.z.ai/api/coding/paas/v4/chat/completions`, GLM thinking enabled |
 
-### Live Codex integration checks
-
-Use a runtime-only installation of the current wheel. Specify the model you intend to
-ship, and choose either `CODEX_BEARER` or the explicit local-login option:
+For example, use an existing local ChatGPT login explicitly for Codex only:
 
 ```bash
-/tmp/ika-runtime-bench/bin/python scripts/live_codex_check.py \
-  --use-local-login --model gpt-5.6-sol
+PATH="$PWD/.venv/bin:$PATH" python scripts/live_matrix.py \
+  --provider codex --use-local-login --model gpt-5.6-sol
 ```
 
-The local-login option uses the existing Codex credential helper and can refresh stored
-credentials. See the [official authentication documentation](https://learn.chatgpt.com/docs/auth).
-No credential values belong in command arguments or repository files.
+`--use-local-login` invokes the existing Codex credential helper and may refresh stored
+credentials; it is never implicit, including with `--all-configured`. It uses `CODEX_HOME`
+when configured. See the [authentication documentation](https://learn.chatgpt.com/docs/auth).
+Never put credential values in CLI arguments, model mappings, files, or workflow inputs.
 
-The runner checks sync/async text, sync/async tool-result replay, simple agents, two-stage
-execution, fresh-process snapshot resume, and cancellation after live response headers.
-Tools return only synthetic fixture data. Each case has a 60-second deadline and one
-request attempt; short prompts and disabled step extensions limit work. Codex does not
-accept the framework's per-request output-token cap, so this is not a strict token/spend
-limit. `--case CASE` selects individual checks. The report at `artifacts/live/codex.json`
-contains model/runtime identity and sanitized outcomes, without credentials or raw model
-output. A failed connectivity check stops the run; inspect requested/completed cases.
+Select providers with repeated `--provider`, or helper option `--providers codex,zai`.
+`--case CASE` is repeatable. Every selected provider gets the following matrix:
 
-The latest 8/8 result, recorded on 2026-10-17, used `gpt-5.6-sol`, the local Codex
-login, and the installed 2.0.0 wheel at runtime revision `1f2bab0`, which includes all
-review-round correctness fixes. An earlier 8/8 run at `183ce24` predates those fixes.
-This verifies that specific model/endpoint/account combination. Other providers,
-model variants, malformed/truncated
-streams, crashes during external tool effects and long-running workloads need separate
-validation. Offline CI continues to run without credentials.
+| Cases | Providers / capability |
+| --- | --- |
+| `sync_text`, `async_text` | All; exact small answer + positive token accounting |
+| `sync_tools`, `async_tools` | All; synthetic tool execution and exact tool-result replay |
+| `simple_agent`, `staged_agent` | All; termination and two-stage snapshot evidence |
+| `fresh_process_resume` | All; replay a saved post-model turn in a fresh process with network blocked and usage unchanged |
+| `async_cancellation` | All; cancel after real response headers, verify response closure and caller-client ownership |
+| `reasoning_tools` | Z.AI GLM, DeepSeek `reasoner`, OpenAI reasoning models, Codex; require parsed tool-turn reasoning to survive into the next payload |
+| `streaming_sse` | Codex; require the live SSE collector to parse a completed output |
+| `usage_accounting` | All; positive provider-reported usage |
+| `deadline` | All; zero request-control budget must fail before network access |
+| `transient_retry` | All; synthetic HTTP 503 then 200 via MockTransport, no live retry injection |
+| `compaction` | All; controlled small context budget, real summarization, post-compaction snapshot, coherent agent completion |
+| `workflow_hitl` | All; two dependent nodes, ask_user pause, resume_input, random value propagation through a named synthetic context field |
+
+Unsupported cases are explicit skips, not compatibility claims. The current runtime has
+no SSE path outside Codex and no Anthropic extended-thinking configuration or signed
+thinking-block replay. Gemini/OpenRouter reasoning is not exercised by this harness.
+If a reasoning model exposes no tool-turn reasoning, `reasoning_tools` records
+`reasoning_not_exposed`; preservation remains unverified. Use a reasoning model for
+that case (for example, DeepSeek's reasoner rather than chat model).
+
+Each case runs in a separate process with a **60-second wall-clock deadline** and
+`request_controls(timeout=60, max_retries=1)`. `--case-timeout 1..120` changes the limit.
+There is one live attempt per request, tiny prompts, at most three simple-agent steps/tool
+rounds, two steps per stage, and no step/stage extensions. The retry case alone permits two **synthetic**
+attempts. Generation is capped at 512 output tokens where supported; summarization
+uses the runtime's 2000-token cap. Codex accepts neither cap, so this is not a strict
+spend/token bound. Failed text connectivity checks skip remaining cases for that provider.
+
+Reports at `artifacts/live/<provider>.json` contain a schema version, model/endpoint,
+package version, git revision, installed-runtime SHA-256, requested cases, sanitized
+outcomes, allowlisted failure checkpoint IDs, elapsed times, and numeric usage. `usage_complete: false` marks cases whose
+full billing usage is unavailable (especially cancellation and failures). Compaction
+usage includes its summary request. Child stdout/stderr and exception messages are
+discarded; request dumps, GLM reasoning logs and TLS key logs are disabled. Synthetic
+snapshots live only in temporary directories. Compaction retention and workflow dataflow
+use random fixture values that are absent from the final answering instruction. No credentials or raw model output belong
+in reports. Generate the Markdown summary independently with:
+
+```bash
+python scripts/live_summary.py --directory artifacts/live
+```
+
+The helper creates `summary.md` automatically. Exit status is nonzero for failed cases
+or missing model configuration; an entirely unconfigured run succeeds with explicit
+skips. Inspect skips and requested/completed cases before accepting a run as validation.
+The optional pytest smoke entry point uses the same installed-wheel harness:
+`IKACORE_LIVE_PROVIDER_TESTS=1 pytest src/IkaTest/test_live_provider_smoke.py`.
+
+The manual **Manual live providers** workflow (`.github/workflows/live-providers.yml`)
+uses `workflow_dispatch` only, with `providers` (comma-separated IDs or `all-configured`)
+and `models` (JSON mapping) inputs. Configure the credential variables above as repository
+**secrets**, and model variables as repository **vars**, or supply models in the dispatch
+input. It has read-only repository permissions, pinned actions, a bounded job timeout,
+and uploads only sanitized reports. It never runs on PRs or a schedule.
+
+The expanded matrix recorded **14 passed, 0 failed, 1 skipped** with `gpt-5.6-sol`
+and local login at harness revision `21184cc`; `reasoning_tools` was skipped because
+the service exposed no tool-turn reasoning. The original eight cases all passed.
+
+Offline repro `python scripts/live_replay_repro.py` shows that Codex and OpenAI
+Responses parse synthetic tool-turn reasoning but omit it from the next request, and
+Anthropic neither enables extended thinking nor preserves its signed thinking blocks.
+Z.AI is a positive replay control. These are existing runtime gaps, left unchanged by
+the live harness work; a live reasoning skip does not validate those paths.
+
+The recorded **Codex 8/8** result on 2026-10-17 used `gpt-5.6-sol`, local Codex login,
+and the installed 2.0.0 wheel at runtime revision `1f2bab0`; `dc9efbd` retains that
+validated runtime baseline. An earlier 8/8 run at `183ce24` predates review fixes.
+These results establish that model/endpoint/account combination only. Other providers
+remain unverified until their keys and models are configured and their matrix passes.
 
 ## Project Conventions
 
