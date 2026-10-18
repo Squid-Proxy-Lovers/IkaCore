@@ -61,7 +61,7 @@ def _resolve_bearer() -> str:
 
 def main() -> None:
     bearer = _resolve_bearer()
-    print(f"[codex] bearer={bearer[:12]}...  plan={codex_auth.get_chatgpt_plan()}")
+    print(f"[codex] authentication succeeded; plan={codex_auth.get_chatgpt_plan()}")
 
     get_pwd = IkaTools(
         name="get_pwd",

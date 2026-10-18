@@ -13,3 +13,5 @@ runtime-data/
 .coverage
 .coverage.*
 artifacts/
+
+/examples/keys.cfg
