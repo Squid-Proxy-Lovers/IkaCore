@@ -149,6 +149,20 @@ def test_provider_routing_and_token_caps(runner, provider, model):
         assert '/api/coding/paas/v4/' in probe.url
         assert payload['thinking'] == {'type': 'enabled'}
 
+    agent = probe.agent('Finish the fixture.')
+    try:
+        assert agent.config.provider.api_url == probe.url
+        assert agent.config.provider.max_tokens == 512
+        assert agent.config.provider.reasoning_effort == probe.reasoning
+        assert agent.config.provider.use_responses_api is (provider == 'openai-responses')
+        assert agent.config.limits.maxsteps == agent.config.limits.max_tool_rounds == 3
+        assert agent.config.limits.max_tool_calls == 3
+        assert agent.config.policy.max_step_extensions == agent.config.policy.max_stage_extensions == 0
+        assert not agent.config.output.cli and not agent.config.output.summarize_final
+        assert not agent.config.output.show_usage_level0
+    finally:
+        agent.shutdown()
+
 
 def test_mocked_transport_text_usage_deadline_and_retry(runner, monkeypatch):
     client, async_client = httpx.Client, httpx.AsyncClient
@@ -217,18 +231,23 @@ def test_mocked_tool_replay_compaction_and_workflow(runner, monkeypatch):
                 message = {'tool_calls': [{'id': 'fixture', 'type': 'function', 'function': {
                     'name': 'lookup_fixture', 'arguments': '{"label":"check"}'}}]}
         else:
-            if 'ask_user' in tools and not any(m.get('content') == 'YES' for m in payload['messages']):
+            system = next((m['content'] for m in payload['messages'] if m['role'] == 'system'), '')
+            if 'Call stage_end immediately' in system:
+                function, arguments = 'stage_end', {}
+            elif 'ask_user' in tools and not any(m.get('content') == 'YES' for m in payload['messages']):
                 function, arguments = 'ask_user', {'question': 'Approve?'}
             else:
                 function = 'agent_end'
-                arguments = {'input': value}
+                expected = runner.re.search(r'input exactly ((?:SIMPLE|STAGED|RESUME)_OK)', text)
+                arguments = {'input': expected.group(1) if expected else value}
             message = {'tool_calls': [{'id': 'fixture', 'type': 'function', 'function': {
                 'name': function, 'arguments': json.dumps(arguments)}}]}
         return httpx.Response(200, json={'choices': [{'message': message}], 'usage': token_usage})
     monkeypatch.setattr(httpx, 'Client', lambda **kwargs: client(transport=httpx.MockTransport(respond), **kwargs))
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **kwargs: async_client(transport=httpx.MockTransport(respond), **kwargs))
     probe = runner.Probe('gpt-4o-mini', 'sk-fake', 'openai-chat')
-    for name in ('sync_tools', 'async_tools', 'compaction', 'workflow_hitl'):
+    for name in ('sync_tools', 'async_tools', 'simple_agent', 'staged_agent',
+                 'fresh_process_resume', 'compaction', 'workflow_hitl'):
         row = runner.run_case(name, runner.operations(probe)[name])
         assert row['status'] == 'passed', row
 

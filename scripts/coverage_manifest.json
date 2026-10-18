@@ -34,9 +34,11 @@
         "src/IkaTest/test_request_controls.py::test_async_deadline_cancels_transport_and_never_retries",
         "src/IkaTest/test_request_controls.py::test_async_abort_unregisters_and_does_not_leave_parent_cancelled",
         "src/IkaTest/test_request_controls.py::test_async_contexts_are_isolated_and_sync_tools_inherit",
-        "src/IkaTest/test_transport_lifecycle.py::test_external_async_cancellation_is_preserved"
+        "src/IkaTest/test_transport_lifecycle.py::test_external_async_cancellation_is_preserved",
+        "src/IkaTest/test_request_controls.py::test_legacy_control_setters_reach_sync_worker_and_restore",
+        "src/IkaTest/test_controlled_runtime_scopes.py::test_controlled_request_keeps_output_hooks_and_runtime_control"
       ],
-      "known_gap": "Cooperative cancellation is tested; forcibly stopping arbitrary synchronous functions is unsupported.",
+      "known_gap": "Controlled JSON/SSE workers preserve request controls, runtime options, output scopes and snapshot RuntimeControl pauses. The caller wait is bounded; forcibly stopping arbitrary synchronous functions is unsupported.",
       "min_lines": 95,
       "min_branches": 90
     },
@@ -261,7 +263,8 @@
         "src/IkaTest/test_logging_utils.py::test_level_two_logger_writes_structured_json_events",
         "src/IkaTest/test_cli_output.py::test_output_buffer_sink_failures_do_not_block_stdout_suppressed_path",
         "src/IkaTest/test_runtime_events.py::test_events_are_structured_isolated_and_follow_worker_context",
-        "src/IkaTest/test_runtime_events.py::test_no_subscriber_does_not_allocate_events_and_scopes_restore"
+        "src/IkaTest/test_runtime_events.py::test_no_subscriber_does_not_allocate_events_and_scopes_restore",
+        "src/IkaTest/test_controlled_runtime_scopes.py::test_controlled_request_keeps_output_hooks_and_runtime_control"
       ],
       "known_gap": "Local files and captured output; extended high-volume logging and sink failures need soak testing.",
       "min_lines": 95,

@@ -29,7 +29,15 @@ from uuid import uuid4
 import httpx
 from live_provider_config import CASES, PROVIDERS, clean_usage, safe_details, validate_model
 
-from IkaCore import IkaBaseAgent, IkaStage, RuntimeControl
+from IkaCore import (
+    ExecutionLimits,
+    ExecutionPolicy,
+    IkaBaseAgent,
+    IkaStage,
+    OutputConfig,
+    ProviderConfig,
+    RuntimeControl,
+)
 from IkaModel.base import AgentTool, BareBoneModel, ToolArgs
 from IkaModel.chat_interface.chat_interface import async_chat, chat, init_message_history
 from IkaModel.codex.auth import get_bearer
@@ -57,12 +65,12 @@ class Probe:
     def agent(self, prompt, **kwargs):
         name = kwargs.pop('name', 'live_fixture')
         return IkaBaseAgent(name, 'Synthetic integration test', prompt,
-            model_id=self.model_id, api_key=self.bearer, api_url=self.url,
-            reasoning_effort=self.reasoning, max_tokens=512,
-            use_responses_api=self.provider == 'openai-responses',
-            maxsteps=3, max_tool_rounds=3, max_tool_calls=3,
-            max_step_extensions=0, max_stage_extensions=0,
-            summarize_final=False, show_usage_level0=False, **kwargs)
+            model_id=self.model_id, api_key=self.bearer,
+            provider=ProviderConfig(api_url=self.url, reasoning_effort=self.reasoning,
+                max_tokens=512, use_responses_api=self.provider == 'openai-responses'),
+            limits=ExecutionLimits(maxsteps=3, max_tool_rounds=3, max_tool_calls=3),
+            policy=ExecutionPolicy(max_step_extensions=0, max_stage_extensions=0),
+            output=OutputConfig(cli=False, summarize_final=False, show_usage_level0=False), **kwargs)
 
     def text(self, asynchronous=False):
         model = self.model()
