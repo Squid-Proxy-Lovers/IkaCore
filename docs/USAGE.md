@@ -72,6 +72,28 @@ also belong to this policy. `policy.use_async` selects the async request bridge.
 Configuration is retained in `agent.config`; transcripts, counters, usage and the
 current (possibly extended) budget live in `agent.state`.
 
+Request lifetimes are a separate scope from agent configuration and snapshot pauses:
+
+```python
+from IkaCore import RuntimeControl
+from IkaModel import request_controls
+
+agent.enable_snapshots("runtime-data/run.db", RuntimeControl(pause_points={"post_model"}))
+with request_controls(timeout=60, max_retries=1):
+    result = agent.execution()
+if result.get("status") == "paused":
+    agent.clear_pause_requests()
+    with request_controls(timeout=60, max_retries=1):
+        result = agent.resume_from_snapshot(result["snapshot_id"])
+agent.shutdown()
+```
+
+`RuntimeControl` selects persisted pause/replay boundaries. `request_controls()` scopes
+deadlines, cancellation and retry limits. Controlled sync HTTP requests copy the caller's
+context into their worker, including snapshot hooks, runtime options and output subscribers.
+The saved post-model turn resumes without another request or duplicate usage. See the
+[deadline and cleanup limits](v2/README.md#retained-controls).
+
 ### Tools
 
 Tools are defined with `IkaTools`.
@@ -456,13 +478,16 @@ Useful options:
 Optional live provider smoke tests are available for checking real provider plumbing outside normal CI:
 
 ```bash
-IKACORE_LIVE_PROVIDER_TESTS=1 OPENAI_API_KEY=... pytest src/IkaTest/test_live_provider_smoke.py
+IKACORE_LIVE_PROVIDER_TESTS=1 OPENAI_API_KEY=... IKACORE_LIVE_OPENAI_RESPONSES_MODEL=... \
+  pytest src/IkaTest/test_live_provider_smoke.py
 ```
 
-The live smoke suite supports OpenAI, Anthropic, DeepSeek, Gemini, and OpenRouter. When live smoke is enabled, at least one provider must be fully configured. For providers without stable project defaults, set the matching `IKACORE_LIVE_<PROVIDER>_MODEL` variable before running it.
+The installed-wheel harness supports Codex, OpenAI Chat/Responses, Anthropic, DeepSeek,
+Gemini, OpenRouter and Z.AI. Every configured route requires an explicit model. Normal
+pytest runs remain offline; the optional smoke test runs only sync/async text cases.
 
 For live Codex text, tool, agent, resume and cancellation checks, see
-[the integration runner](../CONTRIBUTING.md#live-codex-integration-checks).
+[the integration runner](../CONTRIBUTING.md#live-provider-validation).
 
 ### Examples
 

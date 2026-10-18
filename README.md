@@ -11,7 +11,7 @@ The current runtime supports:
 - snapshot/resume and interruptible HITL flows
 - optional memory integration through ordinary tools
 
-This branch develops v2 with intentional breaking changes. See the [migration guide](docs/v2/README.md) before adopting it.
+Version 2.0.0 is unreleased and intentionally breaks compatibility with v1. See the [migration guide](docs/v2/README.md) before adopting it.
 
 ## Install
 
@@ -22,7 +22,9 @@ pip install -e .
 For development:
 
 ```bash
-pip install -e ".[test]"
+python -m venv .venv
+export PATH="$PWD/.venv/bin:$PATH" VIRTUAL_ENV="$PWD/.venv"
+python -m pip install -e ".[test,dev]"
 pytest
 ```
 
@@ -59,6 +61,20 @@ agent = IkaBaseAgent("helper", prompt="Summarize the task", model_id="gpt-4o-min
 usage. `OutputConfig(subscribers=(callback,))` receives structured `RuntimeEvent`
 values. Memory backends are explicitly adapted with `IkaMem.agent_tools.MemoryTools`.
 See the [usage guide](docs/USAGE.md) for executable setup examples.
+
+Bound provider requests across retries with a scoped deadline:
+
+```python
+from IkaModel import request_controls
+
+with request_controls(timeout=60, max_retries=1):
+    result = agent.execution()
+agent.shutdown()
+```
+
+Controlled synchronous JSON and Codex SSE requests bound the caller's wait using
+an absolute deadline. Their workers preserve output subscribers and snapshot controls;
+caller-owned HTTPX clients remain usable. See the [request control limits](docs/v2/README.md#retained-controls).
 
 ## Main Concepts
 

@@ -9,6 +9,7 @@ import copy
 import socket
 import threading
 from collections.abc import Callable
+from contextvars import copy_context
 from functools import partial
 from typing import Any, Optional, TypeVar
 
@@ -98,7 +99,8 @@ class _SyncRequestAbort:
         # Custom transports have no owned socket. Their response close may run
         # arbitrary user code, so it cannot be allowed to hold up the caller.
         if response is not None and not response.is_closed:
-            threading.Thread(target=self._close_response, args=(response,), name="ika-http-close", daemon=True).start()
+            threading.Thread(target=copy_context().run, args=(self._close_response, response),
+                             name="ika-http-close", daemon=True).start()
 
     @staticmethod
     def _close_response(response: httpx.Response) -> None:

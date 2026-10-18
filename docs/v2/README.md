@@ -34,9 +34,9 @@ The initial consolidation carried two generations of behavior at once. This pass
 - Collapses the workflow mixin/type-contract chains. Function and module size checks remain;
   whole-class line limits that encouraged tiny inheritance layers are removed.
 
-The earlier offline quality and wheel measurements below cover runtime/test revision
-`0ec020a`. Historical benchmarks and live checks retain their original revision labels.
-Live-provider and application behavior remain separate release checks.
+The merged validation below covers runtime/test revision `179b52e`, integrating
+the refactor, hard synchronous deadlines and provider harness from merge `6ef53d4`.
+Historical benchmarks retain their original revision labels. Version 2.0.0 is unreleased.
 
 ## Persistence and provider optimization
 
@@ -75,6 +75,7 @@ The permanent suite also checks these behaviors across both execution modes.
 ## Breaking changes and migration
 
 | Previous call or behavior | V2 behavior / migration |
+| --- | --- |
 | Agent `memory`, `memory_access`, backend fields/helpers and `MemoryConfig` | Construct `IkaMem.agent_tools.MemoryTools(name, short_term=..., long_term=...)`; pass `.tools(access=...)` using ordinary agent/stage `tools`. |
 | Stage `memory_access`, `long_term_filter` | Select `.tools(access=..., long_term_filter=...)` for that stage. |
 | `IkaModel.init_global_long_term_memory` / `get_global_long_term_memory` | Construct and explicitly share an `LTMemory` backend. No global backend is read. |
@@ -89,7 +90,6 @@ The permanent suite also checks these behaviors across both execution modes.
 | Flat `subagents`, `next_agent` | `topology=AgentTopology(subagents=(child,), next_agent=...)` |
 | Flat logging/usage/summary settings | `output=OutputConfig(...)` |
 | Configuration mixed with live counters/history | `agent.config` is frozen; `agent.state` stores the current run's budgets, transcript, usage and replay state. |
-| --- | --- |
 | `CheckpointStore`, `load_checkpoint()`, `checkpoint=True`, `checkpoint_db_path=...`, stage `checkpoint` | Removed. Call `agent.enable_snapshots(path)` or `workflow.enable_snapshots(path)`. V1 checkpoint databases are not converted. |
 | `agent.execution(checkpoint_uid=...)` / returned `checkpoint_uid` | Call `agent.resume_from_snapshot(snapshot_id, resume_input=...)`; returned IDs are `snapshot_id`. |
 | `optimize_provider_payloads`, `modern_retries`, `dataflow_workflows`, `preserve_workflow_prompts` | Remove these options; their reviewed behavior is now standard. |
@@ -222,10 +222,10 @@ one-liners, and this sample was not used to justify feature removal. IkaGeneral 
 outside the active runtime scope. Snapshots from `dc9efbd` are covered by a real saved
 post-model fixture: resume consumes its response with no network or duplicate usage.
 
-The completed refactor passes **890 tests** (6 skipped), all coverage floors and
-**42/42 execution-parity scenarios** against `dc9efbd`. See the
-[implementation and validation report](refactor-validation.md) for the constructor
-migration, module map, commit series and before/after benchmark measurements.
+The merged tree passes **973 tests** (one opt-in live smoke test skipped), all coverage
+floors and **42/42 fresh execution-parity traces** against `dc9efbd`. See the
+[merged validation report](merged-validation.md) for final checks and the historical
+[refactor report](refactor-validation.md) for its constructor migration and benchmarks.
 
 ## Checks
 
@@ -242,38 +242,39 @@ caches, forks, or other clones.
 
 ## Live validation status
 
-The latest **8/8** live Codex result, recorded on 2026-10-17, used the installed
-2.0.0 wheel at runtime revision `1f2bab0` with `gpt-5.6-sol`:
-sync/async text, sync/async tool calls, simple and two-stage execution,
-fresh-process resume and cancellation. Resume used no network and preserved usage;
-cancellation closed the response while leaving the caller's client usable.
-This run includes the historical-replay, workflow HITL, transport cancellation,
-nested-frame, transcript, replay-state, stage-budget, fork and SQLite fixes. An earlier
-8/8 run at `183ce24` (runtime `344348c`) predates them.
+The latest Codex matrix, recorded on **2026-10-18 UTC**, used the installed 2.0.0 wheel
+at runtime revision `179b52e` with `gpt-5.6-sol`: **14 passed, 0 failed, 1 skipped**.
+It covers sync/async text and tools, simple/two-stage agents, fresh-process resume,
+cancellation, SSE, usage, expired deadlines, synthetic retries, compaction and workflow
+HITL. Resume used no network and preserved usage; cancellation closed the response while
+keeping the caller's client open. `reasoning_tools` skipped with `reasoning_not_exposed`;
+reasoning replay remains unverified. Every case was bounded to 60 seconds. The historical
+8/8 results at `1f2bab0` and `183ce24` used the narrower original harness.
 
 These results cover one model and account. OpenAI API Chat/Responses, Anthropic,
 DeepSeek, Gemini, OpenRouter and Z.AI remain unverified live in this review. Existing
 offline coverage does not establish live compatibility. Reproduce the Codex run with
-[the live-check command](../../CONTRIBUTING.md#live-codex-integration-checks).
+[the live-check command](../../CONTRIBUTING.md#live-provider-validation).
 
 ## Measured quality and footprint
 
-The full local quality run measured at runtime/test revision `0ec020a` on CPython
-3.13.15 passed **872 tests**, with **6 live-provider checks skipped**:
-**95.72% line coverage**, **87.19% branch
-coverage**, and **93.85% combined coverage**. Ruff, Pyright, compilation, and the isolated
-wheel build/import check also passed. The matrix assigns all **121 runtime modules** to
-**16 areas** and passed all **102 required scenarios**, with zero gate failures. Coverage
-excludes 458 lines, including type-only and abstract declarations. Existing global and
-per-area coverage floors are unchanged. At the same revision, the **28 HTTP/HTTPS
-real-socket tests passed 20 consecutive rounds (560 cases)**, including deadline timing
-and deterministic cancellation after a response hook releases a pooled connection.
+The final runtime/test revision `179b52e` on CPython 3.13.15 / HTTPX 0.28.1 passes
+**973 tests**, with **one opt-in live smoke test skipped**: **96.39% line coverage**,
+**88.20% branch coverage**, and **94.62% combined coverage**. Ruff, Pyright
+(zero errors), compilation, fresh-wheel inventory and isolated imports also pass.
+The coverage matrix assigns all **122 runtime modules** to **16 areas** and passes
+**119 required area/scenario checks** (117 unique selectors), with zero gate failures.
+Coverage excludes 194 lines. All global and per-area floors remain unchanged.
 
-The fresh `ikacore-2.0.0-py3-none-any.whl` measured at `0ec020a` is **206.22 KiB**
-(211,173 bytes), with **672.89 KiB** of unpacked content (689,041 bytes). The runtime
-retains **6 settings** and one direct dependency (`httpx`). The three runtime packages
-contain 17,213 physical Python lines, **2,161 more** than `origin/main` at `0f6234c`
-(15,052 lines); this count includes blank and comment lines and excludes tests/docs.
+The fresh `ikacore-2.0.0-py3-none-any.whl` contains the final README and runtime at
+`179b52e`: **212.85 KiB** compressed (217,960 bytes), **689.76 KiB** unpacked
+(706,313 bytes). The runtime retains **six settings**, one direct dependency (`httpx`)
+and 17,291 physical Python lines across the three packages (including comments/blanks).
+The 60-case HTTP/HTTPS deadline/ownership suite passed ten consecutive rounds
+(600 checks). All six Python 3.11.16 / 3.12.14 / 3.13.15 × HTTPX 0.27.0 / 0.28.1 cells
+passed 967 tests with seven skips each: six dev-only lint fixtures plus the opt-in live
+smoke entry point. All runtime tests ran; the main dev environment exercised the lint
+fixtures. Commands, exact revisions and live results are in [merged-validation.md](merged-validation.md).
 
 The following historical benchmark results at `183ce24` have not been remeasured after
 the merged fixes. They use an installed runtime-only wheel on macOS arm64 / CPython
@@ -334,26 +335,26 @@ CI publishes package/runtime and all-provider reports. See the
 Persistence still dominates this trivial local agent fixture, and the runtime retains
 architectural complexity. Further removal should follow observed use and product needs.
 
-### Local coverage snapshot (`0ec020a`)
+### Local coverage snapshot (`179b52e`)
 
 | Area | Modules | Lines | Branches | Floors L/B | Tests observed | Excluded lines |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Public API / package imports | 4 | 98.00% | 90.91% | 95/90% | 377 | 12 |
-| Request controls / cancellation | 6 | 95.51% | 90.91% | 95/90% | 298 | 0 |
-| HTTP ownership / TLS / connection reuse | 5 | 95.95% | 92.86% | 95/90% | 219 | 2 |
-| Retries / request errors | 2 | 87.34% | 77.38% | 85/75% | 175 | 0 |
-| Tools / schemas / output bounds | 14 | 95.57% | 88.74% | 95/85% | 294 | 161 |
-| Snapshot storage / privacy / replay rules | 8 | 94.67% | 90.32% | 90/90% | 99 | 0 |
-| Agent snapshots / human resume | 6 | 98.61% | 93.27% | 95/90% | 120 | 0 |
-| Workflow snapshots / selective replay | 3 | 98.65% | 92.19% | 95/85% | 53 | 0 |
-| Workflows / fan-in / instance isolation | 9 | 98.25% | 93.24% | 95/90% | 104 | 66 |
-| Memory integration | 9 | 93.30% | 77.27% | 90/75% | 19 | 10 |
-| Logging / CLI | 3 | 96.76% | 88.46% | 95/85% | 344 | 69 |
-| Agent runtime / stages | 15 | 98.17% | 87.41% | 95/80% | 439 | 138 |
-| Summarization / compaction | 1 | 97.81% | 84.62% | 95/80% | 34 | 0 |
-| Codex auth / streaming / payloads | 7 | 94.70% | 88.94% | 90/80% | 143 | 0 |
-| Provider payloads / metadata / history | 19 | 94.25% | 83.74% | 90/80% | 172 | 0 |
-| Chat loop / accounting / human interruption | 10 | 95.13% | 84.74% | 90/80% | 80 | 0 |
+| Public API / package imports | 4 | 97.89% | 90.00% | 95/90% | 301 | 20 |
+| Request controls / cancellation | 6 | 99.63% | 93.75% | 95/90% | 369 | 0 |
+| HTTP ownership / TLS / connection reuse | 5 | 97.76% | 95.00% | 95/90% | 285 | 2 |
+| Retries / request errors | 2 | 87.66% | 78.57% | 85/75% | 221 | 0 |
+| Tools / schemas / output bounds | 11 | 96.13% | 90.83% | 95/85% | 311 | 4 |
+| Snapshot storage / privacy / replay rules | 8 | 94.89% | 91.13% | 90/90% | 109 | 0 |
+| Agent snapshots / human resume | 6 | 99.46% | 94.23% | 95/90% | 132 | 2 |
+| Workflow snapshots / selective replay | 3 | 98.65% | 92.19% | 95/85% | 57 | 0 |
+| Workflows / fan-in / instance isolation | 9 | 98.28% | 93.33% | 95/90% | 109 | 66 |
+| Memory integration | 10 | 93.75% | 76.67% | 90/75% | 27 | 10 |
+| Logging / CLI | 5 | 97.86% | 88.75% | 95/85% | 424 | 71 |
+| Agent runtime / stages | 16 | 98.18% | 87.22% | 95/80% | 463 | 19 |
+| Summarization / compaction | 1 | 97.81% | 86.54% | 95/80% | 35 | 0 |
+| Codex auth / streaming / payloads | 7 | 95.69% | 90.87% | 90/80% | 153 | 0 |
+| Provider payloads / metadata / history | 19 | 94.75% | 84.98% | 90/80% | 190 | 0 |
+| Chat loop / accounting / human interruption | 10 | 95.99% | 86.32% | 90/80% | 98 | 0 |
 
 The generated matrix includes required scenario outcomes, exact uncovered locations,
 and known gaps. CI artifacts describe each checked revision.
