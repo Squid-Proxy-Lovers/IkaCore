@@ -222,3 +222,51 @@ def test_pause_configuration_is_isolated_and_preserves_replay_policy(tmp_path, m
     agent.clear_pause_requests()
     assert not control.should_pause('tool:progress')
     agent.shutdown()
+
+
+@pytest.mark.parametrize('staged', [False, True])
+def test_historical_resume_requires_approval_for_repeated_tool_effects(tmp_path, monkeypatch, staged):
+    effects = []
+    tool = IkaTools('external', 'test', {'type': 'object'},
+                    execute_function=lambda args: effects.append(True), replay_policy='deny')
+    agent = _agent(tmp_path, tools=[] if staged else [tool],
+                   Stages=[IkaStage('phase', 'task', [tool])] if staged else [])
+    store = agent.enable_snapshots(str(tmp_path / 'runtime.db'), RuntimeControl(pause_points={'pre_model'}))
+    def chat(model, messages, history, **kwargs):
+        execute_tool('external', {}, kwargs['tool_executors'])
+        return _finished()
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    try:
+        paused = agent.execution()
+        first = agent.resume_from_snapshot(paused['snapshot_id'])
+        assert effects == [True]
+        assert not store.assess_frame_replay(first['runtime']['frame_id'])['safe']
+        with pytest.raises(ValueError, match='non-replayable'):
+            agent.resume_from_snapshot(paused['snapshot_id'])
+        assert effects == [True]
+        agent.resume_from_snapshot(paused['snapshot_id'], allow_unsafe_replay=True)
+        assert effects == [True, True]
+    finally:
+        agent.shutdown()
+
+
+def test_resume_does_not_require_approval_for_effects_before_snapshot(tmp_path, monkeypatch):
+    effects = []
+    tool = IkaTools('external', 'test', {'type': 'object'},
+                    execute_function=lambda args: effects.append(True), replay_policy='deny')
+    agent = _agent(tmp_path, tools=[tool])
+    agent.enable_snapshots(str(tmp_path / 'runtime.db'))
+    def chat(model, messages, history, **kwargs):
+        if not effects:
+            execute_tool('external', {}, kwargs['tool_executors'])
+            agent.request_pause_at('pre_model')
+            return {'content': 'continue', 'tool_calls': [], 'usage': {}, 'cost': {}}
+        return _finished()
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    try:
+        paused = agent.execution()
+        assert paused['status'] == 'paused' and effects == [True]
+        assert agent.resume_from_snapshot(paused['snapshot_id'])['final_message'] == 'done'
+        assert effects == [True]
+    finally:
+        agent.shutdown()

@@ -58,6 +58,11 @@ class AgentSnapshotReplayMixin(AgentSnapshotControlMixin):
             return {**state["completed_output"], "runtime": {"run_id": info["run_id"], "frame_id": info["frame_id"], "last_snapshot_id": snapshot_id}}
         if state.get("tool_checkpoint") and not allow_unsafe_replay:
             raise ValueError("mid-tool snapshots require an explicit unsafe-replay decision")
+        root_frame = state.get("root_frame_id", info["frame_id"])
+        if not allow_unsafe_replay and not session.store.assess_frame_replay(
+            root_frame, after_snapshot_id=snapshot_id
+        )["safe"]:
+            raise ValueError("historical snapshot contains non-replayable tool calls; explicit unsafe-replay approval required")
         self._resume_state = deepcopy(state)
         self.message_history = deepcopy(state.get("message_history", self.message_history))
         self._total_usage = deepcopy(state.get("total_usage", self._total_usage))

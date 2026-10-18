@@ -86,7 +86,7 @@ def _descendant_frames(store: Any, frame: dict[str, Any]) -> list[dict[str, Any]
         selected = expanded
 
 
-def assess_frame_replay(self: Any, frame_id: str) -> dict[str, Any]:
+def assess_frame_replay(self: Any, frame_id: str, *, after_snapshot_id: Optional[str] = None) -> dict[str, Any]:
     blockers: list[dict[str, Any]] = []
     frame = self.get_frame(frame_id)
     if frame is None:
@@ -95,6 +95,12 @@ def assess_frame_replay(self: Any, frame_id: str) -> dict[str, Any]:
     frame_ids = {item["frame_id"] for item in descendants}
     tool_events = [event for event in self.list_events(frame["run_id"])
                    if event["frame_id"] in frame_ids and event["event_type"] == "tool_completed"]
+    if after_snapshot_id is not None:
+        snapshot = self.load_snapshot(after_snapshot_id)
+        if snapshot is None or snapshot["run_id"] != frame["run_id"]:
+            raise ValueError("replay snapshot must belong to the frame's run")
+        tool_events = [event for event in tool_events if event["created_at"] > snapshot["created_at"]]
+        descendants = [child for child in descendants if child["created_at"] > snapshot["created_at"]]
     for event in tool_events:
         payload = event["payload_json"]
         replay_policy = payload.get("replay_policy", "deny")
