@@ -79,9 +79,9 @@ limit. `--case CASE` selects individual checks. The report at `artifacts/live/co
 contains model/runtime identity and sanitized outcomes, without credentials or raw model
 output. A failed connectivity check stops the run; inspect requested/completed cases.
 
-The earlier 8/8 result recorded at `183ce24` on 2026-10-13 used `gpt-5.6-sol`, the local
-Codex login, and the installed v2 wheel at runtime revision `344348c`. It predates the
-correctness fixes merged into `402d1ae`; live checks have not been rerun for that tree.
+The latest 8/8 result, recorded on 2026-10-17, used `gpt-5.6-sol`, the local Codex
+login, and the installed 2.0.0 wheel at runtime revision `1f2bab0`, which includes all
+review-round correctness fixes. An earlier 8/8 run at `183ce24` predates those fixes.
 This verifies that specific model/endpoint/account combination. Other providers,
 model variants, malformed/truncated
 streams, crashes during external tool effects and long-running workloads need separate

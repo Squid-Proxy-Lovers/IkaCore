@@ -198,14 +198,14 @@ caches, forks, or other clones.
 
 ## Live validation status
 
-The earlier **8/8** live Codex result recorded at `183ce24` on 2026-10-13 used the
-installed v2 wheel at runtime revision `344348c` with `gpt-5.6-sol`:
+The latest **8/8** live Codex result, recorded on 2026-10-17, used the installed
+2.0.0 wheel at runtime revision `1f2bab0` with `gpt-5.6-sol`:
 sync/async text, sync/async tool calls, simple and two-stage execution,
 fresh-process resume and cancellation. Resume used no network and preserved usage;
 cancellation closed the response while leaving the caller's client usable.
-This result predates the historical-replay, workflow HITL, transport cancellation,
-nested-frame, transcript, replay-state, stage-budget, and SQLite fixes merged into
-`402d1ae`; live checks have not been rerun for the merged tree.
+This run includes the historical-replay, workflow HITL, transport cancellation,
+nested-frame, transcript, replay-state, stage-budget, fork and SQLite fixes. An earlier
+8/8 run at `183ce24` (runtime `344348c`) predates them.
 
 These results cover one model and account. OpenAI API Chat/Responses, Anthropic,
 DeepSeek, Gemini, OpenRouter and Z.AI remain unverified live in this review. Existing
