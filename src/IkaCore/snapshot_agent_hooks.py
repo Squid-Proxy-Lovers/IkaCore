@@ -10,6 +10,7 @@ from IkaModel.base import AgentEndException, HumanInputRequired
 from IkaModel.execution_hooks import ExecutionHooks, current_execution_context, current_tool_frame
 
 from .runtime_control import RuntimePauseRequested
+from .snapshot_agent_state import clear_resume_state
 from .snapshot_session import SnapshotSession, record_boundary
 
 
@@ -24,6 +25,7 @@ def ensure_session(agent: Any) -> Optional[SnapshotSession]:
     if session.run_id is not None and not session.replaying:
         frame = session.store.get_frame(str(session.root_frame_id))
         if frame is not None and frame["status"] in {"completed", "cancelled", "failed"}:
+            clear_resume_state(agent)
             session.run_id, session.root_frame_id, session.stage_frame_id = None, None, None
             session.stage_index, session.last_snapshot_id, session.pending_response = None, None, None
             session.live_messages, session.skip_boundary, session.remaining_steps = None, None, None

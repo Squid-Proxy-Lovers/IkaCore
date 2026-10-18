@@ -51,3 +51,33 @@ def test_hitl_resume_consumes_saved_transcript_before_entering_next_stage(agent_
     assert 'CURRENT STAGE IS:\n\nwrite final report' in seen[2][0]['content']
     assert all(item['content'] != 'Approve?' for item in seen[2])
     assert agent._snapshot_resume_messages is None
+
+
+@pytest.mark.parametrize('failed_replay', [False, True])
+def test_fresh_execution_starts_at_first_stage_after_replay(agent_factory, monkeypatch, failed_replay):
+    agent = agent_factory(Stages=[IkaStage('first', 'first phase', []), IkaStage('second', 'second phase', [])])
+    calls = []
+    def chat(model, messages, history, **kwargs):
+        index = kwargs['current_stage_index']
+        calls.append(index)
+        if len(calls) == 1:
+            agent.request_pause_at('pre_model')
+            return _turn('advance', 'stage_end')
+        if failed_replay and len(calls) == 2:
+            raise ValueError('replay failed')
+        return _turn('done', 'agent_end') if index == 1 else _turn('advance', 'stage_end')
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    paused = agent.execution()
+    agent.clear_pause_requests()
+    if failed_replay:
+        with pytest.raises(ValueError, match='replay failed'):
+            agent.resume_from_snapshot(paused['snapshot_id'])
+    else:
+        assert agent.resume_from_snapshot(paused['snapshot_id'])['final_message'] == 'done'
+    resumed_calls = list(calls)
+    fresh = agent.execution()
+    assert calls == resumed_calls + [0, 1]
+    assert fresh['runtime']['run_id'] != paused['runtime']['run_id']
+    assert agent._resume_state is None
+    assert agent._snapshot_resume_messages is None
+    assert agent._snapshot_runtime.pending_response is None

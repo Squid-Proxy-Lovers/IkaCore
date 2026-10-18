@@ -11,6 +11,7 @@ from IkaModel.runtime_errors import IkaRequestControlError
 
 from .runtime_control import RuntimePauseRequested
 from .snapshot_agent_hooks import ensure_session, hooks_for_session
+from .snapshot_agent_state import clear_resume_state
 from .snapshot_session import SnapshotSession, record_boundary
 
 
@@ -58,6 +59,8 @@ def execute_with_snapshots(agent: Any, execute: Callable[..., dict[str, Any]],
             session.store.update_run_status(str(session.run_id), "cancelled", ended=True)
             raise
         finally:
+            clear_resume_state(agent)
+            session.pending_response, session.skip_boundary = None, None
             if not finished:
                 session.store.update_frame(str(session.root_frame_id), status="failed")
                 session.store.update_run_status(str(session.run_id), "failed", ended=True)

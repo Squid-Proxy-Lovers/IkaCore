@@ -10,6 +10,11 @@ from IkaModel.base import AgentEndException
 from IkaModel.execution_hooks import emit_boundary
 
 
+def clear_resume_state(agent: Any) -> None:
+    agent._resume_state = None
+    agent._snapshot_resume_messages = None
+
+
 def resume_pending_response(agent: Any) -> Optional[dict[str, Any]]:
     session = getattr(agent, "_snapshot_runtime", None)
     if session is None or session.pending_response is None:
