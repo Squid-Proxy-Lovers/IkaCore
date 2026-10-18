@@ -113,7 +113,7 @@ This behavior is enforced by tests in [`test_workflow_semantics.py`](../src/IkaT
 Important current behavior:
 
 - OpenAI Responses is the default OpenAI backend
-- OpenAI Chat Completions requires `use_responses_api=False`
+- OpenAI Chat Completions requires `provider=ProviderConfig(use_responses_api=False)`
 - Codex is a separate provider that targets `CODEX_API_URL`
 - explicit non-OpenAI URLs are respected
 - synchronous deadline/cancellation aborts close the active HTTP response and preserve caller-owned HTTPX clients

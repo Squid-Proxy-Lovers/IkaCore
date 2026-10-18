@@ -28,11 +28,13 @@ Saving flows from `STMemory.save()` or `LTMemory.save()` through the backend's
 memory wrapper's result handling/filter. `reset()` delegates to the backend.
 `Memory` itself also supports direct save/search without the item-specific wrapping.
 
-`IkaBaseAgent` integrates these wrappers through `AgentMemoryMixin` and ordinary
-memory tools. `memory=True` enables those tools but does not initialize storage.
-Use `init_short_term_memory(config)` for a Mem0-backed short-term store, or assign
-`STMemory(storage=...)` and `LTMemory(storage=...)` explicitly. Agent long-term save
-uses structured task/output/metadata arguments and creates an `LTMemItem`.
+`IkaMem.agent_tools.MemoryTools` adapts explicit backends to ordinary `IkaTools`.
+Pass `.tools(access=..., long_term_filter=...)` to an agent or stage's `tools`.
+Core agents have no memory-specific schema, executor or backend lookup. Construct
+`STMemory(storage=...)` / `LTMemory(storage=...)`, or use `embedder_config` for Mem0,
+and share the same backend explicitly when cross-run memory is desired.
+Long-term save uses structured task/output/metadata and creates an `LTMemItem`.
+Search tools allow replay; saves deny replay unless the caller approves repeating effects.
 
 ## Backend boundaries
 

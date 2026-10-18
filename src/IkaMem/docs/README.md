@@ -7,6 +7,14 @@ pip install mem0ai
 export MEM0_API_KEY='your_key'
 ```
 
+## agent integration
+
+Create storage explicitly, then use `MemoryTools(name, short_term=..., long_term=...).tools()`
+from `IkaMem.agent_tools` as ordinary agent or stage tools. Access permissions and
+result filters are selected when building the tools. IkaCore does not initialize a
+global memory backend. The [offline example](../../../docs/USAGE.md#memory) runs
+without Mem0 or credentials.
+
 ## short-term memory
 ```python
 from IkaMem import STMemory

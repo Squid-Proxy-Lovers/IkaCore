@@ -34,7 +34,7 @@ The initial consolidation carried two generations of behavior at once. This pass
 - Collapses the workflow mixin/type-contract chains. Function and module size checks remain;
   whole-class line limits that encouraged tiny inheritance layers are removed.
 
-The current offline quality and wheel measurements below cover runtime/test revision
+The earlier offline quality and wheel measurements below cover runtime/test revision
 `0ec020a`. Historical benchmarks and live checks retain their original revision labels.
 Live-provider and application behavior remain separate release checks.
 
@@ -85,7 +85,7 @@ The permanent suite also checks these behaviors across both execution modes.
 | Flat `api_url`, `max_tokens`, `temperature`, `use_responses_api`, `reasoning_effort` | `provider=ProviderConfig(...)` |
 | Flat `system_prompt`, `start_prompt`, `end_prompt` | `prompts=PromptConfig(...)` |
 | Flat `maxsteps`, `step_timeout`, tool budgets and rate limits | `limits=ExecutionLimits(...)` |
-| Flat `final_answer_check`, extension settings and `use_async` | `policy=ExecutionPolicy(final_answer_checks=(check,), ...)`; validation retries and extra steps are explicit. |
+| Flat `final_answer_check`, extension settings and `use_async`, and agent extension attributes | `policy=ExecutionPolicy(final_answer_checks=(check,), ...)`; validation retries and extra steps are explicit; inspect extension settings in `agent.config.policy`. |
 | Flat `subagents`, `next_agent` | `topology=AgentTopology(subagents=(child,), next_agent=...)` |
 | Flat logging/usage/summary settings | `output=OutputConfig(...)` |
 | Configuration mixed with live counters/history | `agent.config` is frozen; `agent.state` stores the current run's budgets, transcript, usage and replay state. |
@@ -203,6 +203,11 @@ three projects. Dynamic calls/subclasses were not fully captured; common calls r
 one-liners, and this sample was not used to justify feature removal. IkaGeneral remains
 outside the active runtime scope. Snapshots from `dc9efbd` are covered by a real saved
 post-model fixture: resume consumes its response with no network or duplicate usage.
+
+The completed refactor passes **890 tests** (6 skipped), all coverage floors and
+**42/42 execution-parity scenarios** against `dc9efbd`. See the
+[implementation and validation report](refactor-validation.md) for the constructor
+migration, module map, commit series and before/after benchmark measurements.
 
 ## Checks
 

@@ -70,7 +70,7 @@ See the [usage guide](docs/USAGE.md) for executable setup examples.
 ## Current Semantics
 
 - OpenAI uses the Responses API by default
-- Set `use_responses_api=False` to use Chat Completions
+- Set `provider=ProviderConfig(use_responses_api=False)` to use Chat Completions
 - Stage execution preserves prior transcript context
 - `child` workflow edges wire subagents into a stage and do not auto-run as standalone nodes
 - HITL uses interrupt/resume rather than blocking terminal input

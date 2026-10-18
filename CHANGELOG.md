@@ -79,6 +79,14 @@ V2 intentionally breaks compatibility with v1. See the
 - A saved snapshot fixture written by `dc9efbd` resumes without a provider call or
   duplicate usage. Its former memory-access state is ignored; explicit tools configure memory.
 
+### Refactor verification
+
+- Complete the remaining v2 simplification candidates with preserved default execution policy.
+  Keep components lazy and frozen options reusable so construction retains benchmark parity.
+- Add permanent 42-scenario execution parity checks against `dc9efbd`, retain all existing
+  behavioral assertions, and update the coverage manifest without lowering floors.
+  See [the validation report](docs/v2/refactor-validation.md) for measured evidence.
+
 ### Fixed
 
 - Preserve zero remaining steps in legacy staged HITL snapshots without `loop_state`

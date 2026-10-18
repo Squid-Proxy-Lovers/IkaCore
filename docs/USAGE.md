@@ -310,7 +310,7 @@ Provider routing is derived from `model_id`, unless you override `api_url`.
 Default behavior:
 
 - OpenAI models use the Responses API by default.
-- Set `use_responses_api=False` to target OpenAI Chat Completions.
+- Set `provider=ProviderConfig(use_responses_api=False)` to target OpenAI Chat Completions.
 - Anthropic, Gemini, DeepSeek, and OpenRouter URLs are inferred from `model_id`.
 - Codex model IDs ending in `-codex`, such as `gpt-5.3-codex`, route to the Codex backend.
 - If you pass an explicit non-OpenAI `api_url`, that URL is respected.
@@ -450,7 +450,7 @@ Useful options:
 
 - `output=OutputConfig(logging_level=1..3)`
 - `OutputConfig(logging_file="logs.txt")`
-- `show_usage_level0=True`
+- `OutputConfig(show_usage_level0=True)`
 - `IKA_DUMP_REQUESTS=/path/to/dir` to dump request/response payloads for debugging
 
 Optional live provider smoke tests are available for checking real provider plumbing outside normal CI:

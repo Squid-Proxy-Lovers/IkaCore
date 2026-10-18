@@ -162,7 +162,8 @@
         "src/IkaTest/test_snapshot_resume_state.py::test_fresh_execution_starts_at_first_stage_after_replay",
         "src/IkaTest/test_snapshot_resume_state.py::test_snapshot_without_loop_state_uses_only_remaining_budget",
         "src/IkaTest/test_snapshot_resume_state.py::test_snapshot_without_loop_state_subtracts_only_current_stage_steps",
-        "src/IkaTest/test_snapshot_resume_state.py::test_exhausted_legacy_budget_does_not_regain_a_turn"
+        "src/IkaTest/test_snapshot_resume_state.py::test_exhausted_legacy_budget_does_not_regain_a_turn",
+        "src/IkaTest/test_agent_configuration.py::test_dc9efbd_snapshot_resumes_saved_turn_without_provider_or_double_usage"
       ],
       "known_gap": "In-process mocked models; mid-tool replay restarts execution rather than restoring Python stacks.",
       "min_lines": 95,
@@ -291,7 +292,9 @@
         "src/IkaTest/test_snapshot_resume_state.py::test_mid_stage_resume_does_not_double_charge_steps_to_following_stage",
         "src/IkaTest/test_snapshot_resume_state.py::test_loop_budget_survives_resume_in_a_new_agent",
         "src/IkaTest/test_snapshot_resume_state.py::test_hitl_resume_preserves_the_stage_budget_already_consumed",
-        "src/IkaTest/test_snapshot_resume_state.py::test_exhausted_hitl_resume_extends_or_finalizes_before_stage_completion"
+        "src/IkaTest/test_snapshot_resume_state.py::test_exhausted_hitl_resume_extends_or_finalizes_before_stage_completion",
+        "src/IkaTest/test_execution_parity.py::test_execution_parity_with_dc9efbd[False]",
+        "src/IkaTest/test_execution_parity.py::test_execution_parity_with_dc9efbd[True]"
       ],
       "known_gap": "Model behavior, task success and downstream application semantics are outside offline unit coverage.",
       "min_lines": 95,
