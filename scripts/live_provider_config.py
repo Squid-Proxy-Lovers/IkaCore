@@ -28,10 +28,14 @@ USAGE_KEYS = ('input_tokens', 'output_tokens', 'total_tokens', 'input_cached_tok
 BOOL_FIELDS = {'usage_reported', 'tool_result_replayed', 'completed', 'fresh_process',
                'network_blocked_during_resume', 'usage_preserved', 'live_response_closed',
                'caller_client_open', 'reasoning_preserved', 'sse_parsed', 'deadline_enforced',
+               'dependency_answer_missing', 'dependency_answer_contains_fixture', 'dependency_answer_empty',
                'synthetic_transport', 'compacted', 'coherent_answer', 'dependency_preserved', 'hitl_resumed'}
 INT_FIELDS = {'tool_executions', 'stages_executed', 'attempts', 'compactions'}
 REASONS = {'not_configured', 'model_required', 'runtime_no_sse', 'runtime_no_extended_thinking',
            'model_not_reasoning', 'reasoning_not_exposed', 'connectivity_failed'}
+CHECKS = {'workflow_initial_pause', 'workflow_interrupted_instance', 'workflow_upstream_answer',
+          'workflow_dependency_answer', 'workflow_dependency_context', 'workflow_resumed', 'compaction_answer', 'compaction_summary',
+          'compaction_snapshot', 'reasoning_replay'}
 ERRORS = {'AssertionError', 'RuntimeError', 'ValueError', 'TypeError', 'KeyError', 'TimeoutExpired',
           'HTTPStatusError', 'ConnectError', 'ReadTimeout', 'IkaAPIError', 'IkaAuthenticationError',
           'IkaRequestDeadlineExceeded', 'IkaProviderResponseError', 'IkaProviderPayloadError',
@@ -52,6 +56,8 @@ def safe_details(value):
     result.update({key: value[key] for key in INT_FIELDS
                    if type(value.get(key)) is int and 0 <= value[key] < 10**6})
     result['usage'] = clean_usage(value.get('usage'))
+    if isinstance(value.get('check'), str) and value['check'] in CHECKS:
+        result['check'] = value['check']
     if isinstance(value.get('reason'), str) and value['reason'] in REASONS:
         result['reason'] = value['reason']
     if isinstance(value.get('error_type'), str) and value['error_type'] in ERRORS:

@@ -102,7 +102,7 @@ Select providers with repeated `--provider`, or helper option `--providers codex
 | `deadline` | All; zero request-control budget must fail before network access |
 | `transient_retry` | All; synthetic HTTP 503 then 200 via MockTransport, no live retry injection |
 | `compaction` | All; controlled small context budget, real summarization, post-compaction snapshot, coherent agent completion |
-| `workflow_hitl` | All; two dependent nodes, ask_user pause, resume_input, upstream answer propagation |
+| `workflow_hitl` | All; two dependent nodes, ask_user pause, resume_input, random value propagation through a named synthetic context field |
 
 Unsupported cases are explicit skips, not compatibility claims. The current runtime has
 no SSE path outside Codex and no Anthropic extended-thinking configuration or signed
@@ -121,7 +121,7 @@ spend/token bound. Failed text connectivity checks skip remaining cases for that
 
 Reports at `artifacts/live/<provider>.json` contain a schema version, model/endpoint,
 package version, git revision, installed-runtime SHA-256, requested cases, sanitized
-outcomes, elapsed times, and numeric usage. `usage_complete: false` marks cases whose
+outcomes, allowlisted failure checkpoint IDs, elapsed times, and numeric usage. `usage_complete: false` marks cases whose
 full billing usage is unavailable (especially cancellation and failures). Compaction
 usage includes its summary request. Child stdout/stderr and exception messages are
 discarded; request dumps, GLM reasoning logs and TLS key logs are disabled. Synthetic

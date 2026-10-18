@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from live_provider_config import CASES, PROVIDERS, REASONS, clean_usage, safe_seconds
+from live_provider_config import CASES, CHECKS, PROVIDERS, REASONS, clean_usage, safe_seconds
 
 
 def write_summary(directory):
@@ -21,8 +21,8 @@ def write_summary(directory):
             if case not in CASES or status not in {'passed', 'failed', 'skipped'}:
                 continue
             tokens = clean_usage(result.get('usage')).get('total_tokens', '—')
-            reason = result.get('reason')
-            reason = reason if isinstance(reason, str) and reason in REASONS else '—'
+            reason = result.get('reason') or result.get('check')
+            reason = reason if isinstance(reason, str) and reason in REASONS | CHECKS else '—'
             rows.append(f"| {provider} | {case} | {status} | {safe_seconds(result.get('seconds'))} | {tokens} | {reason} |")
     directory.mkdir(parents=True, exist_ok=True)
     (directory / 'summary.md').write_text('\n'.join(rows) + '\n')

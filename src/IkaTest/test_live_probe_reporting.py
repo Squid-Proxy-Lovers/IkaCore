@@ -328,3 +328,15 @@ def test_case_timeout_kills_process_group_and_reaps_child(runner, monkeypatch, t
     with pytest.raises(subprocess.TimeoutExpired):
         runner.case_process(['fixture'], tmp_path, {}, 1)
     assert events == [('wait', 1), ('killpg', 12345) if runner.os.name == 'posix' else 'kill', ('wait', None)]
+
+
+def test_failure_checkpoints_and_details_are_allowlisted(runner):
+    def fail():
+        error = AssertionError('workflow_dependency_answer')
+        error.probe_details = {'dependency_answer_missing': True, 'content': 'PRIVATE_MODEL_OUTPUT',
+                               'api_key': 'sk-FAKE-KEY', 'dependency_answer_empty': 'sk-FAKE-KEY'}
+        raise error
+    row = runner.run_case('workflow_hitl', fail)
+    assert row['check'] == 'workflow_dependency_answer' and row['dependency_answer_missing']
+    assert 'PRIVATE_MODEL_OUTPUT' not in json.dumps(row) and 'sk-FAKE-KEY' not in json.dumps(row)
+    assert 'check' not in runner.safe_details({'check': 'sk-FAKE-KEY'})

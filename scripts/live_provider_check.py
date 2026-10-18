@@ -233,7 +233,9 @@ def run_case(name, operation, timeout=60):
             result.update(safe_details({'reason': str(error)}))
             result['status'] = 'skipped'
         except Exception as error:
-            result.update(safe_details({'error_type': type(error).__name__}))
+            result.update(safe_details({'error_type': type(error).__name__,
+                                        'check': error.args[0] if error.args else None}))
+            result.update(safe_details(getattr(error, 'probe_details', {})))
             result.setdefault('error_type', 'RuntimeError')
             status = getattr(getattr(error, 'response', None), 'status_code', None)
             match = re.search(r'returned (\d{3})', str(error))
@@ -271,7 +273,7 @@ def reasoning_tools(probe):
         result = probe.tool_round_trip(thinking=True)
     if not observed:
         raise SkipCase('reasoning_not_exposed')
-    assert replayed and all(replayed)
+    assert replayed and all(replayed), 'reasoning_replay'
     return {**result, 'reasoning_preserved': True}
 
 
@@ -342,11 +344,11 @@ def compaction(probe):
         try:
             with runtime_options(compact_at_fraction=0.6):
                 result = agent.execution()
-            assert result['final_message'] == sentinel
-            assert agent.message_history['summary']['message'].startswith('[SUMMARY]')
+            assert result['final_message'] == sentinel, 'compaction_answer'
+            assert agent.message_history['summary']['message'].startswith('[SUMMARY]'), 'compaction_summary'
             snapshots = store.list_snapshots(result['runtime']['run_id'])
             count = sum(row['snapshot_kind'] == 'post_compaction' for row in snapshots)
-            assert count >= 1
+            assert count >= 1, 'compaction_snapshot'
         finally:
             agent.shutdown()
     return {'compacted': True, 'compactions': count, 'coherent_answer': True, 'usage': result['usage']}
@@ -354,24 +356,40 @@ def compaction(probe):
 
 def workflow_hitl(probe):
     from IkaCore.workflow import IkaWorkflow, WorkflowEdge, WorkflowNode
+    from IkaModel.chat_interface import chat_request
     sentinel = 'upstream_' + uuid4().hex[:12]
     first = probe.agent('Follow the approval stage.', name='approval', Stages=[IkaStage(
         'approve', 'If no approval was supplied, call ask_user with question exactly Approve? '
         'When the user says YES, call agent_end with input exactly ' + sentinel + '.', [], hitl=True, stage_max_step=2)])
-    second = probe.agent('Read upstream context and call agent_end with input exactly the upstream fixture value. '
-                         'If no upstream value is present, use MISSING.', name='final')
+    second = probe.agent('Find SYNTHETIC_UPSTREAM_VALUE in the upstream context. Call agent_end with input '
+                         'exactly its value, without quotes, punctuation or explanation. '
+                         'Use MISSING only if that named field is absent.', name='final')
     workflow = IkaWorkflow('live_flow', 'Synthetic dependency + HITL',
         [WorkflowNode('approval', first), WorkflowNode('final', second)], [WorkflowEdge('approval', 'final')],
-        compress_hook=lambda contexts, agent: '\n'.join(contexts))
-    with tempfile.TemporaryDirectory() as directory:
+        compress_hook=lambda contexts, agent: json.dumps({'SYNTHETIC_UPSTREAM_VALUE': contexts[-1]}))
+    observed = []
+    original = chat_request.build_provider_request
+    def observe(*args, **kwargs):
+        built = original(*args, **kwargs)
+        if args[1].agent_name == 'final':
+            observed.append(sentinel in json.dumps(built[2]))
+        return built
+    with tempfile.TemporaryDirectory() as directory, patch.object(chat_request, 'build_provider_request', observe):
         workflow.enable_snapshots(str(Path(directory) / 'workflow.db'))
         try:
-            assert workflow.run() == {}
+            assert workflow.run() == {}, 'workflow_initial_pause'
             info = workflow.snapshot_runtime_info()
-            assert list(info['interrupted_instances']) == ['approval:0']
+            assert list(info['interrupted_instances']) == ['approval:0'], 'workflow_interrupted_instance'
             result = workflow.resume_from_snapshot(info['last_snapshot_id'], resume_input='YES')
-            assert result['approval'].final == sentinel and result['final'].final == sentinel
-            assert not workflow.snapshot_runtime_info()['interrupted_instances']
+            assert result['approval'].final == sentinel, 'workflow_upstream_answer'
+            assert observed and all(observed), 'workflow_dependency_context'
+            answer = result['final'].final
+            if answer != sentinel:
+                error = AssertionError('workflow_dependency_answer')
+                error.probe_details = {'dependency_answer_missing': answer == 'MISSING',
+                    'dependency_answer_contains_fixture': sentinel in answer, 'dependency_answer_empty': not answer}
+                raise error
+            assert not workflow.snapshot_runtime_info()['interrupted_instances'], 'workflow_resumed'
         finally:
             workflow.async_executor.shutdown()
             first.shutdown()
