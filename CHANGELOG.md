@@ -38,6 +38,9 @@ V2 intentionally breaks compatibility with v1. See the
 
 ### Fixed
 
+- Invalidate interrupted downstream transcripts and their old answers when upstream
+  workflow instances rerun. Restart with fresh inputs and enforce replay-safety checks.
+
 - Clone interrupted workflow child continuations into forked runs, remapping their frames
   and snapshots, and reject cross-run child snapshots before routing human answers.
 

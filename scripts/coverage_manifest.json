@@ -187,7 +187,10 @@
         "src/IkaTest/test_workflow_hitl_resume.py::test_parallel_resume_keeps_each_interruption_and_completed_siblings",
         "src/IkaTest/test_workflow_hitl_resume.py::test_workflow_resume_preserves_effects_before_child_interruption",
         "src/IkaTest/test_workflow_hitl_resume.py::test_workflow_fork_does_not_mutate_source_child",
-        "src/IkaTest/test_workflow_hitl_resume.py::test_workflow_rejects_child_snapshot_from_another_run"
+        "src/IkaTest/test_workflow_hitl_resume.py::test_workflow_rejects_child_snapshot_from_another_run",
+        "src/IkaTest/test_workflow_hitl_resume.py::test_selective_replay_invalidates_interrupted_descendant",
+        "src/IkaTest/test_workflow_hitl_resume.py::test_restarting_interrupted_descendant_checks_replay_safety",
+        "src/IkaTest/test_workflow_hitl_resume.py::test_selecting_interrupted_instance_restarts_only_that_continuation"
       ],
       "known_gap": "No distributed scheduler, crash recovery or arbitrary tool-implementation migration guarantee.",
       "min_lines": 95,

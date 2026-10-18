@@ -69,13 +69,23 @@ def replay_cache(session: WorkflowSnapshotSession, saved: dict[str, Any], allow_
     interrupted = {key.rpartition(":")[0] for key, result in saved.items()
                    if result.get("status") in INTERRUPTED_STATUSES}
     interrupted.update(key.rpartition(":")[0] for key in session.interrupted_instances)
-    for node_name in selected.keys() | interrupted:
+    rerun_nodes = {key.rpartition(":")[0] for key in saved
+                   if not session.control.reuse_historical_parallel_results}
+    rerun_nodes.update(node for node, instances in selected.items() if instances)
+    for node_name in rerun_nodes | interrupted:
         frontier = list(workflow._node_dependents[node_name])
         while frontier:
             name = frontier.pop()
             if name not in invalidated:
                 invalidated.add(name)
                 frontier.extend(workflow._node_dependents[name])
+    # A saved transcript is valid only while all of its upstream inputs are reused.
+    # Answers to invalidated questions must not be applied to the new execution.
+    for key in list(session.interrupted_instances):
+        node, _, instance = key.rpartition(":")
+        if node in invalidated or int(instance) in selected.get(node, []):
+            del session.interrupted_instances[key]
+            session.resume_inputs.pop(key, None)
     cache: dict[str, dict[str, Any]] = {}
     for key, result in saved.items():
         node, _, instance = key.rpartition(":")

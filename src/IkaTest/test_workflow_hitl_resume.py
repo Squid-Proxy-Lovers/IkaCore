@@ -15,7 +15,7 @@ from IkaTest.test_snapshot_resume_state import _turn
 @pytest.fixture
 def approval_workflow(tmp_path, monkeypatch):
     workflows, agents, calls = [], [], []
-    def create(*, parallel=False, use_async=False, tool=None):
+    def create(*, parallel=False, use_async=False, tool=None, version_root=False):
         names = ('root', 'left', 'right', 'join') if parallel else ('approval', 'final')
         approvals = {'left', 'right'} if parallel else {'approval'}
         nodes = []
@@ -23,6 +23,7 @@ def approval_workflow(tmp_path, monkeypatch):
             stages = [IkaStage('approve', 'ask approval', [tool] if tool else [], hitl=True)] if name in approvals else []
             agent = IkaBaseAgent(name, 'test', 'task', model_id='gpt-4o', api_key='test', Stages=stages,
                                 maxsteps=6, max_stage_extensions=0, show_usage_level0=False, use_async=use_async)
+            agent._test_version_root = version_root
             agents.append(agent)
             nodes.append(WorkflowNode(name, agent))
         edges = ([WorkflowEdge('root', n) for n in approvals] + [WorkflowEdge(n, 'join') for n in approvals]
@@ -34,6 +35,8 @@ def approval_workflow(tmp_path, monkeypatch):
         return workflow, store, calls
     def chat(model, messages, history, **kwargs):
         calls.append((model.agent_name, deepcopy(messages)))
+        if model.agent_name == 'root' and agents[-1]._test_version_root:
+            return _turn(f"ROOT-VERSION-{sum(name == 'root' for name, _ in calls)}", 'agent_end')
         answers = [m['content'] for m in messages if m['role'] == 'user' and m['content'].startswith('ANSWER-')]
         if kwargs.get('current_stage_index') is not None and not answers and not any(m['content'] == 'YES' for m in messages):
             if 'effect' in kwargs['tool_executors']:
@@ -156,3 +159,67 @@ def test_workflow_rejects_child_snapshot_from_another_run(approval_workflow):
     with pytest.raises(ValueError, match='workflow run'):
         workflow.resume_from_snapshot(malformed, resume_input='ANSWER-WRONG')
     assert store.list_frames(other['run_id']) == before
+
+
+@pytest.mark.parametrize('parallel', [False, True])
+@pytest.mark.parametrize('reuse', [False, True])
+def test_selective_replay_invalidates_interrupted_descendant(approval_workflow, parallel, reuse):
+    workflow, _, calls = approval_workflow(parallel=True, version_root=True)
+    workflow.run(use_async=parallel)
+    old = workflow.snapshot_runtime_info()
+    control = workflow._workflow_snapshot.control
+    control.parallel_replay = {'root': [0]} if reuse else {}
+    control.reuse_historical_parallel_results = reuse
+    result = workflow.resume_from_snapshot(old['last_snapshot_id'], resume_input={'left:0': 'ANSWER-STALE'})
+    assert set(result) == {'root'}
+    approvals = ('left', 'right') if parallel else ('left',)
+    assert Counter(name for name, _ in calls) == {'root': 2, **dict.fromkeys(approvals, 2)}
+    for name in approvals:
+        messages = [messages for node, messages in calls if node == name][-1]
+        assert 'ROOT-VERSION-2' in str(messages)
+        assert 'ROOT-VERSION-1' not in str(messages)
+        assert 'ANSWER-STALE' not in str(messages)
+    current = workflow.snapshot_runtime_info()
+    assert set(current['interrupted_instances'].values()).isdisjoint(old['interrupted_instances'].values())
+    control.parallel_replay = {}
+    control.reuse_historical_parallel_results = True
+    for _ in range(3):
+        if not current['interrupted_instances']:
+            break
+        result = workflow.resume_from_snapshot(current['last_snapshot_id'],
+            resume_input={key: 'ANSWER-FRESH-' + key for key in current['interrupted_instances']})
+        current = workflow.snapshot_runtime_info()
+    assert set(result) == {'root', 'left', 'right', 'join'}
+    assert Counter(name for name, _ in calls)['root'] == 2
+
+
+@pytest.mark.parametrize('parallel', [False, True])
+def test_restarting_interrupted_descendant_checks_replay_safety(approval_workflow, parallel):
+    effects = []
+    tool = IkaTools('effect', 'test', {'type': 'object'}, execute_function=lambda args: effects.append(1), replay_policy='deny')
+    workflow, _, calls = approval_workflow(parallel=True, version_root=True, tool=tool)
+    workflow.run(use_async=parallel)
+    old = workflow.snapshot_runtime_info()
+    before = len(calls)
+    workflow._workflow_snapshot.control.parallel_replay = {'root': [0]}
+    with pytest.raises(ValueError, match='non-replayable'):
+        workflow.resume_from_snapshot(old['last_snapshot_id'])
+    assert len(calls) == before and len(effects) == (2 if parallel else 1)
+    workflow.resume_from_snapshot(old['last_snapshot_id'], allow_unsafe_replay=True)
+    assert len(effects) == (4 if parallel else 2)
+    assert 'ROOT-VERSION-2' in str([messages for name, messages in calls if name == 'left'][-1])
+
+
+def test_selecting_interrupted_instance_restarts_only_that_continuation(approval_workflow):
+    workflow, store, calls = approval_workflow(parallel=True)
+    workflow.run(use_async=True)
+    old = workflow.snapshot_runtime_info()
+    workflow._workflow_snapshot.control.parallel_replay = {'left': [0]}
+    workflow.resume_from_snapshot(old['last_snapshot_id'], resume_input={'left:0': 'ANSWER-STALE'})
+    current = workflow.snapshot_runtime_info()
+    def roots(info):
+        return {key: store.load_snapshot(value)['state_json']['root_frame_id']
+                for key, value in info['interrupted_instances'].items()}
+    assert roots(current)['right:0'] == roots(old)['right:0']
+    assert roots(current)['left:0'] != roots(old)['left:0']
+    assert Counter(name for name, _ in calls) == {'root': 1, 'left': 2, 'right': 1}
