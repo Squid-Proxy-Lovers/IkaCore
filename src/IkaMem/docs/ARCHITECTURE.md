@@ -1,150 +1,43 @@
 # IkaMem Architecture
 
-## System Overview
+`STMemory` and `LTMemory` share the `Memory` base class. Both require an explicit
+storage backend, or `embedder_config={"provider": "mem0", "config": ...}` to create
+a `Mem0Store`. Mem0 is optional; constructing `Mem0Store` without it raises
+`ImportError`. Custom backends work without Mem0.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         IkaMem                              │
-│                     Memory System                           │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              │
-        ┌─────────────────────┴─────────────────────┐
-        │                                            │
-        ▼                                            ▼
-┌──────────────────┐                        ┌──────────────────┐
-│ ShortTermMemory  │                        │ LongTermMemory   │
-├──────────────────┤                        ├──────────────────┤
-│ - agent          │                        │ - agent          │
-│ - task           │                        │ - task           │
-│ - save()         │                        │ - save()         │
-│ - search()       │                        │ - search()       │
-│ - reset()        │                        │ - reset()        │
-└────────┬─────────┘                        └─────────┬────────┘
-         │                                            │
-         │         ┌──────────────────┐              │
-         └────────▶│  Memory (base)   │◀─────────────┘
-                   ├──────────────────┤
-                   │ - storage        │
-                   │ - _agent         │
-                   │ - _task          │
-                   │ - save()         │
-                   │ - search()       │
-                   │ - reset()        │
-                   └────────┬─────────┘
-                            │
-                            ▼
-                   ┌──────────────────┐
-                   │ Storage (type)   │
-                   ├──────────────────┤
-                   │ + save()         │
-                   │ + search()       │
-                   │ + reset()        │
-                   └────────┬─────────┘
-                            │
-                            ▼
-                   ┌──────────────────┐
-                   │  Mem0Storage     │
-                   ├──────────────────┤
-                   │ - memory (Mem0)  │
-                   │ - memory_type    │
-                   │ - config         │
-                   │ + save()         │
-                   │ + search()       │
-                   │ + reset()        │
-                   └────────┬─────────┘
-                            │
-                            ▼
-                   ┌──────────────────┐
-                   │   Mem0 Library   │
-                   │  (mem0ai pkg)    │
-                   └──────────────────┘
-```
+## Current types
 
-### Saving to Memory
+- `Memory` owns a `StorageBackend` and the optional `agent` and `task` labels.
+- `STMemory` wraps saved values in `STMemItem`, then passes its data and metadata
+  to storage. With Mem0 it adds a short instruction to the stored text.
+- `LTMemory` accepts ordinary values or `LTMemItem`. For an item it stores the task
+  as the value and enriches metadata with agent, expected output, quality and datetime.
+  Search applies the default five-result filter after retrieving candidates.
+- `STMemItem` and `LTMemItem` describe data and metadata; applications can supply
+  their own metadata without a dynamically generated memory schema.
+- `StorageBackend` in `memory.py` is the structural protocol for synchronous
+  `save(value, metadata)`, `search(query, limit, score_threshold)` and `reset()`.
+- `Storage` in `storage/interface.py` is an abstract interface with the same methods.
+- `Mem0Store` implements `Storage` using a hosted or local Mem0 client. It normalizes
+  search results, propagates identity/configuration filters and labels memory type.
 
-```
-User Code
-   │
-   │ memory.save(value, metadata)
-   │
-   ▼
-ShortTermMemory.save()
-   │
-   │ creates ShortTermMemoryItem
-   │ enriches data for Mem0
-   │
-   ▼
-Memory.save() (base class)
-   │
-   │ delegates to storage
-   │
-   ▼
-Mem0Storage.save()
-   │
-   │ formats as conversation
-   │ builds parameters
-   │ applies filters
-   │
-   ▼
-Mem0 API / Local Mem0
-   │
-   │ semantic embedding
-   │ storage
-   │
-   ▼
-Memory stored
-```
+## Data flow
 
-### Searching Memory
+Saving flows from `STMemory.save()` or `LTMemory.save()` through the backend's
+`save()` method. Searching flows through the backend's `search()` and then the
+memory wrapper's result handling/filter. `reset()` delegates to the backend.
+`Memory` itself also supports direct save/search without the item-specific wrapping.
 
-```
-User Code
-   │
-   │ results = memory.search(query, limit, threshold)
-   │
-   ▼
-ShortTermMemory.search()
-   │
-   │ logs search start
-   │
-   ▼
-Memory.search() (base class)
-   │
-   │ delegates to storage
-   │
-   ▼
-Mem0Storage.search()
-   │
-   │ builds search params
-   │ applies filters (user_id, agent_id, run_id)
-   │ sets metadata type filter
-   │
-   ▼
-Mem0 API / Local Mem0
-   │
-   │ semantic similarity search
-   │ metadata filtering
-   │ graph-based reasoning
-   │
-   ▼
-Results normalized
-   │
-   ▼
-User Code receives results
-```
+`IkaBaseAgent` integrates these wrappers through `AgentMemoryMixin` and ordinary
+memory tools. `memory=True` enables those tools but does not initialize storage.
+Use `init_short_term_memory(config)` for a Mem0-backed short-term store, or assign
+`STMemory(storage=...)` and `LTMemory(storage=...)` explicitly. Agent long-term save
+uses structured task/output/metadata arguments and creates an `LTMemItem`.
 
-## Class Hierarchy
+## Backend boundaries
 
-```
-Storage (interface)
-    └── Mem0Storage
-
-Memory (base)
-    ├── ShortTermMemory
-    └── LongTermMemory
-
-(Plain classes - no inheritance)
-    ├── ShortTermMemoryItem
-    └── LongTermMemoryItem
-```
+The public storage protocol is synchronous; native async storage methods are not
+part of this interface. Custom backends must implement all three protocol methods.
+Offline backend and agent integration examples are in the maintained
+[usage guide](../../../docs/USAGE.md#memory); hosted Mem0 setup is in the
+[memory guide](README.md). Hosted Mem0 checks require separately configured credentials.

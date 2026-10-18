@@ -46,7 +46,7 @@ Optional live provider smoke tests are skipped by default and require credential
 IKACORE_LIVE_PROVIDER_TESTS=1 OPENAI_API_KEY=... pytest src/IkaTest/test_live_provider_smoke.py
 ```
 
-The same smoke suite is available in GitHub Actions through the `Live Provider Smoke` workflow. Configure provider API keys as repository secrets and provider model ids as repository variables before relying on the scheduled run.
+Run this suite manually with the environment variables below. The repository does not schedule live-provider runs; normal CI is offline. For Codex, use the separate manual integration runner described below.
 
 Supported live smoke variables:
 

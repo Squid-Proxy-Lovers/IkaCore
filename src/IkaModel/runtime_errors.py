@@ -35,9 +35,5 @@ class IkaToolExecutionError(IkaRuntimeError):
     """Tool execution failed before a structured tool result could be returned."""
 
 
-class IkaCheckpointError(IkaRuntimeError):
-    """Checkpoint serialization, loading, or persistence failed."""
-
-
 class IkaDebugDumpError(IkaRuntimeError):
     """Best-effort request/response debug dumping failed."""

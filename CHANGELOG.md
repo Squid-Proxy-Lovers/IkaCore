@@ -1,0 +1,35 @@
+# Changelog
+
+## 2.0.0
+
+V2 intentionally breaks compatibility with v1. See the
+[migration guide](docs/v2/README.md#breaking-changes-and-migration).
+
+- Removed `CheckpointStore`, `load_checkpoint()`, constructor `checkpoint` and
+  `checkpoint_db_path`, stage `checkpoint`, and `execution(checkpoint_uid=...)`.
+  Enable the SQLite `SnapshotStore` with `enable_snapshots()` and resume using
+  `resume_from_snapshot(snapshot_id, resume_input=...)`. V1 checkpoint databases
+  are left intact and are not converted. Finish old runs with v1 before migrating.
+- Snapshots record runs, nested frames, immutable state and events; boundaries commit
+  atomically. Agent resume, fork/restart, HITL interrupts and workflow selective replay
+  use this one backend. Replay cannot restore Python stacks or undo tool side effects;
+  unsafe replay requires an explicit opt-in.
+- Removed runtime settings `optimize_provider_payloads`, `modern_retries`,
+  `dataflow_workflows`, `preserve_workflow_prompts`, `persistent_async_runner` and
+  `retry_initial_seconds`, plus `close_thread_runner()`. Use request `wait_seconds`
+  for the initial retry delay (default one second).
+- Provider history replay and transient-error retries are now standard. Permanent
+  HTTP/programming failures propagate. OpenAI uses Responses by default; completion
+  controls no longer force tool selection. Sync workflows clone template agents and
+  both workflow modes wait for dependencies while preserving each agent's task.
+- Removed v1 import/private forwarding facades, the `IkaModel.base.TOKENMAX_MAPPING`
+  alias (use `IkaModel.model_metadata`), unused `IkaCheckpointError`, and the unused
+  Gemini payload loader (import `gemini_fill_payload` from `IkaModel.gemini.google`). Public packages report the
+  installed `ikacore` version and ship `py.typed` markers.
+- Examples use environment credentials and avoid printing bearer fragments. Documentation
+  now covers functional memory setup, current snapshot APIs and offline validation.
+- Validation includes deterministic provider payload, retry, execution, workflow,
+  snapshot, memory and cancellation tests; type/lint/coverage gates; and wheel checks.
+  Only Codex `gpt-5.6-sol` was verified live: eight checks at revision `344348c` on
+  2026-10-13. Other providers/models and long-running application behavior require
+  separate live validation. Historical quality/benchmark figures identify their revision.

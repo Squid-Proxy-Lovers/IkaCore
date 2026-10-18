@@ -34,7 +34,8 @@ The initial consolidation carried two generations of behavior at once. This pass
 - Collapses the workflow mixin/type-contract chains. Function and module size checks remain;
   whole-class line limits that encouraged tiny inheritance layers are removed.
 
-The measurements below cover the current draft with offline fixtures. Live-provider
+The recorded measurements below cover the draft at `183ce24` with offline fixtures
+(except comparisons labeled with their own revisions). Live-provider
 and application behavior remain separate release checks.
 
 ## Persistence and provider optimization
@@ -179,13 +180,13 @@ offline coverage does not establish live compatibility. Reproduce the Codex run 
 
 ## Measured quality and footprint
 
-The full local quality run passes **762 tests**, with six live-provider checks skipped:
+The recorded full local quality run at `183ce24` passed **762 tests**, with six live-provider checks skipped:
 **95.40% line coverage**, **86.25% branch coverage**, Ruff, Pyright, and an
 isolated wheel build/import check. The matrix assigns all 121 runtime modules to 16
 areas and requires 67 named scenarios. Coverage excludes 458 lines, including type-only
 and abstract declarations. Existing global and per-area coverage floors are unchanged.
 
-The following results use an installed runtime-only wheel on macOS arm64 / CPython
+The following recorded results at `183ce24` use an installed runtime-only wheel on macOS arm64 / CPython
 3.11.16, with HTTPX 0.28.1. The wheel hash and raw samples are recorded in the generated
 benchmark artifact; development dependencies are excluded.
 
@@ -212,7 +213,7 @@ Real provider/model latency is excluded. The first 1,000 repeated runs retained 
 1.08 MiB of traced allocations; the next 1,000 changed retained allocations by
 -46 KiB. This short soak does not establish leak freedom for every workload.
 
-For the execution-loop refactor specifically, seven alternating before/after batches
+For the execution-loop refactor (`78047e7` → `183ce24`) specifically, seven alternating before/after batches
 of 1,000 operations measured sync **0.2193 → 0.2194 ms** and async bridge
 **0.6582 → 0.6564 ms**. This longer paired run reduces ordering noise in the short
 samples above and supports treating execution latency as unchanged for this fixture.
@@ -243,7 +244,7 @@ CI publishes package/runtime and all-provider reports. See the
 Persistence still dominates this trivial local agent fixture, and the runtime retains
 architectural complexity. Further removal should follow observed use and product needs.
 
-### Local coverage snapshot
+### Local coverage snapshot (`183ce24`)
 
 | Area | Modules | Lines | Branches | Floors L/B | Tests observed | Excluded lines |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |

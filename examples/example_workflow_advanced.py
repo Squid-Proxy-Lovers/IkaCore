@@ -166,7 +166,8 @@ def run_sync() -> None:
         if childs:
             print(f"  child_summaries: {childs}")
     r = results.get("synthesizer")
-    print("Final (synthesizer):", (r.final or ""))
+    if r is not None:
+        print("Final (synthesizer):", (r.final or ""))
 
 
 def run_async() -> None:

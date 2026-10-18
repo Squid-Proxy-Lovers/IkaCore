@@ -8,18 +8,12 @@ from typing import TYPE_CHECKING, Any, List, Optional
 
 from IkaCore.cli_output import OutputType, get_cli_output
 
-from . import model_metadata
-
 if TYPE_CHECKING:
     from IkaMem import LTMemory
 
 _LOG = logging.getLogger(__name__)
 
 _GLOBAL_LONG_TERM_MEMORY: Optional["LTMemory"] = None
-
-# Backward-compatible alias for callers that imported the old constant from
-# IkaModel.base. The table itself lives in model_metadata.py.
-TOKENMAX_MAPPING = model_metadata.TOKENMAX_MAPPING
 
 
 class AgentEndException(RuntimeError):
@@ -38,19 +32,6 @@ class HumanInputRequired(RuntimeError):
     def __init__(self, payload: Optional[dict[str, Any]] = None):
         super().__init__("human input required")
         self.payload: dict[str, Any] = payload or {}
-
-
-def load_gemini_payload():
-    """
-    Dynamically load gemini payload function.
-    This is to avoid circular import issues.
-    """
-    try:
-        from IkaModel.gemini.google import gemini_fill_payload
-        return gemini_fill_payload
-    except ImportError as e:
-        _LOG.error(f"Failed to import gemini_fill_payload: {e}")
-        raise
 
 
 DEFAULT_SYSTEM_PROMPT = """
