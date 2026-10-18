@@ -59,3 +59,11 @@ TONE AND STYLE:
 - Maintain consistency in naming conventions and terminology
 
 Your summary should be detailed enough that someone reading it can understand the full context of the conversation without needing to review the original history, while being concise enough to be practical for future reference.
+
+CONTINUATION CONTRACT:
+Preserve the exact task goal, user constraints (including prohibitions and numbers),
+verified tool results with their source/call IDs, decisions, unanswered questions,
+and pending tool calls. Distinguish completed actions from planned or uncertain ones.
+Do not invent results or mark pending work completed. Preserve identifiers verbatim.
+The next assistant sees this summary instead of older turns and must be able to
+answer follow-up questions about those facts. Prefer these facts over narrative.

@@ -22,7 +22,7 @@ from ..base import AgentEndException, AgentTool, BareBoneModel
 from ..chat_helpers_common import append_provider_tool_messages
 from ..reasoning_replay import take_response_replay
 from ..request_interface import IkaAPIError
-from ..runtime_errors import IkaDebugDumpError
+from ..runtime_errors import IkaDebugDumpError, IkaRequestControlError
 from .tool_result_formatters import format_gemini_results
 from .types import ChatLoopState, ChatResponsePayload, UsageInfo
 
@@ -190,6 +190,8 @@ def _force_complete_with_summary(
             write_to_history=False,
             use_same_model=True,
         )
+    except IkaRequestControlError:
+        raise
     except _SUMMARY_FALLBACK_EXCEPTIONS as e:
         LOG.error(f"Failed to generate force completion summary: {e}")
         summary_text = ""
@@ -240,6 +242,8 @@ async def _async_force_complete_with_summary(
             prompt_kind="force_answer",
             write_to_history=False,
         )
+    except IkaRequestControlError:
+        raise
     except _SUMMARY_FALLBACK_EXCEPTIONS as e:
         LOG.error(f"Failed to generate async force completion summary: {e}")
         summary_text = ""

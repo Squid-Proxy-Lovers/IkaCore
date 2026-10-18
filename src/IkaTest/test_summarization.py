@@ -118,6 +118,7 @@ def test_summary_target_resolution_and_history_helpers():
 
     history = _history()
     assert s.get_conversation_text(history).splitlines() == [
+        "system",
         "first input",
         "[SUMMARY]",
         "old",

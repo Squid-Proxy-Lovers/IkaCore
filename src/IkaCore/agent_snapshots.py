@@ -71,6 +71,21 @@ class AgentSnapshots:
         info = session.store.resume_from_snapshot(snapshot_id)
         state = info["state"]
         if "completed_output" in state:
+            # A process can die after committing the completion boundary but
+            # before finalizing frame/run metadata. Restore saved accounting and
+            # finish that metadata without repeating the model or tool effects.
+            agent.message_history = deepcopy(state.get("message_history", agent.message_history))
+            agent._total_usage = deepcopy(state.get("total_usage", agent._total_usage))
+            agent._total_cost = deepcopy(state.get("total_cost", agent._total_cost))
+            root = state.get("root_frame_id", info["frame_id"])
+            session.run_id, session.root_frame_id = info["run_id"], root
+            session.last_snapshot_id = snapshot_id
+            with session.store.transaction():
+                session.store.update_frame(info["frame_id"], status="completed")
+                session.store.update_frame(root, status="completed", outputs=state["completed_output"])
+                run = session.store.get_run(info["run_id"])
+                if run is not None and run["root_frame_id"] == root:
+                    session.store.update_run_status(info["run_id"], "completed", ended=True)
             return {
                 **state["completed_output"],
                 "runtime": {"run_id": info["run_id"], "frame_id": info["frame_id"], "last_snapshot_id": snapshot_id},

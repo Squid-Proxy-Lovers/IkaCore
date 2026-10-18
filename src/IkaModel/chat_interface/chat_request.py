@@ -123,27 +123,33 @@ def _summarize_sync_if_near_budget(
     barebone_model: BareBoneModel,
     message_history: JsonDict,
     client: Optional[httpx.Client],
+    messages: Optional[list[JsonDict]] = None,
 ) -> None:
     token_count = get_total_tokens(message_history)
     max_tokens = getattr(barebone_model, 'context_budget', None) or get_max_tokens(barebone_model.model_id)
     if token_count > max_tokens * (current_runtime_options().compact_at_fraction or 0.8):
-        emit_boundary("pre_compaction", {})
-        _summaries.summarise_message_history(barebone_model, message_history, client=client)
-        emit_boundary("post_compaction", {})
+        emit_boundary("pre_compaction", {"messages": messages} if messages is not None else {})
+        summary = _summaries.summarise_message_history(barebone_model, message_history, client=client)
+        if messages is not None and summary.strip():
+            _summaries.compact_live_messages(messages)
+        emit_boundary("post_compaction", {"messages": messages} if messages is not None else {})
 
 
 async def _summarize_async_if_near_budget(
     barebone_model: BareBoneModel,
     message_history: JsonDict,
     client: Optional[httpx.AsyncClient],
+    messages: Optional[list[JsonDict]] = None,
 ) -> None:
     token_count = get_total_tokens(message_history)
     max_tokens = getattr(barebone_model, 'context_budget', None) or get_max_tokens(barebone_model.model_id)
     if token_count > max_tokens * (current_runtime_options().compact_at_fraction or 0.8):
         LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
-        emit_boundary("pre_compaction", {})
-        await _summaries.async_summarise_message_history(barebone_model, message_history, client)
-        emit_boundary("post_compaction", {})
+        emit_boundary("pre_compaction", {"messages": messages} if messages is not None else {})
+        summary = await _summaries.async_summarise_message_history(barebone_model, message_history, client)
+        if messages is not None and summary.strip():
+            _summaries.compact_live_messages(messages)
+        emit_boundary("post_compaction", {"messages": messages} if messages is not None else {})
 
 
 def _parse_provider_round(
@@ -156,7 +162,7 @@ def _parse_provider_round(
     try:
         content, reasoning_content, tool_calls, tokens = parse_provider_response(provider, data, model_id, message_history)
         usage_info = extract_usage(provider, data)
-    except (KeyError, IndexError, TypeError, ValueError) as e:
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
         raise IkaProviderResponseError(
             f"Failed to parse {provider} response for model {model_id}: {e}"
         ) from e
@@ -200,7 +206,7 @@ def _request_provider_round(
     def _build() -> ProviderPayload:
         return build_provider_request(provider, barebone_model, messages, message_history)
 
-    response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout, client)
+    response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout, client, messages)
     response.raise_for_status()
     data = _response_json_or_raise(response, provider)
     return _parse_provider_round(provider, data, barebone_model.model_id, usage_token_fallback, message_history)
@@ -218,7 +224,7 @@ async def _request_provider_round_async(
     def _build() -> ProviderPayload:
         return build_provider_request(provider, barebone_model, messages, message_history)
 
-    response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client)
+    response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client, messages)
     response.raise_for_status()
     data = _response_json_or_raise(response, provider)
     return _parse_provider_round(provider, data, barebone_model.model_id, usage_token_fallback, message_history)
@@ -230,6 +236,7 @@ def _api_request_with_context_fallback(
     message_history: JsonDict,
     timeout: float = 900.0,
     client: Optional[httpx.Client] = None,
+    messages: Optional[list[JsonDict]] = None,
 ) -> httpx.Response:
     try:
         api_url, headers, payload = build_payload_fn()
@@ -249,9 +256,11 @@ def _api_request_with_context_fallback(
         LOG.warning("Context length exceeded. Forcing summarization and retrying.")
         get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
         try:
-            emit_boundary("pre_compaction", {})
-            _summaries.summarise_message_history(barebone_model, message_history, client=client)
-            emit_boundary("post_compaction", {})
+            emit_boundary("pre_compaction", {"messages": messages} if messages is not None else {})
+            summary = _summaries.summarise_message_history(barebone_model, message_history, client=client)
+            if messages is not None and summary.strip():
+                _summaries.compact_live_messages(messages)
+            emit_boundary("post_compaction", {"messages": messages} if messages is not None else {})
         except _SUMMARY_FALLBACK_EXCEPTIONS as summary_error:
             if isinstance(summary_error, IkaRequestControlError):
                 raise
@@ -276,7 +285,8 @@ async def _api_request_with_context_fallback_async(
     barebone_model: BareBoneModel,
     message_history: JsonDict,
     timeout: float = 900.0,
-    client: Optional[httpx.AsyncClient] = None
+    client: Optional[httpx.AsyncClient] = None,
+    messages: Optional[list[JsonDict]] = None,
 ) -> httpx.Response:
     try:
         api_url, headers, payload = build_payload_fn()
@@ -296,9 +306,11 @@ async def _api_request_with_context_fallback_async(
         LOG.warning("Context length exceeded. Forcing summarization and retrying.")
         get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
         try:
-            emit_boundary("pre_compaction", {})
-            await _summaries.async_summarise_message_history(barebone_model, message_history, client=client)
-            emit_boundary("post_compaction", {})
+            emit_boundary("pre_compaction", {"messages": messages} if messages is not None else {})
+            summary = await _summaries.async_summarise_message_history(barebone_model, message_history, client=client)
+            if messages is not None and summary.strip():
+                _summaries.compact_live_messages(messages)
+            emit_boundary("post_compaction", {"messages": messages} if messages is not None else {})
         except _SUMMARY_FALLBACK_EXCEPTIONS as summary_error:
             if isinstance(summary_error, IkaRequestControlError):
                 raise
