@@ -7,6 +7,9 @@ V2 intentionally breaks compatibility with v1. See the
 
 ### Fixed (final core review)
 
+- Delegated clones close their owned sync/async clients in a finally block on completion,
+  errors, cancellation, and pauses; borrowed clients remain open.
+
 - Snapshots persist each pending chat message and whether it has entered the transcript,
   preserving later turns exactly once when a fresh agent restores any model/frame boundary.
 

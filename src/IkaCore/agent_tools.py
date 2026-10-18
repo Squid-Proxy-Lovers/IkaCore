@@ -161,16 +161,19 @@ class AgentTools:
         if logger:
             logger.log_action(f"Calling subagent: {subagent.name}")
         subagent_run = agent.tool_runtime._prepare_subagent_run(subagent, task_input, parent_hierarchy)
-        result = subagent_run.execution()
-        from .agent_delegation import raise_delegated_interrupt
+        try:
+            result = subagent_run.execution()
+            from .agent_delegation import raise_delegated_interrupt
 
-        raise_delegated_interrupt(subagent_run, task_input, result)
-        final_output = result.get("final_message", "")
-        summary = result.get("summary", final_output)
-        logger = getattr(agent, "logger", None)
-        if logger:
-            logger.log_action(f"Subagent {subagent.name} completed")
-        return summary or final_output
+            raise_delegated_interrupt(subagent_run, task_input, result)
+            final_output = result.get("final_message", "")
+            summary = result.get("summary", final_output)
+            logger = getattr(agent, "logger", None)
+            if logger:
+                logger.log_action(f"Subagent {subagent.name} completed")
+            return summary or final_output
+        finally:
+            subagent_run.shutdown()
 
     def _build_subagent_executor(
         self, subagent: "IkaBaseAgent", parent_hierarchy: Optional[list[str]] = None

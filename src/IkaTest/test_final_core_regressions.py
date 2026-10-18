@@ -356,3 +356,53 @@ def test_fresh_restore_preserves_pending_later_chat_turn(make_agent, tmp_path, b
         assert message in json.dumps(mock.requests[-1])
     else:
         assert not mock.requests
+
+
+@pytest.mark.parametrize("outcome", ["success", "error", "cancel", "pause"])
+@pytest.mark.parametrize("borrowed", [False, True])
+@pytest.mark.parametrize("use_async", [False, True])
+def test_delegated_clones_close_only_owned_clients(make_agent, tmp_path, outcome, borrowed, use_async):
+    from IkaModel.base import HumanInputRequired
+
+    clients = []
+    def factory():
+        client = httpx.AsyncClient() if use_async else httpx.Client()
+        clients.append(client)
+        return client
+    caller = factory() if borrowed else None
+    provider = ProviderConfig.bounded(client=caller) if borrowed else ProviderConfig.bounded(client_factory=factory)
+    child = make_agent("child", provider=provider, policy=ExecutionPolicy.bounded(use_async=use_async),
+                       stages=[IkaStage("approval", "Get approval", [], hitl=True)] if outcome == "pause" else [])
+    parent = make_agent("parent", topology=AgentTopology(subagents=(child,)))
+    parent.enable_snapshots(str(tmp_path / "clients.db"))
+    def respond(url, payload):
+        if outcome == "error":
+            raise RuntimeError("child failed")
+        if outcome == "cancel":
+            raise IkaRequestCancelled("child cancelled")
+        return provider_response(url, payload, ("ask_user", {"question": "Approve?"}) if outcome == "pause" else end("done"))
+    executor = parent.tool_runtime._build_subagent_executor(child)
+    try:
+        with MockProvider(responder=respond):
+            if outcome in {"cancel", "pause"}:
+                error = IkaRequestCancelled if outcome == "cancel" else HumanInputRequired
+                with pytest.raises(error):
+                    executor({"input": "task"})
+            else:
+                result = executor({"input": "task"})
+                assert ("child failed" in result) if outcome == "error" else result == "done"
+        assert not clients[0].is_closed
+        if borrowed:
+            assert len(clients) == 1
+        else:
+            assert len(clients) == 2 and clients[1].is_closed
+        child.shutdown()
+        assert clients[0].is_closed is not borrowed
+    finally:
+        if use_async:
+            from IkaModel.async_runner import run_async
+            for client in clients:
+                run_async(client.aclose)
+        else:
+            for client in clients:
+                client.close()
