@@ -218,11 +218,11 @@ def test_injected_context_reaches_the_model_alongside_the_agents_own_task():
     simple = _agent("simple")
     simple.prompt = "You are the north analyst. Audit the north region."
     simple.inject_workflow_context("Planner notes: focus on Q3.")
-    first_message = simple._prepare_simple_runtime().messages[0]["content"]
+    first_message = simple.preparation._prepare_simple_runtime().messages[0]["content"]
     assert "You are the north analyst" in first_message and "Planner notes: focus on Q3." in first_message
 
     staged = IkaBaseAgent(name="staged", description="d", prompt="Audit the south region.", model_id="gpt-4o",
                           api_key="k", Stages=[IkaStage("Gather", "Gather balances.", [])])
     staged.inject_workflow_context("Planner notes: focus on Q3.")
-    content = staged._prepare_stage_runtime(0, 10, None).content_prompt
+    content = staged.preparation._prepare_stage_runtime(0, 10, None).content_prompt
     assert "Audit the south region." in content and "Planner notes: focus on Q3." in content

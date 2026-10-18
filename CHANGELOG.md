@@ -57,6 +57,15 @@ V2 intentionally breaks compatibility with v1. See the
   as ordinary agent or stage tools. Storage, access, filters and sharing are explicit.
   Core/model packages do not import IkaMem. Search tools allow replay; saves deny it.
 
+### Runtime ownership
+
+- Removed the agent mixin tree and aggregate `agent_execution` / `agent_helpers`
+  modules. The facade composes preparation, turn loop, execution policy, tools,
+  control parsing, chat/output, lifecycle and snapshot components. Public entry
+  points remain; private helpers and tests patch the owning component directly.
+- Merged `agent_tool_conversion`, `agent_tool_execution` and `agent_tool_schema`
+  into `agent_tools`; pure history/validation helpers remain in `agent_helper_support`.
+
 ### Fixed
 
 - Preserve zero remaining steps in legacy staged HITL snapshots without `loop_state`

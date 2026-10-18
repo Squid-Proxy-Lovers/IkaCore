@@ -19,8 +19,9 @@ def runtime_info(session: SnapshotSession) -> dict[str, Any]:
     return {"run_id": session.run_id, "frame_id": session.root_frame_id, "last_snapshot_id": session.last_snapshot_id}
 
 
-def execute_with_snapshots(agent: Any, execute: Callable[..., dict[str, Any]],
-                           resume_input: Optional[str]) -> dict[str, Any]:
+def execute_with_snapshots(
+    agent: Any, execute: Callable[..., dict[str, Any]], resume_input: Optional[str]
+) -> dict[str, Any]:
     session = ensure_session(agent)
     if session is None:
         return execute(resume_input=resume_input)
@@ -39,7 +40,9 @@ def execute_with_snapshots(agent: Any, execute: Callable[..., dict[str, Any]],
                 session.store.update_run_status(str(session.run_id), "paused")
                 finished = True
                 return {**result, "snapshot_id": snapshot, "runtime": runtime_info(session)}
-            record_boundary(session, "agent_completed", {"last_content": result.get("final_message", ""), "output": result})
+            record_boundary(
+                session, "agent_completed", {"last_content": result.get("final_message", ""), "output": result}
+            )
             with session.store.transaction():
                 if session.stage_frame_id is not None:
                     session.store.update_frame(session.stage_frame_id, status="completed")
@@ -51,8 +54,14 @@ def execute_with_snapshots(agent: Any, execute: Callable[..., dict[str, Any]],
             return {**result, "runtime": runtime_info(session)}
         except RuntimePauseRequested as paused:
             finished = True
-            return {"status": "paused", "final_message": "", "summary": "", "snapshot_id": paused.snapshot_id,
-                    "runtime": runtime_info(session), "pause_point": paused.checkpoint_kind}
+            return {
+                "status": "paused",
+                "final_message": "",
+                "summary": "",
+                "snapshot_id": paused.snapshot_id,
+                "runtime": runtime_info(session),
+                "pause_point": paused.checkpoint_kind,
+            }
         except IkaRequestControlError:
             finished = True
             session.store.update_frame(str(session.root_frame_id), status="cancelled")

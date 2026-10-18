@@ -495,7 +495,7 @@ def test_agent_clone_for_run_isolates_runtime_history_and_client():
     )
     agent.message_history["first_input"]["message"] = "original history"
     agent._parent_hierarchy = ["root"]
-    client = agent._get_chat_client()
+    client = agent.chat._get_chat_client()
 
     clone = agent.clone_for_run(name="A_clone", prompt="new prompt")
 
@@ -504,7 +504,7 @@ def test_agent_clone_for_run_isolates_runtime_history_and_client():
     assert clone.message_history["first_input"]["message"] == ""
     assert clone.logger is agent.logger
     assert clone.client is None
-    assert agent._get_chat_client() is client
+    assert agent.chat._get_chat_client() is client
 
     clone.message_history["first_input"]["message"] = "clone history"
     assert agent.message_history["first_input"]["message"] == "original history"

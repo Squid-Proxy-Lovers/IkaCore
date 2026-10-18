@@ -1,10 +1,10 @@
 import pytest
 
-from IkaCore.agent_parse import JsonToolArgumentParseMixin
+from IkaCore.agent_parse import AgentControl
 from IkaCore.truncated_json import _close_truncated_json_object
 from IkaModel import runtime_options
 
-_parse_tool_arguments = JsonToolArgumentParseMixin()._parse_tool_arguments
+_parse_tool_arguments = AgentControl(None)._parse_tool_arguments
 
 
 @pytest.mark.parametrize("raw, expected", [

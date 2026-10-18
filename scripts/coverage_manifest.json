@@ -90,9 +90,6 @@
       "area": "Tools / schemas / output bounds",
       "sources": [
         "src/IkaCore/agent_parse.py",
-        "src/IkaCore/agent_tool_conversion.py",
-        "src/IkaCore/agent_tool_execution.py",
-        "src/IkaCore/agent_tool_schema.py",
         "src/IkaCore/agent_tools.py",
         "src/IkaCore/tool_runtime_metadata.py",
         "src/IkaCore/tools.py",
@@ -262,11 +259,9 @@
       "area": "Agent runtime / stages",
       "sources": [
         "src/IkaCore/agent_chat_support.py",
-        "src/IkaCore/agent_execution.py",
         "src/IkaCore/agent_execution_loop.py",
         "src/IkaCore/agent_execution_helpers.py",
         "src/IkaCore/agent_helper_support.py",
-        "src/IkaCore/agent_helpers.py",
         "src/IkaCore/agent_initialization.py",
         "src/IkaCore/agent_lifecycle.py",
         "src/IkaCore/agent_runtime_dispatch.py",
@@ -277,7 +272,8 @@
         "src/IkaCore/prompts.py",
         "src/IkaCore/stages.py",
         "src/IkaCore/config.py",
-        "src/IkaCore/agent_state.py"
+        "src/IkaCore/agent_state.py",
+        "src/IkaCore/agent_policy.py"
       ],
       "required_tests": [
         "src/IkaTest/test_agent_helpers.py::TestFinalPrompt::test_execute_stage_refreshes_first_input_for_each_stage",

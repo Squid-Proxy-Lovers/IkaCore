@@ -25,7 +25,7 @@ def agent_factory(tmp_path, monkeypatch):
         agent.enable_snapshots(str(tmp_path / f'runtime-{len(agents)}.db'))
         agents.append(agent)
         return agent
-    monkeypatch.setattr('IkaCore.agent_runtime_foundation.run_summarization', lambda *args, **kwargs: 'forced final')
+    monkeypatch.setattr('IkaCore.agent_policy.run_summarization', lambda *args, **kwargs: 'forced final')
     yield create
     for agent in agents:
         agent.shutdown()
@@ -47,7 +47,7 @@ def test_hitl_resume_consumes_saved_transcript_before_entering_next_stage(agent_
     saved = agent._snapshot_runtime.store.load_snapshot(interrupted['snapshot_id'])['state_json']['chat_messages']
     assert agent.resume_from_snapshot(interrupted['snapshot_id'], resume_input='Yes, approved')['final_message'] == 'done'
     assert seen[1] == saved + [{'role': 'user', 'content': 'Yes, approved'}]
-    assert seen[2][0]['content'].endswith(agent._simple_end_instruction())
+    assert seen[2][0]['content'].endswith(agent.policy_runtime._simple_end_instruction())
     assert 'CURRENT STAGE IS:\n\nwrite final report' in seen[2][0]['content']
     assert all(item['content'] != 'Approve?' for item in seen[2])
     assert agent._snapshot_resume_messages is None
@@ -176,7 +176,7 @@ def test_exhausted_hitl_resume_extends_or_finalizes_before_stage_completion(
         return 'forced final'
     monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
     monkeypatch.setattr('IkaCore.agent_chat_support.async_chat', async_chat)
-    monkeypatch.setattr('IkaCore.agent_runtime_foundation.run_summarization', summarize)
+    monkeypatch.setattr('IkaCore.agent_policy.run_summarization', summarize)
     paused = agent.execution()
     result = agent.resume_from_snapshot(paused['snapshot_id'], resume_input='YES')
     assert result['final_message'] == ('Answer processed' if extensions else 'forced final')

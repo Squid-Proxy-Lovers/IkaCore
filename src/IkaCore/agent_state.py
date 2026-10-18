@@ -1,4 +1,5 @@
 """Live per-agent state; configuration is held separately in frozen AgentConfig."""
+
 from dataclasses import dataclass, field
 from typing import Any
 

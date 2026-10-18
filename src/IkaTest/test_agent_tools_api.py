@@ -28,7 +28,7 @@ class TestConvertToolsToAgentTools:
     def test_ika_tool_to_agent_tool(self):
         ika = IkaTools("fetch", "Fetches data", {"url": {"type": "string", "description": "URL"}}, execute_function=lambda p: "ok")
         a = _minimal_agent()
-        agent_tools = a._convert_tools_to_agent_tools([ika])
+        agent_tools = a.tool_runtime._convert_tools_to_agent_tools([ika])
         assert len(agent_tools) == 1
         t = agent_tools[0]
         assert t.name == "fetch"
@@ -40,20 +40,20 @@ class TestConvertToolsToAgentTools:
     def test_ika_tool_required_param(self):
         ika = IkaTools("run", "Run", {"x": {"type": "string", "description": "X", "required": True}}, execute_function=lambda p: "ok")
         a = _minimal_agent()
-        agent_tools = a._convert_tools_to_agent_tools([ika])
+        agent_tools = a.tool_runtime._convert_tools_to_agent_tools([ika])
         assert agent_tools[0].args.properties.get("__required__") == ["x"]
 
     def test_agent_tool_passthrough(self):
         at = AgentTool("id", "direct", "Direct", ToolArgs(type="input", description="In"))
         a = _minimal_agent()
-        out = a._convert_tools_to_agent_tools([at])
+        out = a.tool_runtime._convert_tools_to_agent_tools([at])
         assert len(out) == 1
         assert out[0] is at
 
     def test_ika_tool_parallel_and_limit_calls(self):
         ika = IkaTools("p", "P", {"x": "string"}, limit_calls=2, parallel=False, execute_function=lambda p: "ok")
         a = _minimal_agent()
-        agent_tools = a._convert_tools_to_agent_tools([ika])
+        agent_tools = a.tool_runtime._convert_tools_to_agent_tools([ika])
         assert agent_tools[0].parallel is False
         assert agent_tools[0].limit_calls == 2
 
@@ -62,7 +62,7 @@ class TestConvertSubagentsToTools:
     def test_subagents_become_agent_tools(self):
         sub = _minimal_agent(name="Worker")
         a = _minimal_agent(topology=AgentTopology(subagents=[sub]))
-        tools = a._convert_subagents_to_tools()
+        tools = a.tool_runtime._convert_subagents_to_tools()
         assert len(tools) == 1
         assert tools[0].name == "Worker"
         assert tools[0].args.type == "input"
@@ -72,13 +72,13 @@ class TestConvertSubagentsToTools:
         sub1 = _minimal_agent(name="A")
         sub2 = _minimal_agent(name="B")
         a = _minimal_agent()
-        tools = a._convert_subagents_to_tools(subagents=[sub1, sub2])
+        tools = a.tool_runtime._convert_subagents_to_tools(subagents=[sub1, sub2])
         assert len(tools) == 2
         assert {t.name for t in tools} == {"A", "B"}
 
     def test_empty_subagents_returns_empty(self):
         a = _minimal_agent()
-        assert a._convert_subagents_to_tools() == []
+        assert a.tool_runtime._convert_subagents_to_tools() == []
 
 
 class TestBuildToolExecutors:
@@ -128,7 +128,7 @@ class TestBuildToolExecutors:
         hitl_stage = IkaStage("Review", "P", [], hitl=True)
         non_hitl_stage = IkaStage("Draft", "P", [])
         a = _minimal_agent()
-        a._prompt_hitl_question = MagicMock(return_value="user answer")
+        a.chat._prompt_hitl_question = MagicMock(return_value="user answer")
 
         hitl_executors = a.build_tool_executors(
             hitl_stage.tools,
@@ -139,7 +139,7 @@ class TestBuildToolExecutors:
         non_hitl_executors = a.build_tool_executors(non_hitl_stage.tools, stage=non_hitl_stage)
 
         assert hitl_executors["ask_user"]({"question": "Proceed?"}) == "user answer"
-        a._prompt_hitl_question.assert_called_once_with(
+        a.chat._prompt_hitl_question.assert_called_once_with(
             "Review",
             "Proceed?",
             stage_index=2,
@@ -174,7 +174,7 @@ class TestBuildToolExecutors:
 
         sub.execution = MagicMock(return_value={"final_message": "Sub result", "summary": "Sub result"})
         a = _minimal_agent(topology=AgentTopology(subagents=[sub]))
-        executor = a._build_subagent_executor(sub, parent_hierarchy=["Parent"])
+        executor = a.tool_runtime._build_subagent_executor(sub, parent_hierarchy=["Parent"])
         out = executor({"input": "Do task"})
 
         assert "Sub result" in out

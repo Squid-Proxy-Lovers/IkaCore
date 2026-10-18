@@ -43,13 +43,13 @@ def scenario(monkeypatch):
             if isinstance(value, Exception):
                 raise value
             return value
-        agent._run_chat_round = chat
-        agent._enforce_rate_limit_model = MagicMock()
+        agent.chat._run_chat_round = chat
+        agent.chat._enforce_rate_limit_model = MagicMock()
         summaries = []
         def summarize(*args, **kwargs):
             summaries.append(kwargs['prompt_kind'])
             return 'forced final' if kwargs['prompt_kind'] == 'force_answer' else 'remaining work'
-        monkeypatch.setattr('IkaCore.agent_runtime_foundation.run_summarization', summarize)
+        monkeypatch.setattr('IkaCore.agent_policy.run_summarization', summarize)
         return agent, calls, summaries
     yield make
     for agent in agents:
@@ -64,7 +64,7 @@ def test_loop_counts_turns_and_uses_executed_control_calls(scenario, staged):
     result = agent.execution()
     assert result['final_message'] == 'done'
     assert result['usage']['total_tokens'] == 6 and result['cost']['total_cost'] == 0.02
-    assert len(calls) == agent._enforce_rate_limit_model.call_count == 2
+    assert len(calls) == agent.chat._enforce_rate_limit_model.call_count == 2
     assert summaries == []
     assert any(item.get('content') == 'intermediate' for item in calls[1]) == staged
 
@@ -167,7 +167,7 @@ def test_progress_logs_preserve_step_numbers_and_cli_updates(scenario, staged, m
 @pytest.mark.parametrize('staged', [False, True])
 def test_final_fallback_uses_pre_tool_text(scenario, staged):
     agent, _, _ = scenario(staged, [])
-    runtime = agent._prepare_stage_runtime(0, 3, None) if staged else agent._prepare_simple_runtime()
+    runtime = agent.preparation._prepare_stage_runtime(0, 3, None) if staged else agent.preparation._prepare_simple_runtime()
     turn = AgentChatTurn(_response(), True, 'after tools', 'before tools', [], [])
-    result = agent._finish_execution_turn(runtime, ExecutionLoopState(3, used_steps=2), turn, None, 0)
+    result = agent.turns._finish_execution_turn(runtime, ExecutionLoopState(3, used_steps=2), turn, None, 0)
     assert tuple(result) == (0, 'before tools', True, 'before tools', 2)

@@ -11,14 +11,22 @@ This document explains how the current IkaCore runtime is structured and where t
 
 ### Core Runtime Model
 
-`IkaBaseAgent` is the public entry point. It mixes together four responsibilities:
+`IkaBaseAgent` is a facade with frozen `agent.config` and separate `agent.state`.
+It composes runtime owners directly; no agent mixin inheritance or lookup forwarding remains:
 
-- `AgentMemoryMixin`: memory initialization and memory tool helpers
-- `AgentToolsMixin`: tool conversion, stage tool assembly, subagent delegation
-- `AgentExecutionMixin`: thin execution entry points
-- `AgentHelpersMixin`: shared runtime helpers, validation, snapshot and HITL support
+- `preparation` (`agent_runtime_foundation.py`): prompt, model and turn preparation
+- `turns` (`agent_execution_loop.py`): shared simple/stage turn loop
+- `execution_runtime` (`agent_runtime_dispatch.py`): stage scheduling and resume routing
+- `policy_runtime` (`agent_policy.py`): final checks, retries and bounded extensions
+- `tool_runtime` (`agent_tools.py`) / `controls` (`agent_parse.py`): tool schemas, execution, delegation and controls
+- `chat` (`agent_chat_support.py`): model calls, accounting and final output
+- `lifecycle` (`agent_lifecycle.py`): run cloning and workflow context
+- `snapshots` (`agent_snapshots.py`): snapshot opt-in and replay entry points
+- optional memory tools (`IkaMem/agent_tools.py`): explicit backends and ordinary tool definitions
 
-The constructor in [`agents.py`](../src/IkaCore/agents.py) is the contract that the rest of the repo now follows.
+Public execution, tool building, cloning and snapshot entry points remain on the facade.
+Private helpers live on the owning component. The constructor in
+[`agents.py`](../src/IkaCore/agents.py) defines the grouped v2 API.
 
 ### Execution Modes
 
@@ -159,7 +167,7 @@ including after a failed resume.
 
 Workflow `resume_from_snapshot()` reuses completed instance results. Selective instance
 replay and historically cached interruptions invalidate downstream results. Interrupted
-instances run again; workflow resume does not accept `resume_input`. Nested or unfinished
+instances run again; workflow resume routes `resume_input` to interrupted children. Nested or unfinished
 tool effects are checked before replay. `snapshot_runtime_info()` exposes run/frame IDs,
 the last snapshot ID and whether the workflow is paused.
 Snapshot JSON filters known credential patterns; redacted state is refused for replay

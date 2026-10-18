@@ -250,11 +250,11 @@ class TestExecutionRuntimeHelpers:
             "message_history": a.message_history,
         }
         barebone = SimpleNamespace(_tool_call_counts={"search": 2})
-        agent_end_exception = a._run_chat_turn.__func__.__globals__["AgentEndException"]
+        agent_end_exception = a.preparation._run_chat_turn.__func__.__globals__["AgentEndException"]
         a.chat_wrapper = MagicMock(side_effect=agent_end_exception(response=response))
-        a._get_chat_client = MagicMock(return_value=None)
+        a.chat._get_chat_client = MagicMock(return_value=None)
 
-        turn = a._run_chat_turn(
+        turn = a.preparation._run_chat_turn(
             barebone,
             [{"role": "user", "content": "task"}],
             {},
@@ -274,7 +274,7 @@ class TestExecutionRuntimeHelpers:
         a = _minimal_agent(Stages=[stage])
         a.logger = MagicMock(level=0)
 
-        runtime = a._prepare_stage_runtime(0, remaining_steps=4, resume_input="human answer")
+        runtime = a.preparation._prepare_stage_runtime(0, remaining_steps=4, resume_input="human answer")
 
         assert runtime.stage is stage
         assert runtime.messages == [{"role": "user", "content": "human answer"}]
@@ -293,10 +293,10 @@ class TestExecutionRuntimeHelpers:
         messages = []
 
         with patch.dict(
-            a._maybe_extend_stage.__func__.__globals__,
+            a.policy_runtime._maybe_extend_stage.__func__.__globals__,
             {"run_summarization": MagicMock(return_value="remaining work")},
         ):
-            step_limit, extension_count, last_content, should_break = a._maybe_extend_stage(
+            step_limit, extension_count, last_content, should_break = a.policy_runtime._maybe_extend_stage(
                 barebone,
                 messages,
                 step_limit=3,
@@ -311,10 +311,10 @@ class TestExecutionRuntimeHelpers:
         assert "remaining work" in messages[-1]["content"]
 
         with patch.dict(
-            a._maybe_extend_stage.__func__.__globals__,
+            a.policy_runtime._maybe_extend_stage.__func__.__globals__,
             {"run_summarization": MagicMock(return_value="forced final")},
         ):
-            step_limit, extension_count, last_content, should_break = a._maybe_extend_stage(
+            step_limit, extension_count, last_content, should_break = a.policy_runtime._maybe_extend_stage(
                 barebone,
                 messages,
                 step_limit=5,
@@ -344,7 +344,7 @@ class TestExecutionRuntimeHelpers:
             last_content="Need human input",
         )
 
-        result = a._handle_stage_interrupt(stage, 0, remaining_steps=6, used_steps=2, turn=turn)
+        result = a.preparation._handle_stage_interrupt(stage, 0, remaining_steps=6, used_steps=2, turn=turn)
 
         assert result is not None
         assert result.next_stage_index == 0
@@ -363,7 +363,7 @@ class TestExecutionRuntimeHelpers:
         a._last_interrupt = {"status": "previous"}
         turn = self._turn(response={"interrupted": False, "usage": {}, "cost": {}})
 
-        assert a._handle_stage_interrupt(stage, 0, remaining_steps=3, used_steps=1, turn=turn) is None
+        assert a.preparation._handle_stage_interrupt(stage, 0, remaining_steps=3, used_steps=1, turn=turn) is None
         assert a._last_interrupt == {"status": "previous"}
 
     def test_simple_run_extension_appends_redirect_and_respects_extension_limit(self):
@@ -375,10 +375,10 @@ class TestExecutionRuntimeHelpers:
         summarizer = MagicMock(return_value="remaining simple work")
 
         with patch.dict(
-            a._maybe_extend_simple_run.__func__.__globals__,
+            a.policy_runtime._maybe_extend_simple_run.__func__.__globals__,
             {"run_summarization": summarizer},
         ):
-            extension_count = a._maybe_extend_simple_run(
+            extension_count = a.policy_runtime._maybe_extend_simple_run(
                 "system",
                 messages,
                 ["A"],
@@ -406,7 +406,7 @@ class TestExecutionRuntimeHelpers:
         cli.agent_response.assert_called_once()
 
         a.get_barebone.reset_mock()
-        assert a._maybe_extend_simple_run("system", messages, ["A"], 6, extension_count, cli) == 1
+        assert a.policy_runtime._maybe_extend_simple_run("system", messages, ["A"], 6, extension_count, cli) == 1
         a.get_barebone.assert_not_called()
 
     def test_finalize_simple_after_max_steps_prefers_agent_end_text(self):
@@ -417,10 +417,10 @@ class TestExecutionRuntimeHelpers:
         summarizer = MagicMock()
 
         with patch.dict(
-            a._finalize_simple_after_max_steps.__func__.__globals__,
+            a.policy_runtime._finalize_simple_after_max_steps.__func__.__globals__,
             {"run_summarization": summarizer},
         ):
-            final_response, summary = a._finalize_simple_after_max_steps(
+            final_response, summary = a.policy_runtime._finalize_simple_after_max_steps(
                 "system",
                 ["A"],
                 cli,
@@ -449,10 +449,10 @@ class TestExecutionRuntimeHelpers:
         summarizer = MagicMock(return_value="  forced final  ")
 
         with patch.dict(
-            a._finalize_simple_after_max_steps.__func__.__globals__,
+            a.policy_runtime._finalize_simple_after_max_steps.__func__.__globals__,
             {"run_summarization": summarizer},
         ):
-            final_response, summary = a._finalize_simple_after_max_steps(
+            final_response, summary = a.policy_runtime._finalize_simple_after_max_steps(
                 "system",
                 ["A"],
                 cli,
@@ -483,7 +483,7 @@ class TestExecutionRuntimeHelpers:
         )
 
         summarizer.return_value = "   "
-        final_response, summary = a._finalize_simple_after_max_steps(
+        final_response, summary = a.policy_runtime._finalize_simple_after_max_steps(
             "system",
             ["A"],
             cli,
@@ -498,15 +498,15 @@ class TestExecutionRuntimeHelpers:
         a.logger = MagicMock()
         empty_turn = self._turn()
 
-        assert a._simple_turn_has_no_progress(empty_turn, step_num=0) is False
-        assert a._simple_turn_has_no_progress(empty_turn, step_num=1) is True
+        assert a.turns._simple_turn_has_no_progress(empty_turn, step_num=0) is False
+        assert a.turns._simple_turn_has_no_progress(empty_turn, step_num=1) is True
         a.logger.log_action.assert_called_once_with(
             "CRITICAL: Infinite loop detected (no tools, no content). Breaking."
         )
 
-        assert a._simple_turn_has_no_progress(self._turn(last_content="progress"), step_num=1) is False
-        assert a._simple_turn_has_no_progress(self._turn(tool_calls=[{"name": "tool"}]), step_num=1) is False
-        assert a._simple_turn_has_no_progress(
+        assert a.turns._simple_turn_has_no_progress(self._turn(last_content="progress"), step_num=1) is False
+        assert a.turns._simple_turn_has_no_progress(self._turn(tool_calls=[{"name": "tool"}]), step_num=1) is False
+        assert a.turns._simple_turn_has_no_progress(
             self._turn(executed_tool_calls=[{"function": {"name": "tool"}}]),
             step_num=1,
         ) is False
@@ -523,10 +523,10 @@ class TestExecutionRuntimeHelpers:
         a.build_tool_executors = MagicMock(return_value={"tool": object()})
 
         with patch.dict(
-            a._prepare_simple_runtime.__func__.__globals__,
+            a.preparation._prepare_simple_runtime.__func__.__globals__,
             {"get_cli_output": MagicMock(return_value=cli)},
         ):
-            runtime = a._prepare_simple_runtime()
+            runtime = a.preparation._prepare_simple_runtime()
 
         assert runtime.system_prompt == "system"
         assert runtime.current_hierarchy == ["A"]
@@ -572,18 +572,18 @@ class TestExecutionRuntimeHelpers:
             tool_executors={},
             step_limit=3,
         )
-        a._prepare_stage_runtime = MagicMock(return_value=runtime)
-        a._enforce_rate_limit_model = MagicMock()
-        a._run_chat_turn = MagicMock(return_value=self._turn(last_content="partial"))
-        a._handle_stage_interrupt = MagicMock(return_value=None)
-        a._parse_turn_control = MagicMock(return_value=(target_stage, False, None))
+        a.preparation._prepare_stage_runtime = MagicMock(return_value=runtime)
+        a.chat._enforce_rate_limit_model = MagicMock()
+        a.preparation._run_chat_turn = MagicMock(return_value=self._turn(last_content="partial"))
+        a.preparation._handle_stage_interrupt = MagicMock(return_value=None)
+        a.turns._parse_turn_control = MagicMock(return_value=(target_stage, False, None))
 
         result = a.execute_stage(0, remaining_steps=5)
 
         assert tuple(result) == (expected_next, "partial", False, None, 1)
-        a._run_chat_turn.assert_called_once()
-        assert a._run_chat_turn.call_args.kwargs["current_stage_index"] == 0
-        assert a._run_chat_turn.call_args.kwargs["context_label"] == "execute_stage"
+        a.preparation._run_chat_turn.assert_called_once()
+        assert a.preparation._run_chat_turn.call_args.kwargs["current_stage_index"] == 0
+        assert a.preparation._run_chat_turn.call_args.kwargs["context_label"] == "execute_stage"
 
     def test_execute_stage_logs_and_forces_final_when_extensions_exhaust(self):
         stage = IkaStage("Review", "Review prompt", [])
@@ -600,20 +600,20 @@ class TestExecutionRuntimeHelpers:
             tool_executors={},
             step_limit=1,
         )
-        a._prepare_stage_runtime = MagicMock(return_value=runtime)
-        a._enforce_rate_limit_model = MagicMock()
-        a._run_chat_turn = MagicMock(
+        a.preparation._prepare_stage_runtime = MagicMock(return_value=runtime)
+        a.chat._enforce_rate_limit_model = MagicMock()
+        a.preparation._run_chat_turn = MagicMock(
             return_value=self._turn(last_content="partial", tool_calls=[{"function": {"name": "search"}}])
         )
-        a._handle_stage_interrupt = MagicMock(return_value=None)
-        a._parse_turn_control = MagicMock(return_value=(None, False, None))
-        a._maybe_extend_stage = MagicMock(return_value=(1, 0, "forced answer", True))
+        a.preparation._handle_stage_interrupt = MagicMock(return_value=None)
+        a.turns._parse_turn_control = MagicMock(return_value=(None, False, None))
+        a.policy_runtime._maybe_extend_stage = MagicMock(return_value=(1, 0, "forced answer", True))
 
         result = a.execute_stage(0, remaining_steps=5)
 
         assert tuple(result) == (1, "forced answer", False, None, 1)
         assert messages[-1] == {"role": "assistant", "content": "partial"}
-        a._maybe_extend_stage.assert_called_once()
+        a.policy_runtime._maybe_extend_stage.assert_called_once()
         a.logger.log_step.assert_called_once()
         a.logger.log_stage_end.assert_called_once_with("Review", 1)
 
@@ -628,19 +628,19 @@ class TestExecutionRuntimeHelpers:
             tool_executors={},
             cli=MagicMock(),
         )
-        a._prepare_simple_runtime = MagicMock(return_value=runtime)
-        a._enforce_rate_limit_model = MagicMock()
+        a.preparation._prepare_simple_runtime = MagicMock(return_value=runtime)
+        a.chat._enforce_rate_limit_model = MagicMock()
         a.get_barebone = MagicMock(return_value=SimpleNamespace())
-        a._run_chat_turn = MagicMock(
+        a.preparation._run_chat_turn = MagicMock(
             side_effect=[
                 self._turn(last_content="draft", content_before_tools="draft"),
                 self._turn(last_content="final", content_before_tools="final"),
             ]
         )
-        a._parse_turn_control = MagicMock(side_effect=[(None, False, None), (None, True, "final")])
+        a.turns._parse_turn_control = MagicMock(side_effect=[(None, False, None), (None, True, "final")])
         summarizer = MagicMock(return_value="remaining work")
 
-        with patch.dict(a._maybe_extend_simple_run.__func__.__globals__, {"run_summarization": summarizer}):
+        with patch.dict(a.policy_runtime._maybe_extend_simple_run.__func__.__globals__, {"run_summarization": summarizer}):
             assert a.run_simple() == ("final", "final")
 
         assert a.maxsteps == 2
@@ -653,8 +653,8 @@ class TestExecutionRuntimeHelpers:
         a._total_usage = {"total_tokens": 7}
         a._total_cost = {"total_cost": 0.5}
 
-        with_last_content = a._interrupt_output({"last_content": "partial", "interrupt_data": {"question": "Q?"}})
-        from_question = a._interrupt_output({"interrupt_data": {"question": "Q?"}})
+        with_last_content = a.execution_runtime._interrupt_output({"last_content": "partial", "interrupt_data": {"question": "Q?"}})
+        from_question = a.execution_runtime._interrupt_output({"interrupt_data": {"question": "Q?"}})
 
         assert with_last_content["final_message"] == "partial"
         assert with_last_content["summary"] == "partial"
@@ -677,14 +677,14 @@ class TestExecutionRuntimeHelpers:
         barebone = SimpleNamespace()
         a.execute_stage = MagicMock(return_value=StageExecutionResult(1, "last", True, ".", 2))
         a.get_barebone = MagicMock(return_value=barebone)
-        a._build_final_output = MagicMock(return_value={"final_message": "last"})
+        a.chat._build_final_output = MagicMock(return_value={"final_message": "last"})
 
-        out = a._run_staged_execution(None, resume_cp, last_content="")
+        out = a.execution_runtime._run_staged_execution(None, resume_cp, last_content="")
 
         assert out == {"final_message": "last"}
         assert a.message_history is resume_history
         a.execute_stage.assert_called_once_with(0, 3, resume_input=None)
-        a._build_final_output.assert_called_once_with("last", barebone)
+        a.chat._build_final_output.assert_called_once_with("last", barebone)
 
     def test_staged_dispatch_replays_hitl_without_input_or_resumes_with_input(self):
         stage = IkaStage("Review", "Review prompt", [])
@@ -701,7 +701,7 @@ class TestExecutionRuntimeHelpers:
         a = _minimal_agent(Stages=[stage], limits=ExecutionLimits(maxsteps=10))
         a.execute_stage = MagicMock()
 
-        replay = a._run_staged_execution("", resume_cp, last_content="")
+        replay = a.execution_runtime._run_staged_execution("", resume_cp, last_content="")
 
         assert replay["status"] == "awaiting_user_input"
         assert replay["interrupt_data"]["question"] == "Proceed?"
@@ -710,9 +710,9 @@ class TestExecutionRuntimeHelpers:
         b = _minimal_agent(Stages=[stage], limits=ExecutionLimits(maxsteps=10))
         b.execute_stage = MagicMock(return_value=StageExecutionResult(1, "done", True, "done", 1))
         b.get_barebone = MagicMock(return_value=SimpleNamespace())
-        b._build_final_output = MagicMock(return_value={"final_message": "done"})
+        b.chat._build_final_output = MagicMock(return_value={"final_message": "done"})
 
-        out = b._run_staged_execution("human answer", resume_cp, last_content="")
+        out = b.execution_runtime._run_staged_execution("human answer", resume_cp, last_content="")
 
         assert out == {"final_message": "done"}
         b.execute_stage.assert_called_once_with(0, 2, resume_input="human answer")
@@ -723,7 +723,7 @@ class TestExecutionRuntimeHelpers:
         a._last_interrupt = {"last_content": "Need input", "interrupt_data": {"question": "Proceed?"}}
         a.execute_stage = MagicMock(return_value=StageExecutionResult(0, "Need input", False, None, 1))
 
-        out = a._run_staged_execution(None, None, last_content="")
+        out = a.execution_runtime._run_staged_execution(None, None, last_content="")
 
         assert out["final_message"] == "Need input"
         a.execute_stage.assert_called_once_with(0, 100, resume_input=None)
@@ -738,10 +738,10 @@ class TestExecutionRuntimeHelpers:
         summarizer = MagicMock(return_value="short summary")
 
         with patch.dict(
-            a._run_next_agent_execution.__func__.__globals__,
+            a.execution_runtime._run_next_agent_execution.__func__.__globals__,
             {"summarise_message_history": summarizer},
         ):
-            out = a._run_next_agent_execution()
+            out = a.execution_runtime._run_next_agent_execution()
 
         assert out == {"final_message": "next done"}
         assert next_agent.message_history["first_input"]["message"] == "Previous agent summary:\nshort summary\n\nP"
@@ -753,7 +753,7 @@ class TestExecutionRuntimeHelpers:
         b = _minimal_agent(topology=AgentTopology(next_agent=other_next), output=OutputConfig(summarize_final=False))
         b.run_simple = MagicMock(return_value=("plain final", "plain final"))
 
-        assert b._run_next_agent_execution() == {"final_message": "other done"}
+        assert b.execution_runtime._run_next_agent_execution() == {"final_message": "other done"}
         assert other_next.message_history["first_input"]["message"] == "Previous agent summary:\nplain final\n\nP"
 
     def test_simple_final_output_builds_summary_from_run_simple_result(self):
@@ -761,9 +761,9 @@ class TestExecutionRuntimeHelpers:
         a.run_simple = MagicMock(return_value=("final", "unused"))
         barebone = SimpleNamespace()
         a.get_barebone = MagicMock(return_value=barebone)
-        a._build_final_output = MagicMock(return_value={"final_message": "final", "summary": "summary"})
+        a.chat._build_final_output = MagicMock(return_value={"final_message": "final", "summary": "summary"})
 
-        out = a._run_simple_final_output()
+        out = a.execution_runtime._run_simple_final_output()
 
         assert out == {"final_message": "final", "summary": "summary"}
         a.get_barebone.assert_called_once_with(
@@ -772,7 +772,7 @@ class TestExecutionRuntimeHelpers:
             parent_hierarchy=["A"],
             suppress_init_output=True,
         )
-        a._build_final_output.assert_called_once_with("final", barebone)
+        a.chat._build_final_output.assert_called_once_with("final", barebone)
 
     def test_validated_simple_execution_retries_with_feedback_until_check_passes(self):
         cli = MagicMock()
@@ -782,7 +782,7 @@ class TestExecutionRuntimeHelpers:
 
         a = _minimal_agent(limits=ExecutionLimits(maxsteps=3), prompt="original prompt")
         a.final_answer_checks = [requires_good]
-        a._run_simple_final_output = MagicMock(
+        a.execution_runtime._run_simple_final_output = MagicMock(
             side_effect=[
                 {"final_message": "bad"},
                 {"final_message": "good"},
@@ -790,13 +790,13 @@ class TestExecutionRuntimeHelpers:
         )
 
         with patch.dict(
-            a._run_validated_simple_execution.__func__.__globals__,
+            a.policy_runtime._run_validated_simple_execution.__func__.__globals__,
             {"get_cli_output": MagicMock(return_value=cli)},
         ):
-            out = a._run_validated_simple_execution()
+            out = a.policy_runtime._run_validated_simple_execution()
 
         assert out == {"final_message": "good"}
-        assert a._run_simple_final_output.call_count == 2
+        assert a.execution_runtime._run_simple_final_output.call_count == 2
         assert a.maxsteps == 3
         assert a.prompt == "original prompt"
         cli.agent_response.assert_called_once()
@@ -812,16 +812,16 @@ class TestExecutionRuntimeHelpers:
         a.logger = MagicMock()
         a.final_answer_checks = [always_fail]
         final_output = {"final_message": "still bad"}
-        a._run_simple_final_output = MagicMock(return_value=final_output)
+        a.execution_runtime._run_simple_final_output = MagicMock(return_value=final_output)
 
         with patch.dict(
-            a._run_validated_simple_execution.__func__.__globals__,
+            a.policy_runtime._run_validated_simple_execution.__func__.__globals__,
             {"get_cli_output": MagicMock(return_value=cli)},
         ):
-            out = a._run_validated_simple_execution()
+            out = a.policy_runtime._run_validated_simple_execution()
 
         assert out is final_output
-        assert a._run_simple_final_output.call_count == 4
+        assert a.execution_runtime._run_simple_final_output.call_count == 4
         assert a.maxsteps == 3
         assert a.prompt == "original prompt"
         assert cli.agent_response.call_count == 3
@@ -829,32 +829,32 @@ class TestExecutionRuntimeHelpers:
 
     def test_execution_dispatches_stages_next_agent_checkpoint_and_validation_paths(self):
         staged = _minimal_agent(Stages=[IkaStage("S", "P", [])])
-        staged._run_staged_execution = MagicMock(return_value={"final_message": "staged"})
+        staged.execution_runtime._run_staged_execution = MagicMock(return_value={"final_message": "staged"})
         assert staged.execution() == {"final_message": "staged"}
-        staged._run_staged_execution.assert_called_once_with(None, None, "")
+        staged.execution_runtime._run_staged_execution.assert_called_once_with(None, None, "")
 
         next_agent = _minimal_agent(name="Next")
         chained = _minimal_agent(topology=AgentTopology(next_agent=next_agent))
-        chained._run_next_agent_execution = MagicMock(return_value={"final_message": "next"})
+        chained.execution_runtime._run_next_agent_execution = MagicMock(return_value={"final_message": "next"})
         assert chained.execution() == {"final_message": "next"}
 
         simple = _minimal_agent()
         resume_history = _minimal_agent().message_history
         simple._resume_state = {"scope": "agent", "remaining_steps": 0, "message_history": resume_history}
-        simple._run_simple_final_output = MagicMock(return_value={"final_message": "simple"})
+        simple.execution_runtime._run_simple_final_output = MagicMock(return_value={"final_message": "simple"})
         assert simple.execution() == {"final_message": "simple"}
         assert simple.message_history is resume_history
         assert simple.maxsteps == 0  # An exhausted older snapshot must not regain a model turn.
 
         validated = _minimal_agent()
         validated.final_answer_checks = [lambda _out: True]
-        validated._run_validated_simple_execution = MagicMock(return_value={"final_message": "validated"})
+        validated.policy_runtime._run_validated_simple_execution = MagicMock(return_value={"final_message": "validated"})
         assert validated.execution() == {"final_message": "validated"}
 
     def test_simple_end_instruction_requires_submit_tool_first(self):
         a = _minimal_agent(tools=[SimpleNamespace(name="submit_discovery")])
 
-        instruction = a._simple_end_instruction()
+        instruction = a.policy_runtime._simple_end_instruction()
 
         assert "submit_discovery" in instruction
         assert "DO NOT call agent_end before" in instruction
@@ -864,10 +864,10 @@ class TestRuntimeHelpers:
     def test_prompt_hitl_question_logs_and_raises_payload(self):
         a = _minimal_agent()
         a.logger = MagicMock()
-        human_input_required = a._prompt_hitl_question.__func__.__globals__["HumanInputRequired"]
+        human_input_required = a.chat._prompt_hitl_question.__func__.__globals__["HumanInputRequired"]
 
         with pytest.raises(human_input_required) as exc_info:
-            a._prompt_hitl_question("Review", "Proceed?", stage_index=2, remaining_steps=5)
+            a.chat._prompt_hitl_question("Review", "Proceed?", stage_index=2, remaining_steps=5)
 
         assert exc_info.value.payload["question"] == "Proceed?"
         assert exc_info.value.payload["stage_index"] == 2
@@ -877,9 +877,9 @@ class TestRuntimeHelpers:
         a = _minimal_agent()
         a._last_tool_ts_search = 9.5
 
-        with patch.object(a._enforce_rate_limit.__func__.__globals__["time"], "time", side_effect=[10.0, 10.1]):
-            with patch.object(a._enforce_rate_limit.__func__.__globals__["time"], "sleep") as sleep:
-                a._enforce_rate_limit(60, "_last_tool_ts_search")
+        with patch.object(a.chat._enforce_rate_limit.__func__.__globals__["time"], "time", side_effect=[10.0, 10.1]):
+            with patch.object(a.chat._enforce_rate_limit.__func__.__globals__["time"], "sleep") as sleep:
+                a.chat._enforce_rate_limit(60, "_last_tool_ts_search")
 
         sleep.assert_called_once_with(0.5)
         assert a._last_tool_ts_search == 10.1
@@ -889,27 +889,27 @@ class TestRuntimeHelpers:
         a = _minimal_agent(policy=ExecutionPolicy(use_async=True))
         a.client = client
 
-        assert a._get_chat_client() is client
+        assert a.chat._get_chat_client() is client
 
 
 class TestParseControlCalls:
     def test_extract_json_from_text_handles_direct_json_code_blocks_and_invalid_text(self):
         a = _minimal_agent()
 
-        assert a._extract_json_from_text('{"ok": true}') == '{"ok": true}'
-        assert a._extract_json_from_text('prefix ```json\n{"ok": true}\n``` suffix') == '{"ok": true}'
-        assert a._extract_json_from_text("   ") is None
-        assert a._extract_json_from_text("bad {not-json}") is None
-        assert a._extract_json_from_text("no json here") is None
+        assert a.controls._extract_json_from_text('{"ok": true}') == '{"ok": true}'
+        assert a.controls._extract_json_from_text('prefix ```json\n{"ok": true}\n``` suffix') == '{"ok": true}'
+        assert a.controls._extract_json_from_text("   ") is None
+        assert a.controls._extract_json_from_text("bad {not-json}") is None
+        assert a.controls._extract_json_from_text("no json here") is None
 
     def test_parse_tool_arguments_rejects_malformed_and_non_dict_payloads(self):
         a = _minimal_agent()
 
-        assert a._parse_tool_arguments('{"value": 1}') == {"value": 1}
-        assert a._parse_tool_arguments("{bad json") == {}
-        assert a._parse_tool_arguments("[1, 2]") == {}
-        assert a._parse_tool_arguments({"value": 1}) == {"value": 1}
-        assert a._parse_tool_arguments(["not", "dict"]) == {}
+        assert a.controls._parse_tool_arguments('{"value": 1}') == {"value": 1}
+        assert a.controls._parse_tool_arguments("{bad json") == {}
+        assert a.controls._parse_tool_arguments("[1, 2]") == {}
+        assert a.controls._parse_tool_arguments({"value": 1}) == {"value": 1}
+        assert a.controls._parse_tool_arguments(["not", "dict"]) == {}
 
     def test_agent_end_detected(self):
         a = _minimal_agent()
@@ -1039,37 +1039,37 @@ class TestParseControlCalls:
 class TestFallbackFinalContent:
     def test_prefers_agent_end_text(self):
         a = _minimal_agent()
-        out = a._fallback_final_content("From tool", "Before", "Last")
+        out = a.chat._fallback_final_content("From tool", "Before", "Last")
         assert out == "From tool"
 
     def test_fallback_to_content_before_tools(self):
         a = _minimal_agent()
-        out = a._fallback_final_content("", "Content before", "Last")
+        out = a.chat._fallback_final_content("", "Content before", "Last")
         assert out == "Content before"
 
     def test_fallback_to_last_content(self):
         a = _minimal_agent()
-        out = a._fallback_final_content("", "", "Last content")
+        out = a.chat._fallback_final_content("", "", "Last content")
         assert out == "Last content"
 
     def test_all_empty_raises(self):
         a = _minimal_agent()
         with pytest.raises(ValueError, match="no output"):
-            a._fallback_final_content("", "", "")
+            a.chat._fallback_final_content("", "", "")
 
 
 class TestBuildFinalOutput:
     def test_returns_final_message_and_summary(self):
         a = _minimal_agent()
         mock_bm = MagicMock()
-        out = a._build_final_output("Final text", mock_bm)
+        out = a.chat._build_final_output("Final text", mock_bm)
         assert out["final_message"] == "Final text"
         assert out["summary"] == "Final text"
 
     def test_build_final_output_has_keys(self):
         a = _minimal_agent(output=OutputConfig(summarize_final=True))
         mock_bm = MagicMock()
-        out = a._build_final_output("Final", mock_bm)
+        out = a.chat._build_final_output("Final", mock_bm)
         assert "final_message" in out
         assert "summary" in out
         assert out["final_message"] == "Final"
@@ -1084,13 +1084,13 @@ class TestBuildFinalOutput:
         cli.get_step.return_value = 3
 
         with patch.dict(
-            a._build_final_output.__func__.__globals__,
+            a.chat._build_final_output.__func__.__globals__,
             {
                 "summarise_message_history": MagicMock(return_value="summary text"),
                 "get_cli_output": MagicMock(return_value=cli),
             },
         ):
-            out = a._build_final_output("", mock_bm)
+            out = a.chat._build_final_output("", mock_bm)
 
         assert out["final_message"] == "summary text"
         assert out["summary"] == "summary text"
@@ -1108,7 +1108,7 @@ class TestChatWrapper:
         }
 
         chat_mock = MagicMock(return_value=response)
-        with patch.dict(a._run_chat_round.__func__.__globals__, {"chat": chat_mock}):
+        with patch.dict(a.chat._run_chat_round.__func__.__globals__, {"chat": chat_mock}):
             out = a.chat_wrapper(
                 barebone,
                 [{"role": "user", "content": "task"}],
@@ -1131,8 +1131,8 @@ class TestChatWrapper:
             "usage": {"input_tokens": 5, "output_tokens": 6, "total_tokens": 11},
             "cost": {"input_cost": 0.5, "output_cost": 0.6, "total_cost": 1.1},
         }
-        agent_end_exception = a.chat_wrapper.__func__.__globals__["AgentEndException"]
-        a._run_chat_round = MagicMock(side_effect=agent_end_exception(response=response))
+        agent_end_exception = a.chat.chat_wrapper.__func__.__globals__["AgentEndException"]
+        a.chat._run_chat_round = MagicMock(side_effect=agent_end_exception(response=response))
 
         with pytest.raises(agent_end_exception):
             a.chat_wrapper(MagicMock(), [{"role": "user", "content": "task"}])
@@ -1149,8 +1149,8 @@ class TestChatWrapper:
             calls.append((args, kwargs))
             return response
 
-        with patch.dict(a._run_chat_round.__func__.__globals__, {"async_chat": fake_async_chat}):
-            out = a._run_chat_round(
+        with patch.dict(a.chat._run_chat_round.__func__.__globals__, {"async_chat": fake_async_chat}):
+            out = a.chat._run_chat_round(
                 MagicMock(),
                 [{"role": "user", "content": "task"}],
                 a.message_history,

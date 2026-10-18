@@ -12,9 +12,7 @@ def build_stage_content_prompt(agent_prompt: str, stages: list[Any], stage: Any,
     if agent_prompt:
         parts.append(agent_prompt)
     if stages:
-        stages_block = "\n\n".join(
-            f"Stage {i} ({s.name}):\n{s.prompt or ''}" for i, s in enumerate(stages)
-        )
+        stages_block = "\n\n".join(f"Stage {i} ({s.name}):\n{s.prompt or ''}" for i, s in enumerate(stages))
         parts.append("STAGES:\n\n" + stages_block)
 
     parts.append("CURRENT STAGE IS:\n\n" + (stage.prompt or ""))

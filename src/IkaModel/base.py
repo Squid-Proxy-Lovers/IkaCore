@@ -81,6 +81,8 @@ class AgentTool:
 
 @dataclass
 class BareBoneModel:
+    _tool_call_counts: dict[str, int]
+    context_budget: int | None
     def __init__(
         self, 
         model_id: str, 
