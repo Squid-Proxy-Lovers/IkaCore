@@ -12,6 +12,17 @@ export PATH="$PWD/.venv/bin:$PATH" VIRTUAL_ENV="$PWD/.venv"
 python -m pip install -e ".[test,dev]"
 ```
 
+Install the secret-scanning hook once per clone. CI runs the same pinned
+[Gitleaks](https://github.com/gitleaks/gitleaks) scan on every pull request and push to `main`:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Keep credentials in environment variables; never commit `keys.cfg`, `.env` files,
+`auth.json`, raw model transcripts, or snapshot databases.
+
 ## Test Commands
 
 Keep that environment active for every command, including Ruff and Pyright, so they
