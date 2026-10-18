@@ -108,7 +108,8 @@ class AgentExecution:
         state.last_content = stage_result.last_content
         if current_resume_input is not None:
             state.resume_stage_input = None
-        state.remaining_steps -= stage_result.used_steps
+        state.remaining_steps = (stage_result.remaining_steps if stage_result.remaining_steps is not None
+                                 else max(0, state.remaining_steps - stage_result.used_steps))
         if stage_result.agent_end_called:
             state.agent_end_text = stage_result.end_text
             return False
@@ -145,7 +146,7 @@ class AgentExecution:
             should_continue = agent.execution_runtime._apply_staged_result(state, stage_result, current_resume_input)
             if agent._last_interrupt:
                 return agent.execution_runtime._interrupt_output(agent._last_interrupt)
-            if not should_continue:
+            if not should_continue or state.remaining_steps <= 0:
                 break
         return agent.execution_runtime._finalize_staged_execution(state)
 

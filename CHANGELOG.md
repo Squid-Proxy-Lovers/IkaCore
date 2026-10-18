@@ -7,6 +7,9 @@ V2 intentionally breaks compatibility with v1. See the
 
 ### Fixed (final core review)
 
+- Stage transitions and validation corrections preserve consumed overall step allowances;
+  only configured extension/correction grants add steps, including after snapshot restore.
+
 - Chained runs execute isolated downstream clones and close their owned resources, including
   on errors; concurrent workflow instances leave downstream templates and histories intact.
 

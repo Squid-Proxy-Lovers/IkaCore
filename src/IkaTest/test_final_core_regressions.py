@@ -12,6 +12,7 @@ from IkaCore import (
     ExecutionLimits,
     ExecutionPolicy,
     IkaBaseAgent,
+    IkaStage,
     IkaWorkflow,
     OutputConfig,
     ProviderConfig,
@@ -24,8 +25,8 @@ from IkaCore.testing import MockProvider, provider_response
 def make_agent():
     with ExitStack() as resources:
         def make(name="review", prompt="FIRST_TURN", **kwargs):
-            defaults = dict(output=OutputConfig(cli=False), limits=ExecutionLimits.bounded(),
-                            policy=ExecutionPolicy.bounded())
+            defaults = {"output": OutputConfig(cli=False), "limits": ExecutionLimits.bounded(),
+                            "policy": ExecutionPolicy.bounded()}
             defaults.update(kwargs)
             agent = IkaBaseAgent(name, prompt=prompt, model_id="gpt-4o-mini", api_key="fixture", **defaults)
             resources.callback(agent.shutdown)
@@ -100,3 +101,38 @@ def test_chain_closes_owned_downstream_on_error(make_agent):
     finally:
         for client in clients:
             client.close()
+
+
+@pytest.mark.parametrize("restore", [False, True])
+def test_backward_stage_transitions_exhaust_overall_budget(make_agent, tmp_path, restore):
+    stages = [IkaStage("work", "Work", [], stage_max_step=1),
+              IkaStage("review", "Review", [], stage_max_step=1, allowed_back_to=[0])]
+    options = {"stages": stages, "limits": ExecutionLimits.bounded(maxsteps=2, max_tool_rounds=1)}
+    agent = make_agent(**options)
+    db = str(tmp_path / "budget.db")
+    store = agent.enable_snapshots(db)
+    if restore:
+        agent.request_pause_at("post_model")
+    actions = iter([("stage_end", {"reason": "ready"}), ("change_stage", {"stage_index": 0, "reason": "revise"}),
+                    ("stage_end", {"reason": "again"}), end("unexpected extra turn")])
+    with MockProvider(responder=lambda u, p: provider_response(u, p, next(actions))) as mock:
+        result = agent.execution()
+        if restore:
+            other = make_agent(**options)
+            other.enable_snapshots(db)
+            result = other.resume_from_snapshot(result["snapshot_id"])
+    assert len(mock.requests) == 2
+    states = [s["state_json"] for s in store.list_snapshots(result["runtime"]["run_id"])]
+    assert all(s.get("remaining_steps", 0) >= 0 for s in states)
+
+
+def test_validation_correction_does_not_reset_consumed_budget(make_agent):
+    agent = make_agent(limits=ExecutionLimits.bounded(maxsteps=2, max_tool_rounds=1),
+                       policy=ExecutionPolicy.bounded(final_answer_checks=(lambda result: False,),
+                                                      validation_retries=1, validation_extra_steps=0))
+    actions = iter([end("first"), ("stage_end", {"reason": "no correction yet"}), end("third turn")])
+    def respond(url, payload):
+        return provider_response(url, payload, next(actions) if payload.get("tools") else "forced final")
+    with MockProvider(responder=respond) as mock:
+        agent.execution()
+    assert len([p for p in mock.requests if p.get("tools")]) == 2

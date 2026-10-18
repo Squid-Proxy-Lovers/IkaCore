@@ -13,6 +13,7 @@ class AgentRunState:
     compaction_count: int = 0
     validation_attempts: int = 0
     validation_maxsteps: int | None = None
+    remaining_steps: int | None = None
     _resume_state: dict[str, Any] | None = None
     _last_interrupt: dict[str, Any] | None = None
     _tool_call_counts: dict[str, int] = field(default_factory=dict)

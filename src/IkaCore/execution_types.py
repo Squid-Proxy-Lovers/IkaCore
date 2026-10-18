@@ -15,6 +15,7 @@ class StageExecutionResult:
     agent_end_called: bool
     end_text: Optional[str]
     used_steps: int
+    remaining_steps: int | None = None
 
     def __iter__(self) -> Iterator[object]:
         yield self.next_stage_index

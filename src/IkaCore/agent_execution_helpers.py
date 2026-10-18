@@ -50,5 +50,5 @@ def resolve_stage_model_overrides(agent: Any, stage: Any) -> dict[str, Any]:
 def stage_step_limit(stage: Any, remaining_steps: int) -> int:
     stage_max = getattr(stage, "stage_max_step", 1)
     if stage_max == 0:
-        return max(1, remaining_steps)
-    return min(stage_max, max(1, remaining_steps))
+        return max(0, remaining_steps)
+    return min(stage_max, max(0, remaining_steps))

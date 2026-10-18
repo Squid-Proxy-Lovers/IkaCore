@@ -21,6 +21,7 @@ def replace_prompt(agent: IkaBaseAgent, value: str) -> None:
         agent.__dict__.pop(key, None)
     agent.state._last_interrupt = None
     agent.state.maxsteps = agent.config.limits.maxsteps
+    agent.state.remaining_steps = None
     agent.state.validation_attempts = 0
     agent.state.validation_maxsteps = None
     session = getattr(agent, "_snapshot_runtime", None)

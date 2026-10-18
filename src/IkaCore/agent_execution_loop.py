@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Optional
 
 from IkaModel.execution_hooks import emit_boundary
@@ -149,6 +150,7 @@ class AgentTurnLoop:
         if isinstance(runtime, StageRuntimeContext):
             if state.used_steps < state.step_limit:
                 return False
+            previous_limit = state.step_limit
             state.step_limit, state.extension_count, state.last_content, stop = (
                 agent.policy_runtime._maybe_extend_stage(
                     runtime.barebone_model,
@@ -158,6 +160,7 @@ class AgentTurnLoop:
                     state.last_content,
                 )
             )
+            state.remaining_steps += state.step_limit - previous_limit
             return stop
         if state.used_steps >= agent.maxsteps and state.extension_count < agent.config.policy.max_step_extensions:
             state.extension_count = agent.policy_runtime._maybe_extend_simple_run(
@@ -169,6 +172,7 @@ class AgentTurnLoop:
                 runtime.cli,
             )
         state.step_limit = agent.maxsteps
+        state.remaining_steps = agent.maxsteps
         return False
 
     def _simple_turn_has_no_progress(self, turn: AgentChatTurn, step_num: int) -> bool:
@@ -180,17 +184,24 @@ class AgentTurnLoop:
             return True
         return False
 
+    def _finish_loop(self, state: ExecutionLoopState, result: StageExecutionResult) -> StageExecutionResult:
+        remaining = max(0, state.remaining_steps - state.used_steps)
+        self.agent.state.remaining_steps = remaining
+        session = self.agent._snapshot_runtime
+        if session is not None:
+            session.remaining_steps = remaining
+        return replace(result, remaining_steps=remaining)
+
     def _run_execution_loop(self, runtime: RuntimeContext, remaining_steps: int) -> StageExecutionResult:
         agent = self.agent
         staged = isinstance(runtime, StageRuntimeContext)
         state = restore_loop_state(
             agent, runtime.step_limit if isinstance(runtime, StageRuntimeContext) else agent.maxsteps, remaining_steps
         )
-        remaining_steps = state.remaining_steps
         if state.used_steps >= state.step_limit:
             agent.turns._extend_execution(runtime, state)
         while state.used_steps < state.step_limit:
-            started = agent.turns._start_execution_step(runtime, state, remaining_steps)
+            started = agent.turns._start_execution_step(runtime, state, state.remaining_steps)
             turn = agent.preparation._run_chat_turn(
                 runtime.barebone_model,
                 runtime.messages,
@@ -203,16 +214,18 @@ class AgentTurnLoop:
             state.last_content = turn.last_content
             if not staged and agent.turns._simple_turn_has_no_progress(turn, state.used_steps - 1):
                 break
-            terminal = agent.turns._terminal_turn_result(runtime, state, turn, remaining_steps, started)
+            terminal = agent.turns._terminal_turn_result(runtime, state, turn, state.remaining_steps, started)
             if terminal is not None:
-                return terminal
+                return agent.turns._finish_loop(state, terminal)
             agent.turns._record_execution_progress(runtime, state, turn, started)
             if agent.turns._extend_execution(runtime, state):
                 break
         if isinstance(runtime, StageRuntimeContext) and agent.logger:
             agent.logger.log_stage_end(runtime.stage.name, state.used_steps)
         next_stage = runtime.stage_index + 1 if isinstance(runtime, StageRuntimeContext) else 0
-        return StageExecutionResult(next_stage, state.last_content, False, None, state.used_steps)
+        return agent.turns._finish_loop(
+            state, StageExecutionResult(next_stage, state.last_content, False, None, state.used_steps)
+        )
 
     def run_simple(self) -> tuple[str, str]:
         agent = self.agent

@@ -47,6 +47,7 @@ def capture_state(session: SnapshotSession, label: str, payload: dict[str, Any])
         "prompt": getattr(session.agent, "prompt", ""),
         "compaction_count": getattr(session.agent, "compaction_count", 0),
         "validation_attempts": getattr(getattr(session.agent, "state", None), "validation_attempts", 0),
+        "validation_remaining_steps": getattr(session.agent.state, "remaining_steps", None),
         "validation_maxsteps": getattr(getattr(session.agent, "state", None), "validation_maxsteps", None),
         "timestamp": time.time(),
     }

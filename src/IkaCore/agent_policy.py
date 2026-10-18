@@ -161,7 +161,9 @@ class AgentPolicy:
         try:
             for attempt in range(agent.state.validation_attempts, agent.config.policy.validation_retries + 1):
                 if attempt:
-                    agent.maxsteps = original_maxsteps + agent.config.policy.validation_extra_steps
+                    if not agent._resume_state:
+                        remaining = agent.state.remaining_steps
+                        agent.maxsteps = (remaining if remaining is not None else original_maxsteps) + agent.config.policy.validation_extra_steps
                     output = agent.execution_runtime._run_simple_final_output()
                 else:
                     output = execute()

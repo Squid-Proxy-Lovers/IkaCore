@@ -98,6 +98,8 @@ class AgentSnapshots:
         session.loop_state = ExecutionLoopState(**state["loop_state"]) if state.get("loop_state") else None
         session.live_messages = state.get("chat_messages")
         agent._snapshot_resume_messages = deepcopy(session.live_messages)
+        agent.maxsteps = state.get("maxsteps", agent.maxsteps)
+        agent.state.remaining_steps = state.get("validation_remaining_steps")
         agent.state.prompt = state.get("prompt", agent.prompt)
         agent.state.compaction_count = state.get("compaction_count", 0)
         agent.state.validation_attempts = state.get("validation_attempts", 0)
