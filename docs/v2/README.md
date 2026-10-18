@@ -111,13 +111,13 @@ extend their parent. `IkaTools(..., timeout=30)` sets an individual tool timeout
 Synchronous functions must cooperate with cancellation; a timed-out worker may finish later.
 
 Synchronous HTTP posts register abort before headers, clamp connect/read/write/pool
-timeouts to the remaining deadline, and interrupt exposed HTTP/1 sockets with shutdown
-before closing the response. Caller-owned clients stay open. This uses HTTPX's optional
-[trace and network-stream extensions](https://www.python-httpx.org/advanced/extensions/).
-DNS/connect/TLS, reused connections before headers, HTTP/2, and custom transports can
-still wait until their current I/O timeout or cooperative check. Sync cancellation and
-deadlines are therefore not hard wall-clock guarantees for those phases; async requests
-support task cancellation throughout the request.
+timeouts to the remaining deadline, and close only the response or stream they own.
+Caller-owned clients stay open, and cancellation never shuts down a raw pooled socket.
+The timeout clamp uses HTTPX's optional [trace extension](https://www.python-httpx.org/advanced/extensions/).
+Explicit cancellation of a blocked sync read may take effect only at the next clamped
+I/O timeout. Deadlines bound each I/O wait rather than guaranteeing a hard wall-clock
+return: DNS/TLS, trickled bodies, and custom transports can delay the next control check.
+Async requests support task cancellation throughout the request.
 
 The remaining runtime settings are `shared_ssl_context`, `reuse_connections`,
 `parallel_context_preparation`, `recover_truncated_control_calls`, `compact_at_fraction`,

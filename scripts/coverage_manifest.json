@@ -57,13 +57,16 @@
         "src/IkaTest/test_transport_lifecycle.py::test_deadline_owned_client_is_closed_after_success",
         "src/IkaTest/test_transport_lifecycle.py::test_sync_abort_closes_only_response_and_preserves_caller_client",
         "src/IkaTest/test_transport_lifecycle.py::test_async_post_abort_preserves_caller_client",
-        "src/IkaTest/test_transport_loopback.py::test_real_socket_abort_wakes_headers_and_body_and_preserves_client",
+        "src/IkaTest/test_transport_loopback.py::test_real_socket_deadline_and_cancel_timeout_preserve_client",
         "src/IkaTest/test_transport_loopback.py::test_trickled_body_cannot_restart_the_execution_deadline",
         "src/IkaTest/test_transport_loopback.py::test_reused_connection_header_wait_is_bounded_by_remaining_deadline",
         "src/IkaTest/test_transport_lifecycle.py::test_sync_request_clamps_each_timeout_without_changing_caller_configuration",
-        "src/IkaTest/test_transport_lifecycle.py::test_sync_abort_handles_closed_sockets_and_never_shuts_down_http2"
+        "src/IkaTest/test_transport_lifecycle.py::test_sync_abort_never_accesses_transport_sockets",
+        "src/IkaTest/test_transport_pool_ownership.py::test_preloaded_response_does_not_abort_another_request",
+        "src/IkaTest/test_transport_pool_ownership.py::test_sync_socket_and_pool",
+        "src/IkaTest/test_transport_pool_ownership.py::test_async_socket_and_pool"
       ],
-      "known_gap": "Real loopback HTTP/1 header/body aborts are tested; real TLS/proxy handshakes and HTTP/2 interruption are not. Sync abort can wait for an I/O timeout before headers on reused connections or when transports expose no request socket.",
+      "known_gap": "Real loopback HTTP/HTTPS header/body timeouts and pooled-response cancellation are tested; proxy handshakes and real HTTP/2 are not. Blocked sync reads may observe explicit cancellation only at their next clamped I/O timeout; deadlines are not hard wall-clock guarantees.",
       "min_lines": 95,
       "min_branches": 90
     },

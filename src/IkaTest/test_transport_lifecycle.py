@@ -214,7 +214,7 @@ def test_sync_transport_errors_preserve_their_type_without_an_execution_abort(er
 
 
 @pytest.mark.parametrize('multiplexed', [False, True])
-def test_sync_abort_handles_closed_sockets_and_never_shuts_down_http2(multiplexed):
+def test_sync_abort_never_accesses_transport_sockets(multiplexed):
     cancelled, released = threading.Event(), threading.Event()
     callbacks = []
     sock = Mock(spec=socket.socket)
@@ -244,4 +244,5 @@ def test_sync_abort_handles_closed_sockets_and_never_shuts_down_http2(multiplexe
         with request_controls(cancel_checker=cancelled.is_set, abort_registrar=register), pytest.raises(IkaRequestCancelled):
             controlled_post(URL, {}, {}, 2, client)
         assert not client.is_closed and not callbacks
-    assert sock.shutdown.call_count == (0 if multiplexed else 1)
+    network.get_extra_info.assert_not_called()
+    sock.shutdown.assert_not_called()

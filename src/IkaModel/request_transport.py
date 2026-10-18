@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import socket
 import threading
 from typing import Any, Optional
 
@@ -18,19 +17,11 @@ from .runtime_policy import current_runtime_options
 
 
 class _SyncRequestAbort:
-    """Abort one HTTP/1 connection; never close a caller's connection pool."""
+    """Close only our response; blocked sync I/O may wait for its timeout."""
 
     def __init__(self) -> None:
         self.lock = threading.RLock()
-        self.stream: Any = None
-        self.socket: Optional[socket.socket] = None
         self.response: Optional[httpx.Response] = None
-
-    def _bind_stream(self, stream: Any) -> None:
-        if stream is not None:
-            sock = stream.get_extra_info("socket")
-            if isinstance(sock, socket.socket):
-                self.socket = sock
 
     def trace(self, event: str, info: dict[str, Any]) -> None:
         # HTTPX's trace/network_stream extensions are optional on custom transports.
@@ -39,14 +30,6 @@ class _SyncRequestAbort:
             return
         if event.endswith(".started"):
             check_request_controls()
-        with self.lock:
-            if event in {"connection.connect_tcp.complete", "connection.connect_unix_socket.complete",
-                         "connection.start_tls.complete"}:
-                self.stream = info["return_value"]
-            elif event.startswith("http11."):
-                self._bind_stream(self.stream)
-            elif event.startswith("http2."):
-                self.socket = None  # A multiplexed connection belongs to other requests too.
         request = info.get("request")
         if request is not None:
             timeouts = request.extensions.get("timeout", {})
@@ -56,24 +39,16 @@ class _SyncRequestAbort:
         check_request_controls()
         with self.lock:
             self.response = response
-            if response.extensions.get("http_version") != b"HTTP/2":
-                self._bind_stream(response.extensions.get("network_stream"))
 
     def close(self) -> None:
         with self.lock:
-            if self.socket is not None:
-                try:
-                    self.socket.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-                self.socket = None
             response = self.response
         if response is not None:
             response.close()
 
     def clear(self) -> None:
         with self.lock:
-            self.stream, self.socket, self.response = None, None, None
+            self.response = None
 
 
 def controlled_post(
