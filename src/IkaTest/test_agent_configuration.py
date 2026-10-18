@@ -55,3 +55,47 @@ def test_dc9efbd_snapshot_resumes_saved_turn_without_provider_or_double_usage(tm
     assert result['final_message'] == 'legacy complete'
     assert result['usage']['input_tokens'] == 2 and result['usage']['output_tokens'] == 3
     agent.shutdown()
+
+
+def test_clone_preserves_effective_prompt_model_and_async_overrides():
+    from dataclasses import replace
+
+    from IkaCore import PromptConfig
+
+    agent = IkaBaseAgent('a', prompt='task', model_id='gpt-4o', api_key='key',
+                         prompts=PromptConfig(system_prompt='original'))
+    agent.system_prompt = 'delegated task guard'
+    agent.use_async = True
+    agent.api_url = 'https://fixture.invalid'
+    agent.max_tokens = 123
+    agent.temperature = 0.4
+    clone = agent.clone_for_run()
+    assert clone.system_prompt == 'delegated task guard' and clone.use_async
+    assert clone.api_url == 'https://fixture.invalid' and clone.max_tokens == 123 and clone.temperature == 0.4
+    assert agent.config.prompts.system_prompt == 'original' and not agent.config.policy.use_async
+    assert replace(agent.config.prompts, system_prompt='new').system_prompt == 'new'
+    clone.shutdown()
+    agent.shutdown()
+
+
+@pytest.mark.parametrize('retries,expected_calls', [(0, 1), (1, 2)])
+def test_explicit_validation_policy_bounds_retries_and_restores_run_budget(retries, expected_calls):
+    def accepts_answer(output) -> bool:
+        """Require a passing final answer."""
+        return output.get('final_message') == 'pass'
+
+    agent = IkaBaseAgent('a', prompt='task', model_id='gpt-4o', api_key='key',
+                         limits=ExecutionLimits(maxsteps=10),
+                         policy=ExecutionPolicy(final_answer_checks=(accepts_answer,),
+                                                validation_retries=retries, validation_extra_steps=7))
+    calls = []
+    def execute():
+        calls.append(agent.maxsteps)
+        return {'final_message': 'fail' if len(calls) == 1 else 'pass'}
+    agent.execution_runtime._run_simple_final_output = execute
+    result = agent.execution()
+    assert len(calls) == expected_calls
+    assert calls == ([10] if retries == 0 else [10, 17])
+    assert result['final_message'] == ('fail' if retries == 0 else 'pass')
+    assert agent.maxsteps == 10 and agent.prompt == 'task' and agent.config.limits.maxsteps == 10
+    agent.shutdown()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import cached_property
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from IkaCore.agent_helper_support import (
@@ -44,6 +45,15 @@ from .agent_tools import AgentTools
 "Public agent facade composed from explicit runtime components."
 
 
+
+_DEFAULT_PROVIDER = ProviderConfig()
+_DEFAULT_PROMPTS = PromptConfig()
+_DEFAULT_LIMITS = ExecutionLimits()
+_DEFAULT_POLICY = ExecutionPolicy()
+_DEFAULT_TOPOLOGY = AgentTopology()
+_DEFAULT_OUTPUT = OutputConfig()
+
+
 class IkaBaseAgent:
     events: RuntimeOutput
     _snapshot_resume_messages: list[dict[str, Any]] | None
@@ -70,6 +80,7 @@ class IkaBaseAgent:
     api_url: Optional[str]
     api_key: str
     model_id: str
+    use_responses_api: bool
     tools: list[IkaTools]
     end_prompt: Optional[str]
     start_prompt: Optional[str]
@@ -103,23 +114,14 @@ class IkaBaseAgent:
             api_key,
             tuple(tools or ()),
             tuple(Stages or ()),
-            provider or ProviderConfig(),
-            prompts or PromptConfig(),
-            limits or ExecutionLimits(),
-            policy or ExecutionPolicy(),
-            topology or AgentTopology(),
-            output or OutputConfig(),
+            provider or _DEFAULT_PROVIDER,
+            prompts or _DEFAULT_PROMPTS,
+            limits or _DEFAULT_LIMITS,
+            policy or _DEFAULT_POLICY,
+            topology or _DEFAULT_TOPOLOGY,
+            output or _DEFAULT_OUTPUT,
         )
         initialize_agent(self)
-        self.preparation = AgentPreparation(self)
-        self.turns = AgentTurnLoop(self)
-        self.execution_runtime = AgentExecution(self)
-        self.policy_runtime = AgentPolicy(self)
-        self.tool_runtime = AgentTools(self)
-        self.controls = AgentControl(self)
-        self.chat = AgentChat(self)
-        self.lifecycle = AgentLifecycle(self)
-        self.snapshots = AgentSnapshots(self)
         self._snapshot_runtime = None
 
     def shutdown(self) -> None:
@@ -346,3 +348,39 @@ class IkaBaseAgent:
         to handle cases like "google/gemini-3-flash-preview" on OpenRouter.
         """
         return get_api_url_for_model(model_id, use_responses_api)
+
+    @cached_property
+    def preparation(self) -> AgentPreparation:
+        return AgentPreparation(self)
+
+    @cached_property
+    def turns(self) -> AgentTurnLoop:
+        return AgentTurnLoop(self)
+
+    @cached_property
+    def execution_runtime(self) -> AgentExecution:
+        return AgentExecution(self)
+
+    @cached_property
+    def policy_runtime(self) -> AgentPolicy:
+        return AgentPolicy(self)
+
+    @cached_property
+    def tool_runtime(self) -> AgentTools:
+        return AgentTools(self)
+
+    @cached_property
+    def controls(self) -> AgentControl:
+        return AgentControl(self)
+
+    @cached_property
+    def chat(self) -> AgentChat:
+        return AgentChat(self)
+
+    @cached_property
+    def lifecycle(self) -> AgentLifecycle:
+        return AgentLifecycle(self)
+
+    @cached_property
+    def snapshots(self) -> AgentSnapshots:
+        return AgentSnapshots(self)

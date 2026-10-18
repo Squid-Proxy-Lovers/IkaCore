@@ -145,7 +145,7 @@ class AgentControl:
             name = fn.get("name") or call.get("name")
             args_raw = fn.get("arguments") or "{}"
             args = agent.controls._parse_tool_arguments(args_raw, name)
-            if name in ["short_term_save", "short_term_search", "long_term_save", "long_term_search"]:
+            if name not in {"agent_end", "stage_end", "change_stage", "ask_user"}:
                 logger = getattr(agent, "logger", None)
                 if logger:
                     logger.log_action(f"{name} called")

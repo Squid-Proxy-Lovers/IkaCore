@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import copy, deepcopy
 from typing import TYPE_CHECKING, Dict, List, Optional, cast
 
+from IkaCore.config import AgentTopology
 from IkaCore.stages import IkaStage
 
 "AgentLifecycle component; owns one execution responsibility."
@@ -59,12 +60,18 @@ class AgentLifecycle:
             "api_key": agent.api_key,
             "tools": list(agent.tools),
             "Stages": [agent.lifecycle._clone_stage_for_run(stage) for stage in agent.Stages],
-            "provider": config.provider,
-            "prompts": config.prompts,
-            "limits": replace(config.limits, maxsteps=agent.maxsteps),
-            "policy": replace(config.policy, final_answer_checks=()),
-            "topology": config.topology,
-            "output": replace(config.output, logging_level=0),
+            "provider": replace(config.provider, api_url=agent.api_url, max_tokens=agent.max_tokens,
+                                temperature=agent.temperature, use_responses_api=agent.use_responses_api,
+                                reasoning_effort=agent.reasoning_effort),
+            "prompts": replace(config.prompts, system_prompt=agent.system_prompt,
+                               start_prompt=agent.start_prompt, end_prompt=agent.end_prompt),
+            "limits": replace(config.limits, maxsteps=agent.maxsteps, step_timeout=agent.step_timeout,
+                              max_tool_rounds=agent.max_tool_rounds, max_tool_calls=agent.max_tool_calls,
+                              rate_limit_per_min=agent.rate_limit_per_min,
+                              per_tool_rate_limit=agent.per_tool_rate_limit),
+            "policy": replace(config.policy, final_answer_checks=(), use_async=agent.use_async),
+            "topology": AgentTopology(tuple(agent.subagents), agent.next_agent),
+            "output": replace(config.output, logging_level=0, summarize_final=agent.summarize_final),
         }
 
     def _sync_clone_runtime_state(self, clone: "IkaBaseAgent", include_history: bool) -> None:
