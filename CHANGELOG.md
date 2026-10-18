@@ -75,7 +75,8 @@ V2 intentionally breaks compatibility with v1. See the
 ### Refactor verification
 
 - Permanent 42-scenario execution parity checks compare the grouped API with `dc9efbd`.
-  Components remain lazy and frozen options reusable. Coverage floors are unchanged.
+  Components remain lazy and frozen options reusable. Later hardening raises global
+  floors to 99% lines / 95% branches and 99% combined, with raised per-area floors.
 - The installed-wheel live harness uses grouped provider, limit, policy and output
   configuration. Its offline probes cover agent construction for all eight routes,
   simple/staged completion, fresh-process resume, compaction and workflow HITL.
@@ -84,7 +85,8 @@ V2 intentionally breaks compatibility with v1. See the
 - Validation includes deterministic provider, retry, execution, workflow, snapshot,
   memory and cancellation tests; lint/type/coverage gates; wheel checks; repeated
   real-socket deadlines; and Python 3.11–3.13 / HTTPX compatibility checks.
-  See [the merged validation report](docs/v2/merged-validation.md) for exact revisions,
+  See [current merged validation](docs/v2/merge-validation.md) for the integrated gate,
+  and [historical validation](docs/v2/merged-validation.md) for earlier exact revisions,
   measurements and live Codex results (14 passed, 1 `reasoning_not_exposed` skip with
   `gpt-5.6-sol` at `179b52e`). Other providers/models and long-running application
   behavior require separate live validation.
@@ -135,59 +137,38 @@ V2 intentionally breaks compatibility with v1. See the
 - Close SQLite connections when snapshot setup fails.
 
 
-### Reasoning replay: OpenAI Responses
+### Reasoning replay
 
-- Preserve ordered native reasoning items (including opaque encrypted content) in
-  assistant history through tool turns, final answers and snapshot persistence.
-  Stateless reasoning requests ask for encrypted reasoning. Display text and
-  tool arguments exclude opaque replay data. See [provider reasoning replay](docs/v2/REASONING_REPLAY.md).
+- OpenAI Responses and Codex preserve ordered native reasoning items, including IDs,
+  encrypted content and empty summaries, through tool turns, final answers and snapshots.
+  Stateless requests include encrypted reasoning; Codex retains streaming-only payloads
+  and merges indexed SSE done items with the completed envelope in original order.
+- Anthropic adds explicit `thinking_budget_tokens`, validates it against effective output
+  caps, omits temperature and uses compatible tool choice. Signed thinking and redacted
+  blocks replay verbatim; the feature remains opt-in.
+- Gemini preserves complete signed parts in their original positions alongside parallel
+  function calls, and separates thought text from visible content.
+- OpenRouter preserves `reasoning_details` and original reasoning string fields, rebuilds
+  tool history after resume, and honors reasoning effort with tools. DeepSeek and Z.AI
+  retain their existing `reasoning_content` contracts with golden-loop regressions.
+- Shared HTTP previews redact opaque replay state; provider requests and snapshots retain
+  it. Public SQLite resume tests cover seven routes, including usage/cost recovery without
+  double charging. See [provider reasoning replay](docs/v2/REASONING_REPLAY.md) for
+  historical offline/live evidence and its limits.
 
-### Reasoning replay: Codex
+### Hardening and merged validation
 
-- Request encrypted reasoning with store=false and replay completed native SSE
-  output items in order, including reasoning IDs and empty summaries. Preserve
-  Codex's streaming-only request shape. Update only its three reasoning-model
-  benchmark hashes for the added include; the other 18 payload hashes are unchanged.
-
-### Reasoning replay: Anthropic
-
-- Add explicit ProviderConfig/BareBoneModel thinking_budget_tokens. Manual extended
-  thinking validates the budget against effective max_tokens, omits temperature,
-  and adjusts forced tool choice to auto. Default behavior stays opt-out.
-- Preserve complete signed thinking and redacted_thinking blocks in assistant
-  turns before tool results. Opaque signatures/data stay out of display output.
-
-### Reasoning replay: Gemini
-
-- Preserve complete signed parts, including text/thought parts alongside parallel
-  function calls; keep each thought signature at its original position. Persist
-  final-part signatures and separate thought text from visible content.
-- Redact opaque reasoning/signatures from shared HTTP debug previews, retaining
-  original data for provider requests and snapshots.
-
-### Reasoning replay: OpenRouter
-
-- Round-trip complete reasoning_details and original reasoning string fields,
-  including signed/encrypted entries and final-answer reasoning. Reconstruct
-  Chat Completions tool history from persisted history after resume.
-- Honor explicit reasoning effort with tools via OpenRouter's unified reasoning
-  object, requesting passthrough instead of excluding reasoning.
-
-### Reasoning replay: DeepSeek verification
-
-- Retain reasoning_content replay as required by the current DeepSeek thinking
-  API for requests carrying tools. Add sync/async golden requests and final-turn
-  history checks; document that no-tools requests accept but ignore the field.
-
-### Reasoning replay: Z.AI verification
-
-- Protect existing GLM reasoning_content replay with sync/async golden tool loops
-  and fresh-buffer reconstruction tests, including final-turn reasoning.
-
-### Reasoning replay: durable and live validation
-
-- Add public SQLite snapshot resume regressions for all seven provider routes,
-  plus an offline replay probe covering opaque state and display-safe logging.
-- Merge indexed Codex SSE done items with the complete envelope, preserving
-  missing items and original order. A bounded live gpt-5.6-sol high-effort tool
-  case returned encrypted reasoning, replayed it exactly, and was accepted.
+- Recover completed-snapshot history, usage, cost and run/frame status after process death.
+  Propagate cancellation through forced completion and wrap malformed provider failures
+  in typed errors. Reject malformed native replay items before persisting them.
+- Compaction retains system constraints, latest input, complete/pending tool exchanges
+  and their reasoning, including consecutive native reasoning items. Empty summaries
+  preserve history; successful compaction bounds the live request buffer as well.
+- Move opt-in chat diagnostics into its own module and remove superseded Responses/Codex
+  context helpers, keeping production modules below the existing 600-line limit.
+- Add crash/concurrent-writer, soak, generative and controlled fact-retention coverage.
+  The [hardening report](docs/v2/hardening-validation.md) labels its historical runs;
+  [merge-validation.md](docs/v2/merge-validation.md) records the integrated results.
+- Add six runnable [example apps](examples/apps/README.md) and offline application checks.
+  Three strict expected failures retain documented prompt/final-validation findings;
+  [the dogfood report](docs/v2/dogfood-report.md) records their reproductions and scope.

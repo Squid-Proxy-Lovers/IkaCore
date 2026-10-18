@@ -160,7 +160,7 @@ Codex SSE collection also merges the completed envelope with indexed done events
 keeping items absent from individual events and restoring original output order.
 Completed done-event data wins over envelope data for the same item.
 
-## Final merged quality gate
+## Historical reasoning-branch quality gate (`01249f6`)
 
 After merging ikacore-v2 at aca8c53 into v2-reasoning (merge 01249f6), both
 requested gates pass on 2026-10-18:
@@ -180,3 +180,7 @@ Codex reasoning probe above was run explicitly. Test servers require loopback
 access, so the final gate ran with sandbox escalation. No tests or floors were
 disabled, and no production behavior was changed to accommodate the live harness:
 the completed grouped-config port was brought in by the requested merge.
+
+The later hardening/dogfood integration is measured separately at `8efd658` in
+[merge-validation.md](merge-validation.md); its higher coverage floors supersede
+the historical floors above. The live Codex probe was not rerun for that integration.

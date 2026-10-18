@@ -34,9 +34,10 @@ The initial consolidation carried two generations of behavior at once. This pass
 - Collapses the workflow mixin/type-contract chains. Function and module size checks remain;
   whole-class line limits that encouraged tiny inheritance layers are removed.
 
-The merged validation below covers runtime/test revision `179b52e`, integrating
-the refactor, hard synchronous deadlines and provider harness from merge `6ef53d4`.
-Historical benchmarks retain their original revision labels. Version 2.0.0 is unreleased.
+The latest merged validation is recorded in [merge-validation.md](merge-validation.md)
+at runtime/test revision `8efd658`, after reasoning, dogfood and hardening were merged.
+Earlier validation and benchmarks below retain their original revision labels.
+Version 2.0.0 is unreleased.
 
 ## Persistence and provider optimization
 
@@ -222,9 +223,9 @@ one-liners, and this sample was not used to justify feature removal. IkaGeneral 
 outside the active runtime scope. Snapshots from `dc9efbd` are covered by a real saved
 post-model fixture: resume consumes its response with no network or duplicate usage.
 
-The merged tree passes **973 tests** (one opt-in live smoke test skipped), all coverage
+Historical revision `179b52e` passed **973 tests** (one opt-in live smoke test skipped), all coverage
 floors and **42/42 fresh execution-parity traces** against `dc9efbd`. See the
-[merged validation report](merged-validation.md) for final checks and the historical
+[historical merged validation report](merged-validation.md) for those checks and the
 [refactor report](refactor-validation.md) for its constructor migration and benchmarks.
 
 ## Checks
@@ -240,33 +241,62 @@ application workflows are separate release checks. Historical credential cleanup
 also separate: removing source copies or branches does not purge Git objects, PR refs,
 caches, forks, or other clones.
 
+## Current merged validation (`8efd658`)
+
+After integrating reasoning, dogfood and hardening, sequential `pytest` then
+`python scripts/quality.py` pass with **1,320 tests passed, 2 skipped and 3 expected
+failures**. The expected failures preserve the documented prompt/final-validation
+[dogfood findings](dogfood-report.md), whose agent API fixes are separate work.
+
+Coverage is **100% lines (9,439/9,439)**, **96.86% branches (2,561/2,644)** and
+**99.31% combined**. All **125 runtime modules / 16 areas** meet the raised hardening
+floors: **99% lines / 95% branches / 99% combined** globally, plus each area floor.
+The 194 pre-existing excluded lines are unchanged. Ruff, compilation, Pyright,
+coverage inventory and fresh-wheel/import checks pass.
+
+This merge also rejects malformed native replay items, preserves consecutive native
+reasoning during compaction, and verifies accounting with reasoning history across
+fresh-instance snapshot recovery. Chat diagnostics have a separate owner; the
+response module is now 561 lines. See [merge-validation.md](merge-validation.md)
+for exact per-area figures, regressions, evidence and limits. Historical benchmark,
+soak and live-provider results below retain their original revision labels.
+
 ## Live validation status
 
-The latest Codex matrix, recorded on **2026-10-18 UTC**, used the installed 2.0.0 wheel
+The historical Codex matrix, recorded on **2026-10-18 UTC**, used the installed 2.0.0 wheel
 at runtime revision `179b52e` with `gpt-5.6-sol`: **14 passed, 0 failed, 1 skipped**.
 It covers sync/async text and tools, simple/two-stage agents, fresh-process resume,
 cancellation, SSE, usage, expired deadlines, synthetic retries, compaction and workflow
 HITL. Resume used no network and preserved usage; cancellation closed the response while
 keeping the caller's client open. `reasoning_tools` skipped with `reasoning_not_exposed`;
-reasoning replay remains unverified. Every case was bounded to 60 seconds. The historical
+that run did not verify reasoning replay. Every case was bounded to 60 seconds. The historical
 8/8 results at `1f2bab0` and `183ce24` used the narrower original harness.
+
+A later bounded high-effort Codex probe on the reasoning branch replayed encrypted
+reasoning exactly and received the correct answer: **596 input + 186 output = 782 tokens**.
+That direct runtime probe is described in [REASONING_REPLAY.md](REASONING_REPLAY.md);
+it was separate from the installed-wheel matrix. Hardening also recorded **19/20**
+strict follow-up facts in four live compaction fixtures, with one constraint miss
+([hardening-validation.md](hardening-validation.md)). Neither live experiment was rerun
+for `8efd658`.
 
 These results cover one model and account. OpenAI API Chat/Responses, Anthropic,
 DeepSeek, Gemini, OpenRouter and Z.AI remain unverified live in this review. Existing
 offline coverage does not establish live compatibility. Reproduce the Codex run with
 [the live-check command](../../CONTRIBUTING.md#live-provider-validation).
 
-## Measured quality and footprint
+## Historical quality and footprint (`179b52e`)
 
-The final runtime/test revision `179b52e` on CPython 3.13.15 / HTTPX 0.28.1 passes
+Historical runtime/test revision `179b52e` on CPython 3.13.15 / HTTPX 0.28.1 passed
 **973 tests**, with **one opt-in live smoke test skipped**: **96.39% line coverage**,
 **88.20% branch coverage**, and **94.62% combined coverage**. Ruff, Pyright
 (zero errors), compilation, fresh-wheel inventory and isolated imports also pass.
 The coverage matrix assigns all **122 runtime modules** to **16 areas** and passes
 **119 required area/scenario checks** (117 unique selectors), with zero gate failures.
-Coverage excludes 194 lines. All global and per-area floors remain unchanged.
+That run excluded 194 lines and retained the pre-hardening floors. Current floors and
+measurements are in [merge-validation.md](merge-validation.md).
 
-The fresh `ikacore-2.0.0-py3-none-any.whl` contains the final README and runtime at
+The historical `ikacore-2.0.0-py3-none-any.whl` contained the README and runtime at
 `179b52e`: **212.85 KiB** compressed (217,960 bytes), **689.76 KiB** unpacked
 (706,313 bytes). The runtime retains **six settings**, one direct dependency (`httpx`)
 and 17,291 physical Python lines across the three packages (including comments/blanks).
@@ -359,14 +389,14 @@ architectural complexity. Further removal should follow observed use and product
 The generated matrix includes required scenario outcomes, exact uncovered locations,
 and known gaps. CI artifacts describe each checked revision.
 
-### Test hardening validation (local, unreleased)
+### Historical hardening validation (`dba0e05`, local, unreleased)
 
-The `v2-hardening` work from `aca8c53` passes **1,211 tests** (two opt-in skips),
+The `v2-hardening` work from `aca8c53` through `dba0e05` passed **1,211 tests** (two opt-in skips),
 Ruff, Pyright and the complete quality/wheel gate. Measured coverage rises from
-**96.39% to 100% lines** and **88.20% to 96.86% branches**. Global floors are now
+**96.39% to 100% lines** and **88.20% to 96.86% branches**. That work raised global floors to
 **99% lines / 95% branches**, with a **99% combined** pytest-cov floor and raised
 area floors. All 9,305 measured statements are exercised; the 194 existing excluded
-lines are unchanged. Every remaining branch arc is listed in the separate report.
+lines are unchanged. The historical remaining branch arcs are listed in the separate report.
 
 Validation includes **46 real process-kill/concurrent-writer cases** across DELETE
 and WAL, a resumed **2,200-completed-turn** offline soak with 440 compactions, and

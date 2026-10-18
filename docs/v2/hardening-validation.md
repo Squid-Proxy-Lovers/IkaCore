@@ -1,8 +1,11 @@
 # v2 hardening validation
 
+Historical measurements for `v2-hardening` through `dba0e05`, before its merge with
+reasoning and dogfood. Current integrated figures are in [merge-validation.md](merge-validation.md).
+
 Work was confined to `/private/tmp/ikacore-w-hardening`, branch `v2-hardening`, starting at `aca8c53a57332c0e5ab225628ac7b29bae99d23b`. Version 2.0.0 remains unreleased. Nothing was pushed or posted. Provider payload/history modules and example apps were not edited.
 
-## Final offline gates
+## Final offline gates for `v2-hardening` (`dba0e05`)
 
 - `pytest` inside `python scripts/quality.py`: **1,211 passed, 2 skipped**. The skips are the installed-wheel live smoke entry point and the explicitly opt-in soak.
 - Ruff, compilation, Pyright (**0 errors / 0 warnings**), coverage manifest, fresh wheel module inventory and isolated wheel imports: **passed**.

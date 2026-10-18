@@ -1,5 +1,8 @@
 # Remaining hardening branch coverage
 
+Historical inventory at `dba0e05`, before reasoning/dogfood integration. For current
+figures and artifact locations, see [merge-validation.md](merge-validation.md).
+
 The final run covers every one of the 9,305 measured runtime statements. There are **no remaining uncovered lines**. The 194 excluded lines predate this work; no `no cover` or `no branch` pragmas were added.
 
 These **81 branch arcs** remain uncovered. They are explicit testable edge-path gaps, not assertions of unreachability or offline impossibility. Negative destinations denote a function exit. The behavioral tests exercise every statement on each alternative; they do not exercise every combination of conditions or loop exit. The global branch floor is 95%; measured coverage is 96.8629%.
