@@ -15,9 +15,19 @@ Version 2.0.0 is unreleased and intentionally breaks compatibility with v1. See 
 
 ## Install
 
+For application evaluation from this unreleased checkout, install a built wheel:
+
 ```bash
-pip install -e .
+python3 -m venv .venv
+export PATH="$PWD/.venv/bin:$PATH" VIRTUAL_ENV="$PWD/.venv"
+python -m pip install build
+python -m build --wheel
+python -m pip install dist/ikacore-2.0.0-py3-none-any.whl
+python -m examples.apps.research_assistant.main --offline
 ```
+
+See [six runnable applications](examples/apps/README.md), their [live results](examples/apps/LIVE_RESULTS.md),
+and the [new-user findings](docs/v2/dogfood-report.md).
 
 For development:
 
