@@ -8,18 +8,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from IkaCore import AgentTopology, ExecutionLimits, ExecutionPolicy, OutputConfig, PromptConfig
-from IkaTest.agent_config_fixtures import agent_kwargs
-
-mock_ika_mem = MagicMock()
-with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
-    from IkaCore.agents import IkaBaseAgent
 from IkaCore.agent_execution_helpers import (
     build_stage_content_prompt,
     resolve_stage_model_overrides,
     stage_step_limit,
 )
+from IkaCore.agents import IkaBaseAgent
 from IkaCore.execution_types import AgentChatTurn, SimpleRuntimeContext, StageExecutionResult, StageRuntimeContext
 from IkaCore.stages import IkaStage
+from IkaMem.agent_tools import memory_access_defaults
+from IkaTest.agent_config_fixtures import agent_kwargs
 
 
 def _minimal_agent(**kwargs):
@@ -43,17 +41,17 @@ class TestValidateRequiredFields:
 
 class TestBuildMemoryAccessDefaults:
     def test_memory_disabled_all_false(self):
-        out = IkaBaseAgent._build_memory_access_defaults(False)
+        out = memory_access_defaults(False)
         assert out["short_term_save"] is False
         assert out["long_term_search"] is False
 
     def test_memory_enabled_all_true(self):
-        out = IkaBaseAgent._build_memory_access_defaults(True)
+        out = memory_access_defaults(True)
         assert out["short_term_save"] is True
         assert out["long_term_search"] is True
 
     def test_overrides_applied(self):
-        out = IkaBaseAgent._build_memory_access_defaults(True, {"short_term_save": False})
+        out = memory_access_defaults(True, {"short_term_save": False})
         assert out["short_term_save"] is False
         assert out["long_term_search"] is True
 
@@ -172,7 +170,7 @@ class TestFinalPrompt:
         assert stage0.subagents == []
 
     def test_clone_for_run_copies_selected_runtime_overrides(self):
-        stage = IkaStage("S", "Prompt", [], memory_access={"short_term_save": False})
+        stage = IkaStage("S", "Prompt", [])
         a = _minimal_agent(Stages=[stage])
         a.message_history["first_input"]["message"] = "history"
         a.context_budget = 123
@@ -190,7 +188,7 @@ class TestFinalPrompt:
         assert clone._parent_hierarchy == ["Parent"]
         assert clone.execution is a.execution
         assert clone.Stages[0] is not stage
-        assert clone.Stages[0].memory_access == {"short_term_save": False}
+        assert clone.Stages[0].tools == stage.tools
 
     def test_execute_stage_refreshes_first_input_for_each_stage(self):
         stage0 = IkaStage("S0", "Stage 0 prompt", [])
@@ -549,7 +547,6 @@ class TestExecutionRuntimeHelpers:
         )
         a.build_tool_executors.assert_called_once_with(
             a.tools,
-            memory_access=a.memory_access,
             subagents=a.subagents,
             parent_hierarchy=["A"],
         )

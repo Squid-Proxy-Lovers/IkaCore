@@ -75,12 +75,6 @@ class OutputConfig:
 
 
 @dataclass(frozen=True)
-class MemoryConfig:
-    enabled: bool = False
-    access: Mapping[str, bool] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
 class AgentConfig:
     name: str
     description: str
@@ -95,4 +89,3 @@ class AgentConfig:
     policy: ExecutionPolicy = ExecutionPolicy()
     topology: AgentTopology = AgentTopology()
     output: OutputConfig = OutputConfig()
-    memory: MemoryConfig = field(default_factory=MemoryConfig)

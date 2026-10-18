@@ -5,7 +5,6 @@ from typing import Any
 from IkaCore.agent_execution import AgentExecutionMixin
 from IkaCore.agent_helpers import AgentHelpersMixin
 from IkaCore.agent_initialization import initialize_agent
-from IkaCore.agent_memory import AgentMemoryMixin
 from IkaCore.agent_snapshots import AgentSnapshotReplayMixin
 from IkaCore.agent_state import AgentRunState
 from IkaCore.agent_tools import AgentToolsMixin
@@ -14,7 +13,6 @@ from IkaCore.config import (
     AgentTopology,
     ExecutionLimits,
     ExecutionPolicy,
-    MemoryConfig,
     OutputConfig,
     PromptConfig,
     ProviderConfig,
@@ -23,7 +21,7 @@ from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
 
 
-class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, AgentHelpersMixin,
+class IkaBaseAgent( AgentToolsMixin, AgentExecutionMixin, AgentHelpersMixin,
                    AgentSnapshotReplayMixin):
     state: AgentRunState
 
@@ -34,12 +32,11 @@ class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, Agent
         provider: ProviderConfig | None = None, prompts: PromptConfig | None = None,
         limits: ExecutionLimits | None = None, policy: ExecutionPolicy | None = None,
         topology: AgentTopology | None = None, output: OutputConfig | None = None,
-        memory: MemoryConfig | None = None,
     ):
         self.config = AgentConfig(name, description, prompt, model_id, api_key,
                                   tuple(tools or ()), tuple(Stages or ()), provider or ProviderConfig(), prompts or PromptConfig(),
                                   limits or ExecutionLimits(), policy or ExecutionPolicy(), topology or AgentTopology(),
-                                  output or OutputConfig(), memory or MemoryConfig())
+                                  output or OutputConfig())
         initialize_agent(self)
 
     def shutdown(self) -> None:

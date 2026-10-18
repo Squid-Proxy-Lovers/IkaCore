@@ -206,7 +206,7 @@ without an answer: it reuses the completed child's output and continues dependen
 
 ### Memory
 
-Set `memory=True` to enable memory tools, then initialize the corresponding backends. The flag alone does not create storage. Memory access is controlled with `memory_access`.
+Create backends explicitly and pass `MemoryTools(...).tools(access=...)` through the ordinary `tools` argument (or a stage’s tools). Core agents do not initialize or share memory. Filters belong to `MemoryTools.tools(long_term_filter=...)`.
 
 Supported access keys:
 
@@ -222,12 +222,12 @@ with literal substring matching. It needs no Mem0 dependency or credentials, and
 lasts only for the lifetime of the backend instance.
 
 ```python
-from IkaCore import MemoryConfig, ProviderConfig
 from datetime import datetime
 from typing import Any
 
 from IkaCore import IkaBaseAgent
 from IkaMem import LTMemItem, LTMemory, STMemory
+from IkaMem.agent_tools import MemoryTools
 
 
 class LocalStorage:
@@ -259,23 +259,26 @@ agent = IkaBaseAgent(
     prompt="Analyze and remember relevant results.",
     model_id="gpt-4o-mini",
     api_key="...",
-    memory=MemoryConfig(enabled=True, access=memory_access),
 )
-agent.short_term_memory = STMemory(storage=LocalStorage())
-agent.short_term_memory.agent = agent.name
-agent.long_term_memory = LTMemory(storage=LocalStorage())
-agent.long_term_memory.agent = agent.name
+short_term = STMemory(storage=LocalStorage())
+short_term.agent = agent.name
+long_term = LTMemory(storage=LocalStorage())
+long_term.agent = agent.name
 
-agent.short_term_memory.save("The project uses Python", {"source": "README"})
-assert agent.short_term_memory.search("Python")[0]["data"] == "The project uses Python"
-agent.long_term_memory.save(LTMemItem(
+short_term.save("The project uses Python", {"source": "README"})
+assert short_term.search("Python")[0]["data"] == "The project uses Python"
+long_term.save(LTMemItem(
     agent=agent.name,
     task="Inspect the project",
     expected_output="A Python framework",
     datetime=datetime.now().isoformat(),
     quality=1.0,
 ))
-assert agent.long_term_memory.search("Inspect")[0]["metadata"]["expected_output"] == "A Python framework"
+assert long_term.search("Inspect")[0]["metadata"]["expected_output"] == "A Python framework"
+memory_tools = MemoryTools(agent.name, short_term=short_term, long_term=long_term)
+agent.tools.extend(memory_tools.tools(access=memory_access))
+result = agent.execution()
+assert result["final_message"]
 ```
 
 `STMemory` and `LTMemory` accept any backend implementing `save(value, metadata)`, `search(query, limit, score_threshold)` and `reset()`. For optional Mem0 storage, install/configure `mem0ai`, call `agent.init_short_term_memory({"provider": "mem0", "config": {...}})`, and assign `LTMemory(embedder_config=...)` for long-term storage. See the [memory setup guide](../src/IkaMem/docs/README.md).

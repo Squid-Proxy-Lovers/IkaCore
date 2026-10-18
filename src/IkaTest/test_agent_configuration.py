@@ -35,3 +35,23 @@ def test_no_duplicate_flat_constructor_options_and_collections_are_copied():
     children.append(object())
     assert policy.final_answer_checks == () and topology.subagents == ()
     assert ProviderConfig().use_responses_api
+
+
+def test_dc9efbd_snapshot_resumes_saved_turn_without_provider_or_double_usage(tmp_path, monkeypatch):
+    import json
+    import sqlite3
+    from contextlib import closing
+    from pathlib import Path
+
+    fixture = json.loads((Path(__file__).parent / 'fixtures/dc9efbd-post-model.json').read_text())
+    path = tmp_path / 'legacy.db'
+    with closing(sqlite3.connect(path)) as db:
+        db.executescript(fixture['sql'])
+    agent = IkaBaseAgent('legacy', 'description', 'task', model_id='gpt-4o', api_key='fixture',
+                         limits=ExecutionLimits(maxsteps=2))
+    agent.enable_snapshots(str(path))
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', lambda *a, **k: pytest.fail('saved turn contacted provider'))
+    result = agent.resume_from_snapshot(fixture['snapshot_id'])
+    assert result['final_message'] == 'legacy complete'
+    assert result['usage']['input_tokens'] == 2 and result['usage']['output_tokens'] == 3
+    agent.shutdown()

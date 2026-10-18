@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, Coroutine, Optional, cast
 
 from IkaCore.agent_helper_support import (
     RawFinalAnswerCheck,
-    build_memory_access_defaults,
     initial_message_history,
     validate_final_answer_checks_for_history,
     validate_required_fields,
@@ -14,7 +13,6 @@ from IkaCore.agent_helper_support import (
 from IkaCore.logging_utils import IkaLogger
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
-from IkaModel.base import get_global_long_term_memory
 from IkaModel.model_metadata import get_api_url_for_model
 
 if TYPE_CHECKING:
@@ -67,17 +65,13 @@ def _assign_execution_limits(self: Any, maxsteps: int, step_timeout: int, max_to
     self.max_stage_extensions = max_stage_extensions
     self.extend_stage_steps_by = extend_stage_steps_by
 
-def _assign_runtime_state(self: Any, rate_limit_per_min: Optional[float], per_tool_rate_limit: Optional[dict[str, float]], memory: bool, memory_access: Optional[dict[str, bool]], final_answer_check: Optional[list[RawFinalAnswerCheck]], summarize_final: bool, use_async: bool) -> None:
-    self.memory = memory
-    self.memory_access = build_memory_access_defaults(memory, memory_access)
+def _assign_runtime_state(self: Any, rate_limit_per_min: Optional[float], per_tool_rate_limit: Optional[dict[str, float]], final_answer_check: Optional[list[RawFinalAnswerCheck]], summarize_final: bool, use_async: bool) -> None:
     self.message_history = initial_message_history(getattr(self, 'system_prompt', None))
     self.rate_limit_per_min = rate_limit_per_min
     self.per_tool_rate_limit = per_tool_rate_limit or {}
     self._last_api_call_ts = 0.0
     self._resume_state = None
     self._last_interrupt = None
-    self.short_term_memory = None
-    self.long_term_memory = get_global_long_term_memory()
     self.summarize_final = summarize_final
     self.use_async = use_async
     self.final_answer_checks = validate_final_answer_checks_for_history(self.message_history, final_answer_check)
@@ -119,5 +113,5 @@ def initialize_agent(agent: Any) -> None:
         c.limits.max_tool_calls, c.policy.max_step_extensions, c.policy.extend_steps_by,
         c.policy.max_stage_extensions, c.policy.extend_stage_steps_by)
     _assign_runtime_state(agent, c.limits.rate_limit_per_min, dict(c.limits.per_tool_rate_limit),
-        c.memory.enabled, dict(c.memory.access), list(c.policy.final_answer_checks) or None,
+        list(c.policy.final_answer_checks) or None,
         c.output.summarize_final, c.policy.use_async)

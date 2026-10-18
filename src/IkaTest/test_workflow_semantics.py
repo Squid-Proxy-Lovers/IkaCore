@@ -9,9 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-mock_ika_mem = MagicMock()
-with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
-    from IkaCore.agents import IkaBaseAgent
+from IkaCore.agents import IkaBaseAgent
 from IkaCore.stages import IkaStage
 from IkaCore.workflow import AsyncWorkflowExecutor, IkaWorkflow, WorkflowEdge, WorkflowNode
 

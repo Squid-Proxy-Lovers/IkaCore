@@ -3,21 +3,19 @@ Tests for IkaBaseAgent tool conversion and API schema generation:
 convert IkaTools/subagents to AgentTool, build_tool_executors, and payload tools shape.
 """
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from IkaCore import AgentTopology, MemoryConfig, PromptConfig
-from IkaTest.agent_config_fixtures import agent_kwargs
-
-mock_ika_mem = MagicMock()
-with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
-    from IkaCore.agents import IkaBaseAgent
+from IkaCore import AgentTopology, PromptConfig
+from IkaCore.agents import IkaBaseAgent
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
+from IkaMem.agent_tools import MemoryTools
 from IkaModel.base import AgentTool, BareBoneModel, ToolArgs
 from IkaModel.chat_helpers_common import build_provider_request
 from IkaModel.openai.openai import openai_fill_payload
+from IkaTest.agent_config_fixtures import agent_kwargs
 
 
 def _minimal_agent(**kwargs):
@@ -201,14 +199,14 @@ class TestBuildToolExecutors:
         sub_run.execution.assert_called_once()
 
     def test_memory_executors_enforce_rate_limit_and_delegate(self):
-        a = _minimal_agent(memory=MemoryConfig(access={}))
-        a.short_term_memory = MagicMock()
-        a.long_term_memory = MagicMock()
-        a._enforce_rate_limit_tool = MagicMock()
-        a._save_to_short_term = MagicMock(return_value="short saved")
-        a._search_short_term = MagicMock(return_value={"matches": ["short"]})
-        a._save_to_long_term = MagicMock(return_value="long saved")
-        a._search_long_term = MagicMock(return_value={"matches": ["long"]})
+        a = MemoryTools("TestAgent")
+        a.operations.short_term_memory = MagicMock()
+        a.operations.long_term_memory = MagicMock()
+        a.before_call = MagicMock()
+        a.operations.save_short_term = MagicMock(return_value="short saved")
+        a.operations.search_short_term = MagicMock(return_value={"matches": ["short"]})
+        a.operations.save_long_term = MagicMock(return_value="long saved")
+        a.operations.search_long_term = MagicMock(return_value={"matches": ["long"]})
         long_term_filter = MagicMock(return_value=True)
         memory_access = {
             "short_term_save": True,
@@ -217,7 +215,7 @@ class TestBuildToolExecutors:
             "long_term_search": True,
         }
 
-        executors = a.build_tool_executors([], memory_access=memory_access, long_term_filter=long_term_filter)
+        executors = {tool.name: tool.execute_function for tool in a.tools(access=memory_access, long_term_filter=long_term_filter)}
 
         assert executors["short_term_save"]({"input": "note"}) == "short saved"
         assert json.loads(executors["short_term_search"]({"query": "needle", "limit": 3, "score_threshold": 0.8})) == {
@@ -226,16 +224,16 @@ class TestBuildToolExecutors:
         assert executors["long_term_save"]({"task": "t", "output": "o"}) == "long saved"
         assert json.loads(executors["long_term_search"]({"query": "archive", "limit": 2})) == {"matches": ["long"]}
 
-        assert a._enforce_rate_limit_tool.call_args_list == [
+        assert a.before_call.call_args_list == [
             (("short_term_save",),),
             (("short_term_search",),),
             (("long_term_save",),),
             (("long_term_search",),),
         ]
-        a._save_to_short_term.assert_called_once_with("note")
-        a._search_short_term.assert_called_once_with("needle", limit=3, score_threshold=0.8)
-        a._save_to_long_term.assert_called_once_with({"task": "t", "output": "o"})
-        a._search_long_term.assert_called_once_with(
+        a.operations.save_short_term.assert_called_once_with("note")
+        a.operations.search_short_term.assert_called_once_with("needle", limit=3, score_threshold=0.8)
+        a.operations.save_long_term.assert_called_once_with({"task": "t", "output": "o"})
+        a.operations.search_long_term.assert_called_once_with(
             "archive",
             limit=2,
             score_threshold=0.6,
@@ -283,9 +281,9 @@ class TestApiPayloadToolSchema:
         assert "input" in fn["parameters"]["required"]
 
     def test_memory_tool_schema_is_structured(self):
-        a = _minimal_agent(memory=MemoryConfig(enabled=True, access={"long_term_save": True, "long_term_search": True}))
-        a.long_term_memory = MagicMock()
-        tools = a._build_memory_tools(a.memory_access, "long_term")
+        a = MemoryTools("TestAgent")
+        a.operations.long_term_memory = MagicMock()
+        tools = a._build_memory_tools({"long_term_save": True, "long_term_search": True}, "long_term")
         names = {t.name for t in tools}
         assert {"long_term_save", "long_term_search"}.issubset(names)
         save_tool = next(t for t in tools if t.name == "long_term_save")
@@ -294,12 +292,12 @@ class TestApiPayloadToolSchema:
         assert search_tool.args.properties["__required__"] == ["query"]
 
     def test_long_term_save_executor_accepts_structured_payload(self):
-        a = _minimal_agent(memory=MemoryConfig(enabled=True, access={"long_term_save": True}))
-        a.long_term_memory = MagicMock()
-        a.long_term_memory.save = MagicMock()
-        result = a._save_to_long_term({"task": "research", "output": "done", "metadata": {"source": "unit-test"}})
+        a = MemoryTools("TestAgent")
+        a.operations.long_term_memory = MagicMock()
+        a.operations.long_term_memory.save = MagicMock()
+        result = a.operations.save_long_term({"task": "research", "output": "done", "metadata": {"source": "unit-test"}})
         assert "saved to long-term memory" in result
-        assert a.long_term_memory.save.called
+        assert a.operations.long_term_memory.save.called
 
     def test_object_properties_in_payload(self):
         at = AgentTool(

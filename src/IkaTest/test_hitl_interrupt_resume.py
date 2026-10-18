@@ -3,9 +3,7 @@ import asyncio
 import json
 from unittest.mock import MagicMock, patch
 
-mock_ika_mem = MagicMock()
-with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
-    from IkaCore.agents import IkaBaseAgent
+from IkaCore.agents import IkaBaseAgent
 from IkaCore.stages import IkaStage
 from IkaModel.base import AgentTool, BareBoneModel, HumanInputRequired, ToolArgs
 from IkaModel.chat_interface.chat_interface import async_chat, chat

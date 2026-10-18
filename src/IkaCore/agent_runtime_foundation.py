@@ -53,7 +53,6 @@ class _RuntimeValueState:
     extend_steps_by: int
     max_stage_extensions: int
     extend_stage_steps_by: int
-    memory_access: dict[str, bool]
     summarize_final: bool
     final_answer_checks: list[Callable[[JsonDict], bool]]
     logger: Any
@@ -122,8 +121,6 @@ class _RuntimeBuildServices:
     def build_tool_executors(
         self,
         tools: list[Any],
-        memory_access: Optional[dict[str, bool]] = None,
-        long_term_filter: Optional[Callable[..., Any]] = None,
         subagents: Optional[list[Any]] = None,
         parent_hierarchy: Optional[list[str]] = None,
         stage: Optional[Any] = None,
@@ -426,11 +423,8 @@ class RuntimePreparationMixin(_RuntimeState):
         current_hierarchy: list[str],
     ) -> dict[str, Any]:
         self._reset_tool_call_counts()
-        stage_memory_access = getattr(stage, "memory_access", None) or self.memory_access
         return self.build_tool_executors(
             stage.tools,
-            memory_access=stage_memory_access,
-            long_term_filter=getattr(stage, "long_term_filter", None),
             subagents=getattr(stage, "subagents", None),
             parent_hierarchy=current_hierarchy,
             stage=stage,
@@ -510,7 +504,6 @@ class RuntimePreparationMixin(_RuntimeState):
         messages = restore_messages(self, messages)
         tool_executors = self.build_tool_executors(
             self.tools,
-            memory_access=self.memory_access,
             subagents=self.subagents,
             parent_hierarchy=current_hierarchy,
         )

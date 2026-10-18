@@ -43,7 +43,7 @@ def capture_state(session: SnapshotSession, label: str, payload: dict[str, Any])
         "scope": "agent" if session.stage_index is None else "stage",
         "agent_name": session.agent.name, "remaining_steps": remaining,
         "last_content": session.last_content, "message_history": deepcopy(session.agent.message_history),
-        "maxsteps": session.agent.maxsteps, "memory_access": deepcopy(session.agent.memory_access),
+        "maxsteps": session.agent.maxsteps,
         "timestamp": time.time(),
     }
     if session.stage_index is not None:

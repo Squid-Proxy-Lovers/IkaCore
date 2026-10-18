@@ -1,6 +1,6 @@
 import importlib
 import importlib.metadata
-from typing import ClassVar
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -65,23 +65,15 @@ def test_base_exceptions_default_payloads_and_final_text():
     assert human.payload == {}
 
 
-def test_global_long_term_memory_initializes_once(monkeypatch):
-    class DummyLTMemory:
-        instances: ClassVar[list] = []
-
-        def __init__(self, embedder_config):
-            self.embedder_config = embedder_config
-            DummyLTMemory.instances.append(self)
-
-    monkeypatch.setattr(base, "_GLOBAL_LONG_TERM_MEMORY", None)
-    monkeypatch.setattr(IkaMem, "LTMemory", DummyLTMemory)
-
-    memory = base.init_global_long_term_memory({"provider": "fake"}, search_limit=3)
-    assert memory.embedder_config == {"provider": "fake"}
-    assert memory._search_limit == 3
-    assert memory._filter_func([1, 2, 3, 4]) == [1, 2, 3, 4][:5]
-
-    assert base.init_global_long_term_memory({"provider": "other"}) is memory
+def test_memory_backends_are_explicit_and_not_global(monkeypatch):
+    from IkaMem.agent_tools import MemoryTools
+    backend = MagicMock()
+    first = MemoryTools('first', long_term=backend)
+    second = MemoryTools('second')
+    assert first.operations.long_term_memory is backend
+    assert second.operations.long_term_memory is None
+    assert not hasattr(base, 'get_global_long_term_memory')
+    assert not hasattr(base, 'init_global_long_term_memory')
 
 
 def test_lazy_package_exports_cache_values_and_reject_unknowns():

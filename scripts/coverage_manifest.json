@@ -222,7 +222,6 @@
     {
       "area": "Memory integration",
       "sources": [
-        "src/IkaCore/agent_memory.py",
         "src/IkaMem/__init__.py",
         "src/IkaMem/long_term_memory.py",
         "src/IkaMem/memory.py",
@@ -230,7 +229,9 @@
         "src/IkaMem/short_term_memory.py",
         "src/IkaMem/storage/__init__.py",
         "src/IkaMem/storage/interface.py",
-        "src/IkaMem/storage/mem0_storage.py"
+        "src/IkaMem/storage/mem0_storage.py",
+        "src/IkaMem/agent_tools.py",
+        "src/IkaMem/agent_memory.py"
       ],
       "required_tests": [
         "src/IkaTest/test_memory_classes.py::test_short_term_memory_search_reset_and_error_paths",

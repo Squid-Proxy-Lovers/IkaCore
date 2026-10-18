@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
-from IkaCore.agent_runtime_payloads import JsonDict, history_section
+from IkaCore.agent_runtime_payloads import history_section
 from IkaCore.stages import IkaStage
 from IkaCore.tool_runtime_metadata import runtime_executor
 from IkaCore.tools import IkaTools, ToolExecutor, ToolParameters
@@ -87,34 +87,7 @@ class _SubagentExecutorState(Protocol):
         ...
 
 
-class _MemoryToolExecutorState(Protocol):
-    short_term_memory: object | None
-    long_term_memory: object | None
-
-    def _enforce_rate_limit_tool(self, tool_name: str) -> None:
-        ...
-
-    def _save_to_short_term(self, data: str, metadata: Optional[JsonDict] = None) -> str:
-        ...
-
-    def _search_short_term(self, query: str, limit: int = 5, score_threshold: float = 0.6) -> JsonDict:
-        ...
-
-    def _save_to_long_term(self, payload: JsonDict) -> str:
-        ...
-
-    def _search_long_term(
-        self,
-        query: str,
-        limit: int = 5,
-        score_threshold: float = 0.6,
-        filter_func: Optional[LongTermFilter] = None,
-    ) -> JsonDict:
-        ...
-
-
-class _AgentToolExecutorState(_SubagentExecutorState, _MemoryToolExecutorState, Protocol):
-    memory_access: dict[str, bool]
+class _AgentToolExecutorState(_SubagentExecutorState, Protocol):
 
     def _explicit_tool_executors(
         self: Any,
@@ -129,16 +102,6 @@ class _AgentToolExecutorState(_SubagentExecutorState, _MemoryToolExecutorState, 
         self,
         subagents: Optional[list["IkaBaseAgent"]],
         parent_hierarchy: Optional[list[str]],
-    ) -> ToolExecutorMap:
-        ...
-
-    def _short_term_memory_executors(self, effective_access: dict[str, bool]) -> ToolExecutorMap:
-        ...
-
-    def _long_term_memory_executors(
-        self: _MemoryToolExecutorState,
-        effective_access: dict[str, bool],
-        long_term_filter: Optional[LongTermFilter],
     ) -> ToolExecutorMap:
         ...
 
@@ -355,81 +318,10 @@ class SubagentToolExecutorMixin(SubagentRunPreparationMixin):
         return subagent_executor
 
 
-class MemoryToolExecutorMixin:
-    def _short_term_memory_executors(
-        self: _MemoryToolExecutorState,
-        effective_access: dict[str, bool],
-    ) -> ToolExecutorMap:
-        if not self.short_term_memory:
-            return {}
-
-        executors: ToolExecutorMap = {}
-        if effective_access.get("short_term_save", False):
-
-            def short_save_executor(args: ToolParameters) -> str:
-                self._enforce_rate_limit_tool("short_term_save")
-                data = _first_string_arg(args, "input", "data")
-                return self._save_to_short_term(data)
-
-            executors["short_term_save"] = short_save_executor
-
-        if effective_access.get("short_term_search", False):
-
-            def short_search_executor(args: ToolParameters) -> str:
-                self._enforce_rate_limit_tool("short_term_search")
-                query = _string_arg(args, "query")
-                limit = _int_arg(args, "limit", 5)
-                score_threshold = _float_arg(args, "score_threshold", 0.6)
-                result = self._search_short_term(query, limit=limit, score_threshold=score_threshold)
-                return json.dumps(result)
-
-            executors["short_term_search"] = short_search_executor
-
-        return executors
-
-    def _long_term_memory_executors(
-        self: _MemoryToolExecutorState,
-        effective_access: dict[str, bool],
-        long_term_filter: Optional[LongTermFilter],
-    ) -> ToolExecutorMap:
-        if not self.long_term_memory:
-            return {}
-
-        executors: ToolExecutorMap = {}
-        if effective_access.get("long_term_save", False):
-
-            def long_save_executor(args: ToolParameters) -> str:
-                self._enforce_rate_limit_tool("long_term_save")
-                return self._save_to_long_term(args)
-
-            executors["long_term_save"] = long_save_executor
-
-        if effective_access.get("long_term_search", False):
-
-            def long_search_executor(args: ToolParameters) -> str:
-                self._enforce_rate_limit_tool("long_term_search")
-                query = _string_arg(args, "query")
-                limit = _int_arg(args, "limit", 5)
-                score_threshold = _float_arg(args, "score_threshold", 0.6)
-                result = self._search_long_term(
-                    query,
-                    limit=limit,
-                    score_threshold=score_threshold,
-                    filter_func=long_term_filter,
-                )
-                return json.dumps(result)
-
-            executors["long_term_search"] = long_search_executor
-
-        return executors
-
-
-class AgentToolExecutorMixin(ExplicitToolExecutorMixin, SubagentToolExecutorMixin, MemoryToolExecutorMixin):
+class AgentToolExecutorMixin(ExplicitToolExecutorMixin, SubagentToolExecutorMixin):
     def build_tool_executors(
         self: _AgentToolExecutorState,
         tools: list[IkaTools],
-        memory_access: Optional[dict[str, bool]] = None,
-        long_term_filter: Optional[LongTermFilter] = None,
         subagents: Optional[list["IkaBaseAgent"]] = None,
         parent_hierarchy: Optional[list[str]] = None,
         stage: Optional[IkaStage] = None,
@@ -439,8 +331,5 @@ class AgentToolExecutorMixin(ExplicitToolExecutorMixin, SubagentToolExecutorMixi
         tool_executors = self._explicit_tool_executors(tools, stage, stage_index, remaining_steps)
         tool_executors.update(self._subagent_executors(subagents, parent_hierarchy))
 
-        effective_access = memory_access or self.memory_access
-        tool_executors.update(self._short_term_memory_executors(effective_access))
-        tool_executors.update(self._long_term_memory_executors(effective_access, long_term_filter))
         tool_executors["agent_end"] = self._agent_end_executor
         return tool_executors

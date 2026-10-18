@@ -45,8 +45,6 @@ class _CloneConfigState(_WorkflowContextState, Protocol):
     step_timeout: int
     rate_limit_per_min: Optional[float]
     per_tool_rate_limit: Dict[str, float]
-    memory: bool
-    memory_access: Dict[str, bool]
     logging_file: str
     summarize_final: bool
     use_async: bool
@@ -60,8 +58,6 @@ class _CloneState(_CloneConfigState, Protocol):
     logging_level: int
     logger: Any
     final_answer_checks: List[Callable]
-    short_term_memory: Any
-    long_term_memory: Any
 
     def _initial_message_history(self, system_prompt: Optional[str]) -> Dict[str, Dict[str, object]]:
         ...
@@ -97,7 +93,6 @@ class AgentWorkflowContextMixin:
         cloned.tools = list(getattr(stage, "tools", []))
         cloned.subagents = list(getattr(stage, "subagents", []))
         cloned.allowed_back_to = list(getattr(stage, "allowed_back_to", []))
-        cloned.memory_access = deepcopy(getattr(stage, "memory_access", None))
         return cloned
 
     def final_prompt(self: _WorkflowContextState, stage: IkaStage) -> str:
@@ -121,7 +116,6 @@ class AgentCloneConfigMixin:
             "limits": replace(config.limits, maxsteps=self.maxsteps),
             "policy": replace(config.policy, final_answer_checks=()),
             "topology": config.topology, "output": replace(config.output, logging_level=0),
-            "memory": config.memory,
         }
 
 
@@ -136,8 +130,6 @@ class AgentCloneStateMixin(AgentCloneConfigMixin):
             if include_history
             else self._initial_message_history(clone.system_prompt)
         )
-        clone.short_term_memory = self.short_term_memory
-        clone.long_term_memory = self.long_term_memory
         clone.client = None
 
     def _copy_clone_overrides(self: _CloneState, clone: "IkaBaseAgent") -> None:

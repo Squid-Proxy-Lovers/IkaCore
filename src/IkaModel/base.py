@@ -4,16 +4,12 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import Any, List, Optional
 
 from IkaCore.cli_output import OutputType, get_cli_output
 
-if TYPE_CHECKING:
-    from IkaMem import LTMemory
-
 _LOG = logging.getLogger(__name__)
 
-_GLOBAL_LONG_TERM_MEMORY: Optional["LTMemory"] = None
 
 
 class AgentEndException(RuntimeError):
@@ -81,36 +77,6 @@ class AgentTool:
         if not re.match(r'^[a-zA-Z0-9_-]{1,64}$', name):
             # we need for deepseek
             raise ValueError("Name must be a-z, A-Z, 0-9, or contain underscores and dashes, with a maximum length of 64.")
-
-
-def init_global_long_term_memory(
-    embedder_config: dict, 
-    search_limit: int = 10,
-    filter_func: Optional[Any] = None
-) -> "LTMemory":
-    """
-    initialize global long-term memory (called once).
-    
-    Args:
-        embedder_config: mem0 config
-        search_limit: default number of results to return when searching
-        filter_func: optional custom filter function(results: list) -> list
-                     receives: list of search results sorted by relevance
-                     must return: filtered list of results
-                     default (no user filter): returns top 5 most relevant results
-    """
-    global _GLOBAL_LONG_TERM_MEMORY
-    if _GLOBAL_LONG_TERM_MEMORY is None:
-        from IkaMem import LTMemory
-        _GLOBAL_LONG_TERM_MEMORY = LTMemory(embedder_config=embedder_config)
-        _GLOBAL_LONG_TERM_MEMORY._search_limit = search_limit
-        _GLOBAL_LONG_TERM_MEMORY._filter_func = filter_func or (lambda results: results[:5])
-        _LOG.info("global long-term memory initialized")
-    return _GLOBAL_LONG_TERM_MEMORY
-
-
-def get_global_long_term_memory() -> Optional["LTMemory"]:
-    return _GLOBAL_LONG_TERM_MEMORY
 
 
 @dataclass

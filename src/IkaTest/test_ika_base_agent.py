@@ -6,14 +6,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from IkaCore import AgentTopology, ExecutionPolicy, OutputConfig, PromptConfig, ProviderConfig
-from IkaTest.agent_config_fixtures import agent_kwargs
-
-mock_ika_mem = MagicMock()
-with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
-    from IkaCore.agents import IkaBaseAgent
+from IkaCore.agents import IkaBaseAgent
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
 from IkaModel.base import AgentTool, ToolArgs
+from IkaTest.agent_config_fixtures import agent_kwargs
 
 
 def _minimal_agent(**kwargs):

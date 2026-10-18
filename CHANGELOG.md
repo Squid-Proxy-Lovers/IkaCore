@@ -48,6 +48,15 @@ V2 intentionally breaks compatibility with v1. See the
   Final checks and automatic continuation settings are one explicit execution policy;
   defaults preserve three validation retries and the existing extension behavior.
 
+### Optional memory integration
+
+- Removed agent `memory` / `memory_access`, `MemoryConfig`, backend attributes and
+  memory helper methods, stage `memory_access` / `long_term_filter`, and
+  `IkaModel.init_global_long_term_memory` / `get_global_long_term_memory`.
+  Use `IkaMem.agent_tools.MemoryTools(name, short_term=..., long_term=...).tools()`
+  as ordinary agent or stage tools. Storage, access, filters and sharing are explicit.
+  Core/model packages do not import IkaMem. Search tools allow replay; saves deny it.
+
 ### Fixed
 
 - Preserve zero remaining steps in legacy staged HITL snapshots without `loop_state`

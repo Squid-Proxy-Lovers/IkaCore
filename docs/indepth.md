@@ -177,7 +177,10 @@ finish those runs with v1 before migrating. See the [migration guide](v2/README.
 - `LTMemory`
 - `Mem0Store`
 
-Agent-side memory tools are assembled by `AgentMemoryMixin`. Long-term save and search now use structured tool schemas instead of the old string-splitting format.
+`IkaMem.agent_tools.MemoryTools` adapts explicit STMemory/LTMemory backends to
+ordinary IkaTools. Agents and stages receive these through `tools`; IkaCore and
+IkaModel have no dependency on memory internals. Access, filters and sharing are
+chosen when building the tools, with save effects denied replay by default.
 
 ### Maintenance Gates
 

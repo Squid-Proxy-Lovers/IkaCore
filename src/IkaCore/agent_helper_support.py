@@ -88,23 +88,6 @@ def validate_required_fields(fields: dict[str, object]) -> None:
             raise ValueError(f"{field_name} is required for the agent")
 
 
-def build_memory_access_defaults(
-    memory_enabled: bool,
-    overrides: Optional[dict[str, bool]] = None,
-) -> dict[str, bool]:
-    defaults = {
-        "short_term_save": True,
-        "short_term_search": True,
-        "long_term_save": True,
-        "long_term_search": True,
-    }
-    if not memory_enabled:
-        defaults = dict.fromkeys(defaults, False)
-    if overrides:
-        defaults.update(overrides)
-    return defaults
-
-
 def initial_message_history(system_prompt: Optional[str]) -> MessageHistory:
     return {
         "system": {"message": system_prompt or "", "tokens": 0},
@@ -140,8 +123,6 @@ class AgentAttributeDeclarationsMixin:
     @maxsteps.setter
     def maxsteps(self, value: int) -> None: ...
     step_timeout: int
-    memory: bool
-    memory_access: dict[str, bool]
     @property
     def message_history(self) -> MessageHistory: ...
 
@@ -162,8 +143,6 @@ class AgentAttributeDeclarationsMixin:
 
     @_resume_state.setter
     def _resume_state(self, value: Optional[JsonDict]) -> None: ...
-    short_term_memory: Optional[Any]
-    long_term_memory: Optional[Any]
     summarize_final: bool
     use_async: bool
     max_tool_rounds: int
@@ -180,12 +159,6 @@ class AgentConfigDefaultsMixin:
     @staticmethod
     def _validate_required_fields(fields: dict[str, object]) -> None:
         validate_required_fields(fields)
-
-    @staticmethod
-    def _build_memory_access_defaults(
-        memory_enabled: bool, overrides: Optional[dict[str, bool]] = None
-    ) -> dict[str, bool]:
-        return build_memory_access_defaults(memory_enabled, overrides)
 
     @staticmethod
     def _initial_message_history(system_prompt: Optional[str]) -> MessageHistory:

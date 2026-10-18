@@ -3,7 +3,6 @@ from IkaCore import (
     AgentTopology,
     ExecutionLimits,
     ExecutionPolicy,
-    MemoryConfig,
     OutputConfig,
     PromptConfig,
     ProviderConfig,
@@ -32,11 +31,4 @@ def agent_kwargs(values):
     group = {key: values.pop(key) for key in ('logging_level', 'logging_file', 'show_usage_level0', 'summarize_final') if key in values}
     if group:
         values["output"] = OutputConfig(**group)
-    group = {key: values.pop(key) for key in ('memory_access',) if key in values}
-    if isinstance(values.get("memory"), bool):
-        group["enabled"] = values.pop("memory")
-    if "memory_access" in group:
-        group["access"] = group.pop("memory_access")
-    if group:
-        values["memory"] = MemoryConfig(**group)
     return values

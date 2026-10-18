@@ -13,10 +13,10 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from IkaCore import MemoryConfig
 from IkaCore.agents import IkaBaseAgent
 from IkaCore.logging_utils import IkaLogger
 from IkaCore.snapshot_store import SnapshotStore
+from IkaMem.agent_tools import MemoryTools
 from IkaMem.long_term_memory import LTMemory
 from IkaMem.short_term_memory import STMemory
 from IkaModel import model_metadata
@@ -64,18 +64,10 @@ def test_public_package_imports_work_in_clean_subprocess():
 
 
 def test_short_term_search_tool_is_exposed_when_executor_is_available():
-    agent = IkaBaseAgent(
-        name="A",
-        description="D",
-        prompt="P",
-        model_id="gpt-4o",
-        api_key="k",
-        memory=MemoryConfig(enabled=True, access={"short_term_save": True, "short_term_search": True}),
-    )
-    agent.short_term_memory = MagicMock()
+    agent = MemoryTools("A", short_term=MagicMock())
 
-    exposed = {tool.name for tool in agent._build_memory_tools(agent.memory_access, "short_term")}
-    executors = agent.build_tool_executors([], memory_access=agent.memory_access)
+    exposed = {tool.name for tool in agent._build_memory_tools({"short_term_save": True, "short_term_search": True}, "short_term")}
+    executors = {tool.name: tool.execute_function for tool in agent.tools()}
 
     assert {"short_term_save", "short_term_search"}.issubset(exposed)
     assert {"short_term_save", "short_term_search"}.issubset(executors)
@@ -454,17 +446,11 @@ def test_agent_end_empty_functions_list_is_rejected():
 
 
 def test_long_term_filter_failure_is_reported():
-    agent = IkaBaseAgent(
-        name="A",
-        description="D",
-        prompt="P",
-        model_id="gpt-4o",
-        api_key="k",
-    )
-    agent.long_term_memory = MagicMock()
-    agent.long_term_memory.search.return_value = [{"task": "task", "expected_output": "output"}]
+    agent = MemoryTools("A")
+    agent.operations.long_term_memory = MagicMock()
+    agent.operations.long_term_memory.search.return_value = [{"task": "task", "expected_output": "output"}]
 
-    result = agent._search_long_term("query", filter_func=lambda _results: (_ for _ in ()).throw(RuntimeError("boom")))
+    result = agent.operations.search_long_term("query", filter_func=lambda _results: (_ for _ in ()).throw(RuntimeError("boom")))
 
     assert "long-term memory filter failed: boom" == result["error"]
 

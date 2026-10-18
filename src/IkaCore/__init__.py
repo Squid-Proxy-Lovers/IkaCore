@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from IkaCore.config import AgentTopology as AgentTopology
     from IkaCore.config import ExecutionLimits as ExecutionLimits
     from IkaCore.config import ExecutionPolicy as ExecutionPolicy
-    from IkaCore.config import MemoryConfig as MemoryConfig
     from IkaCore.config import OutputConfig as OutputConfig
     from IkaCore.config import PromptConfig as PromptConfig
     from IkaCore.config import ProviderConfig as ProviderConfig
@@ -36,7 +35,6 @@ __all__ = [
     "ExecutionPolicy",
     "AgentTopology",
     "OutputConfig",
-    "MemoryConfig",
 
     "__version__",
     "IkaBaseAgent",
@@ -58,7 +56,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ExecutionPolicy": ("IkaCore.config", "ExecutionPolicy"),
     "AgentTopology": ("IkaCore.config", "AgentTopology"),
     "OutputConfig": ("IkaCore.config", "OutputConfig"),
-    "MemoryConfig": ("IkaCore.config", "MemoryConfig"),
 
     "IkaBaseAgent": ("IkaCore.agents", "IkaBaseAgent"),
     "IkaStage": ("IkaCore.stages", "IkaStage"),
