@@ -185,3 +185,9 @@ def current_output() -> RuntimeOutput:
 
 def output_enabled() -> bool:
     return _output_scoped.get()
+
+
+def can_inherit_silent_output(output: RuntimeOutput) -> bool:
+    """A silent workflow may reuse an already silent caller's scope."""
+    parent = _active_output.get()
+    return not output.subscribers and parent is not None and not parent.subscribers

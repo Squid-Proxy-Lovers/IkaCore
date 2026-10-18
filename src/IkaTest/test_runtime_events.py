@@ -145,3 +145,27 @@ def test_usage_adapter_is_an_optional_subscriber():
     output.log_step('phase', 1, '', [], {'input_tokens': 3}, {}, 0)
     assert '[USAGE] stage=phase' in rendered[0] and '3' in rendered[0]
     assert callable(UsageAdapter().writer)
+
+
+def test_silent_workflow_scopes_preserve_silent_and_observed_callers(capsys):
+    from IkaCore import IkaWorkflow, WorkflowNode
+
+    class Fixture:
+        name = 'fixture'
+        Stages = ()
+        use_async = False
+        def clone_for_run(self):
+            return Fixture()
+        def execution(self):
+            return {'final_message': 'done', 'summary': 'done'}
+        def inject_workflow_context(self, context):
+            pass
+    workflow = IkaWorkflow('flow', 'description', [WorkflowNode('fixture', Fixture())], [],
+                           output=OutputConfig(cli=False))
+    observed = []
+    for parent in (RuntimeOutput(), RuntimeOutput((observed.append,))):
+        with output_scope(parent):
+            result = workflow.run(use_async=True)
+            assert result['fixture'].final == 'done' and current_output() is parent
+    assert observed == [] and capsys.readouterr().out == ''
+    workflow.async_executor.shutdown()
