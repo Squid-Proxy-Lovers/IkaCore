@@ -225,7 +225,7 @@ async def controlled_async_post(
     api_url: str, headers: dict[str, str], payload: JsonDict, timeout: float, client: httpx.AsyncClient
 ) -> httpx.Response:
     if not request_lifecycle_active():
-        return await client.post(api_url, headers=headers, json=payload)
+        return await client.post(api_url, headers=headers, json=payload, timeout=timeout)
     response = await await_with_controls(lambda: client.post(
         api_url, headers=headers, json=payload, timeout=effective_timeout(timeout)
     ))
