@@ -117,7 +117,11 @@ def initial_message_history(system_prompt: Optional[str]) -> MessageHistory:
 class AgentAttributeDeclarationsMixin:
     name: str
     description: str
-    prompt: str
+    @property
+    def prompt(self) -> str: ...
+
+    @prompt.setter
+    def prompt(self, value: str) -> None: ...
     system_prompt: Optional[str]
     start_prompt: Optional[str]
     end_prompt: Optional[str]
@@ -130,25 +134,45 @@ class AgentAttributeDeclarationsMixin:
     Stages: list[IkaStage]
     subagents: list["IkaBaseAgent"]
     next_agent: Optional["IkaBaseAgent"]
-    maxsteps: int
+    @property
+    def maxsteps(self) -> int: ...
+
+    @maxsteps.setter
+    def maxsteps(self, value: int) -> None: ...
     step_timeout: int
     memory: bool
     memory_access: dict[str, bool]
-    message_history: MessageHistory
+    @property
+    def message_history(self) -> MessageHistory: ...
+
+    @message_history.setter
+    def message_history(self, value: MessageHistory) -> None: ...
     logging_level: int
     logging_file: str
     logger: Optional[IkaLogger]
     rate_limit_per_min: Optional[float]
     per_tool_rate_limit: dict[str, float]
-    _last_api_call_ts: float
-    _resume_state: Optional[JsonDict]
+    @property
+    def _last_api_call_ts(self) -> float: ...
+
+    @_last_api_call_ts.setter
+    def _last_api_call_ts(self, value: float) -> None: ...
+    @property
+    def _resume_state(self) -> Optional[JsonDict]: ...
+
+    @_resume_state.setter
+    def _resume_state(self, value: Optional[JsonDict]) -> None: ...
     short_term_memory: Optional[Any]
     long_term_memory: Optional[Any]
     summarize_final: bool
     use_async: bool
     max_tool_rounds: int
     final_answer_checks: list[FinalAnswerCheck]
-    _tool_call_counts: dict[str, int]
+    @property
+    def _tool_call_counts(self) -> dict[str, int]: ...
+
+    @_tool_call_counts.setter
+    def _tool_call_counts(self, value: dict[str, int]) -> None: ...
     client: Optional[Any]
 
 

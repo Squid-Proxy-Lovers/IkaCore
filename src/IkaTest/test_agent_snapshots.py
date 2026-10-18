@@ -2,14 +2,15 @@ import json
 
 import pytest
 
-from IkaCore import IkaBaseAgent, IkaStage, IkaTools
+from IkaCore import ExecutionLimits, IkaBaseAgent, IkaStage, IkaTools, OutputConfig
 from IkaCore.runtime_control import RuntimeControl
 from IkaModel.chat_interface.tool_execution_sync import execute_tool
+from IkaTest.agent_config_fixtures import agent_kwargs
 
 
 def _agent(tmp_path, **kwargs):
     return IkaBaseAgent(name="Parent", description="test", prompt="do the task", model_id="gpt-4o",
-                        api_key="test", maxsteps=2, show_usage_level0=False, **kwargs)
+                        api_key="test", limits=ExecutionLimits(maxsteps=2), output=OutputConfig(show_usage_level0=False), **agent_kwargs(kwargs))
 
 
 def _finished(text="done"):
@@ -273,7 +274,7 @@ def test_resume_does_not_require_approval_for_effects_before_snapshot(tmp_path, 
 
 
 def test_nested_agent_snapshots_belong_to_child_and_support_frame_restart(tmp_path, monkeypatch):
-    child = IkaBaseAgent('Child', 'test', 'child task', model_id='gpt-4o', api_key='test', show_usage_level0=False)
+    child = IkaBaseAgent('Child', 'test', 'child task', model_id='gpt-4o', api_key='test', output=OutputConfig(show_usage_level0=False))
     tool = IkaTools('child', 'test', {'type': 'object'}, execute_function=lambda args: child.execution(), replay_policy='allow')
     parent = _agent(tmp_path, tools=[tool])
     store = parent.enable_snapshots(str(tmp_path / 'runtime.db'))

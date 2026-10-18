@@ -1,169 +1,119 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
+from typing import Any
 
 from IkaCore.agent_execution import AgentExecutionMixin
-from IkaCore.agent_helper_support import RawFinalAnswerCheck
 from IkaCore.agent_helpers import AgentHelpersMixin
-from IkaCore.agent_initialization import AgentInitializationMixin
+from IkaCore.agent_initialization import initialize_agent
 from IkaCore.agent_memory import AgentMemoryMixin
 from IkaCore.agent_snapshots import AgentSnapshotReplayMixin
+from IkaCore.agent_state import AgentRunState
 from IkaCore.agent_tools import AgentToolsMixin
+from IkaCore.config import (
+    AgentConfig,
+    AgentTopology,
+    ExecutionLimits,
+    ExecutionPolicy,
+    MemoryConfig,
+    OutputConfig,
+    PromptConfig,
+    ProviderConfig,
+)
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
 
 
-@dataclass
-class _AgentConstructorConfig:
-    name: str
-    description: str
-    prompt: str
-    system_prompt: Optional[str]
-    start_prompt: Optional[str]
-    end_prompt: Optional[str]
-    tools: Optional[list[IkaTools]]
-    model_id: str
-    api_key: str
-    api_url: Optional[str]
-    max_tokens: int
-    temperature: float
-    use_responses_api: bool
-    Stages: Optional[list[IkaStage]]
-    subagents: Optional[list[IkaBaseAgent]]
-    next_agent: Optional["IkaBaseAgent"]
-    maxsteps: int
-    step_timeout: int
-    rate_limit_per_min: Optional[float]
-    per_tool_rate_limit: Optional[dict[str, float]]
-    memory: bool
-    memory_access: Optional[dict[str, bool]]
-    final_answer_check: Optional[list[RawFinalAnswerCheck]]
-    logging_level: int
-    logging_file: str
-    show_usage_level0: bool
-    summarize_final: bool
-    use_async: bool
-    max_tool_rounds: Optional[int]
-    max_tool_calls: Optional[int]
-    max_step_extensions: int
-    extend_steps_by: int
-    max_stage_extensions: int
-    extend_stage_steps_by: int
-    reasoning_effort: Optional[str]
-
-
-def _initialize_base_agent(agent: "IkaBaseAgent", config: _AgentConstructorConfig) -> None:
-    tools, stages, subagents = agent._normalize_init_collections(config.tools, config.Stages, config.subagents)
-
-    agent._validate_required_fields(
-        {
-            "name": config.name,
-            "description": config.description,
-            "prompt": config.prompt,
-            "model_id": config.model_id,
-            "api_key": config.api_key,
-        }
-    )
-    agent._assign_identity_and_model_config(
-        config.name,
-        config.description,
-        config.prompt,
-        config.system_prompt,
-        config.start_prompt,
-        config.end_prompt,
-        tools,
-        config.model_id,
-        config.api_key,
-        config.api_url,
-        config.max_tokens,
-        config.temperature,
-        config.use_responses_api,
-        config.reasoning_effort,
-    )
-    agent._assign_agent_topology(stages, subagents, config.next_agent)
-    agent._configure_agent_logger(config.logging_level, config.logging_file, config.show_usage_level0)
-    agent._assign_execution_limits(
-        config.maxsteps,
-        config.step_timeout,
-        config.max_tool_rounds,
-        config.max_tool_calls,
-        config.max_step_extensions,
-        config.extend_steps_by,
-        config.max_stage_extensions,
-        config.extend_stage_steps_by,
-    )
-    agent._assign_runtime_state(
-        config.rate_limit_per_min,
-        config.per_tool_rate_limit,
-        config.memory,
-        config.memory_access,
-        config.final_answer_check,
-        config.summarize_final,
-        config.use_async,
-    )
-
-
-class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, AgentHelpersMixin, AgentInitializationMixin,
+class IkaBaseAgent(AgentMemoryMixin, AgentToolsMixin, AgentExecutionMixin, AgentHelpersMixin,
                    AgentSnapshotReplayMixin):
+    state: AgentRunState
+
     def __init__(
-        self,
-        name: str, description: str, prompt: str,
-        system_prompt: Optional[str] = None, start_prompt: Optional[str] = None, end_prompt: Optional[str] = None,
-        tools: Optional[list[IkaTools]] = None,
-        model_id: str = "", api_key: str = "", api_url: Optional[str] = None,
-        max_tokens: int = 50000, temperature: float = 0.0, use_responses_api: bool = True,
-        Stages: Optional[list[IkaStage]] = None,
-        subagents: Optional[list[IkaBaseAgent]] = None,
-        next_agent: Optional["IkaBaseAgent"] = None,
-        maxsteps: int = 100, step_timeout: int = 900,
-        rate_limit_per_min: Optional[float] = None, per_tool_rate_limit: Optional[dict[str, float]] = None,
-        memory: bool = False, memory_access: Optional[dict[str, bool]] = None,
-        final_answer_check: Optional[list[RawFinalAnswerCheck]] = None,
-        logging_level: int = 0, logging_file: str = "logs.txt", show_usage_level0: bool = True,
-        summarize_final: bool = False, use_async: bool = False,
-        max_tool_rounds: Optional[int] = None, max_tool_calls: Optional[int] = None,
-        max_step_extensions: int = 2, extend_steps_by: int = 3,
-        max_stage_extensions: int = 2, extend_stage_steps_by: int = 3,
-        reasoning_effort: Optional[str] = None,
+        self, name: str, description: str, prompt: str, *,
+        model_id: str = "", api_key: str = "", tools: list[IkaTools] | None = None,
+        Stages: list[IkaStage] | None = None,
+        provider: ProviderConfig | None = None, prompts: PromptConfig | None = None,
+        limits: ExecutionLimits | None = None, policy: ExecutionPolicy | None = None,
+        topology: AgentTopology | None = None, output: OutputConfig | None = None,
+        memory: MemoryConfig | None = None,
     ):
-        _initialize_base_agent(
-            self,
-            _AgentConstructorConfig(
-                name=name,
-                description=description,
-                prompt=prompt,
-                system_prompt=system_prompt,
-                start_prompt=start_prompt,
-                end_prompt=end_prompt,
-                tools=tools,
-                model_id=model_id,
-                api_key=api_key,
-                api_url=api_url,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                use_responses_api=use_responses_api,
-                Stages=Stages,
-                subagents=subagents,
-                next_agent=next_agent,
-                maxsteps=maxsteps,
-                step_timeout=step_timeout,
-                rate_limit_per_min=rate_limit_per_min,
-                per_tool_rate_limit=per_tool_rate_limit,
-                memory=memory,
-                memory_access=memory_access,
-                final_answer_check=final_answer_check,
-                logging_level=logging_level,
-                logging_file=logging_file,
-                show_usage_level0=show_usage_level0,
-                summarize_final=summarize_final,
-                use_async=use_async,
-                max_tool_rounds=max_tool_rounds,
-                max_tool_calls=max_tool_calls,
-                max_step_extensions=max_step_extensions,
-                extend_steps_by=extend_steps_by,
-                max_stage_extensions=max_stage_extensions,
-                extend_stage_steps_by=extend_stage_steps_by,
-                reasoning_effort=reasoning_effort,
-            ),
-        )
+        self.config = AgentConfig(name, description, prompt, model_id, api_key,
+                                  tuple(tools or ()), tuple(Stages or ()), provider or ProviderConfig(), prompts or PromptConfig(),
+                                  limits or ExecutionLimits(), policy or ExecutionPolicy(), topology or AgentTopology(),
+                                  output or OutputConfig(), memory or MemoryConfig())
+        initialize_agent(self)
+
+    def shutdown(self) -> None:
+        from IkaCore.agent_initialization import shutdown_agent
+        shutdown_agent(self)
+
+    @property
+    def message_history(self) -> dict[str, Any]:
+        return self.state.message_history
+
+    @message_history.setter
+    def message_history(self, value: dict[str, Any]) -> None:
+        self.state.message_history = value
+
+    @property
+    def maxsteps(self) -> int:
+        return self.state.maxsteps
+
+    @maxsteps.setter
+    def maxsteps(self, value: int) -> None:
+        self.state.maxsteps = value
+
+    @property
+    def prompt(self) -> str:
+        return self.state.prompt
+
+    @prompt.setter
+    def prompt(self, value: str) -> None:
+        self.state.prompt = value
+
+    @property
+    def _resume_state(self) -> dict[str, Any] | None:
+        return self.state._resume_state
+
+    @_resume_state.setter
+    def _resume_state(self, value: dict[str, Any] | None) -> None:
+        self.state._resume_state = value
+
+    @property
+    def _last_interrupt(self) -> dict[str, Any] | None:
+        return self.state._last_interrupt
+
+    @_last_interrupt.setter
+    def _last_interrupt(self, value: dict[str, Any] | None) -> None:
+        self.state._last_interrupt = value
+
+    @property
+    def _tool_call_counts(self) -> dict[str, int]:
+        return self.state._tool_call_counts
+
+    @_tool_call_counts.setter
+    def _tool_call_counts(self, value: dict[str, int]) -> None:
+        self.state._tool_call_counts = value
+
+    @property
+    def _total_usage(self) -> dict[str, int]:
+        return self.state._total_usage
+
+    @_total_usage.setter
+    def _total_usage(self, value: dict[str, int]) -> None:
+        self.state._total_usage = value
+
+    @property
+    def _total_cost(self) -> dict[str, float]:
+        return self.state._total_cost
+
+    @_total_cost.setter
+    def _total_cost(self, value: dict[str, float]) -> None:
+        self.state._total_cost = value
+
+    @property
+    def _last_api_call_ts(self) -> float:
+        return self.state._last_api_call_ts
+
+    @_last_api_call_ts.setter
+    def _last_api_call_ts(self, value: float) -> None:
+        self.state._last_api_call_ts = value

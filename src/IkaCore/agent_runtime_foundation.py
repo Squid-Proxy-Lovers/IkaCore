@@ -28,15 +28,24 @@ run_summarization = cast(RunSummarization, _run_summarization_untyped)
 
 
 class _RuntimeValueState:
+    config: Any
     name: str
     description: str
-    prompt: str
+    @property
+    def prompt(self) -> str: ...
+
+    @prompt.setter
+    def prompt(self, value: str) -> None: ...
     system_prompt: Optional[str]
     tools: list[Any]
     Stages: list[Any]
     subagents: list[Any]
     next_agent: Any | None
-    maxsteps: int
+    @property
+    def maxsteps(self) -> int: ...
+
+    @maxsteps.setter
+    def maxsteps(self, value: int) -> None: ...
     step_timeout: int
     max_tool_rounds: int
     max_tool_calls: int
@@ -48,9 +57,21 @@ class _RuntimeValueState:
     summarize_final: bool
     final_answer_checks: list[Callable[[JsonDict], bool]]
     logger: Any
-    message_history: JsonDict
-    _tool_call_counts: dict[str, int]
-    _last_interrupt: Optional[JsonDict]
+    @property
+    def message_history(self) -> JsonDict: ...
+
+    @message_history.setter
+    def message_history(self, value: JsonDict) -> None: ...
+    @property
+    def _tool_call_counts(self) -> dict[str, int]: ...
+
+    @_tool_call_counts.setter
+    def _tool_call_counts(self, value: dict[str, int]) -> None: ...
+    @property
+    def _last_interrupt(self) -> Optional[JsonDict]: ...
+
+    @_last_interrupt.setter
+    def _last_interrupt(self, value: Optional[JsonDict]) -> None: ...
     context_budget: Optional[int]
 
 

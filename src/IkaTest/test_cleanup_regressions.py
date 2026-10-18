@@ -1,5 +1,4 @@
 """Regression tests for broad cleanup hardening."""
-
 import asyncio
 import json
 import os
@@ -14,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from IkaCore import MemoryConfig
 from IkaCore.agents import IkaBaseAgent
 from IkaCore.logging_utils import IkaLogger
 from IkaCore.snapshot_store import SnapshotStore
@@ -70,8 +70,7 @@ def test_short_term_search_tool_is_exposed_when_executor_is_available():
         prompt="P",
         model_id="gpt-4o",
         api_key="k",
-        memory=True,
-        memory_access={"short_term_save": True, "short_term_search": True},
+        memory=MemoryConfig(enabled=True, access={"short_term_save": True, "short_term_search": True}),
     )
     agent.short_term_memory = MagicMock()
 

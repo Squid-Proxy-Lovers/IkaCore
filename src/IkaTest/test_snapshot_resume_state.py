@@ -1,11 +1,11 @@
 """Resumed transcripts, execution positions, and stage budgets are consumed once."""
-
 import json
 from copy import deepcopy
 
 import pytest
 
-from IkaCore import IkaBaseAgent, IkaStage
+from IkaCore import IkaBaseAgent, IkaStage, OutputConfig
+from IkaTest.agent_config_fixtures import agent_kwargs
 
 
 def _turn(content='partial', control=None):
@@ -21,7 +21,7 @@ def agent_factory(tmp_path, monkeypatch):
         defaults = {'maxsteps': 6, 'max_stage_extensions': 0, 'max_step_extensions': 0}
         defaults.update(options)
         agent = IkaBaseAgent('test', 'test', 'task', model_id='gpt-4o', api_key='test',
-                            show_usage_level0=False, **defaults)
+                            output=OutputConfig(show_usage_level0=False), **agent_kwargs(defaults))
         agent.enable_snapshots(str(tmp_path / f'runtime-{len(agents)}.db'))
         agents.append(agent)
         return agent

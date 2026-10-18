@@ -223,7 +223,7 @@ class ValidatedSimpleExecutionMixin(SimpleExecutionDispatchMixin):
     def _run_validated_simple_execution(self) -> JsonDict:
         original_maxsteps = self.maxsteps
         original_prompt = self.prompt
-        max_retries = 3
+        max_retries = self.config.policy.validation_retries
         retry_count = 0
 
         while True:
@@ -250,7 +250,7 @@ class ValidatedSimpleExecutionMixin(SimpleExecutionDispatchMixin):
                     )
                 return final_output
 
-            self.maxsteps = original_maxsteps + 10
+            self.maxsteps = original_maxsteps + self.config.policy.validation_extra_steps
             check_descriptions: list[str] = []
             for check in self.final_answer_checks:
                 func_name = _string_attr(check, '__name__')

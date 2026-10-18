@@ -4,7 +4,6 @@
 Run with an installed IkaCore wheel. Credentials and model output are never written
 into the report. Local-login access requires --use-local-login explicitly.
 """
-
 import argparse
 import asyncio
 import contextlib
@@ -25,7 +24,15 @@ from uuid import uuid4
 
 import httpx
 
-from IkaCore import IkaBaseAgent, IkaStage, RuntimeControl
+from IkaCore import (
+    ExecutionLimits,
+    ExecutionPolicy,
+    IkaBaseAgent,
+    IkaStage,
+    OutputConfig,
+    ProviderConfig,
+    RuntimeControl,
+)
 from IkaModel.base import AgentTool, BareBoneModel, ToolArgs
 from IkaModel.chat_interface.chat_interface import async_chat, chat, init_message_history
 from IkaModel.codex.auth import get_bearer
@@ -33,6 +40,7 @@ from IkaModel.codex_constants import CODEX_API_URL
 from IkaModel.request_control import request_controls
 from IkaModel.request_interface import async_api_request_retry
 from IkaModel.runtime_errors import IkaRequestCancelled
+from IkaTest.agent_config_fixtures import agent_kwargs
 
 
 class Probe:
@@ -46,10 +54,9 @@ class Probe:
 
     def agent(self, prompt, **kwargs):
         return IkaBaseAgent('live_fixture', 'Synthetic integration test', prompt,
-                            model_id=self.model_id, api_key=self.bearer, api_url=CODEX_API_URL,
-                            reasoning_effort='low', maxsteps=3, max_tool_rounds=3, max_tool_calls=3,
-                            max_step_extensions=0, max_stage_extensions=0,
-                            summarize_final=False, show_usage_level0=False, **kwargs)
+                            model_id=self.model_id, api_key=self.bearer, provider=ProviderConfig(api_url=CODEX_API_URL, reasoning_effort='low'), limits=ExecutionLimits(maxsteps=3, max_tool_rounds=3, max_tool_calls=3),
+                            policy=ExecutionPolicy(max_step_extensions=0, max_stage_extensions=0),
+                            output=OutputConfig(summarize_final=False, show_usage_level0=False), **agent_kwargs(agent_kwargs(agent_kwargs(agent_kwargs(agent_kwargs(agent_kwargs(agent_kwargs(agent_kwargs(agent_kwargs(agent_kwargs(agent_kwargs(kwargs))))))))))))
 
     def text(self, asynchronous=False):
         model = self.model()

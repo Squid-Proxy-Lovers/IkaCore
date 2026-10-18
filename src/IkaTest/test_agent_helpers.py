@@ -7,6 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from IkaCore import AgentTopology, ExecutionLimits, ExecutionPolicy, OutputConfig, PromptConfig
+from IkaTest.agent_config_fixtures import agent_kwargs
+
 mock_ika_mem = MagicMock()
 with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
     from IkaCore.agents import IkaBaseAgent
@@ -22,7 +25,7 @@ from IkaCore.stages import IkaStage
 def _minimal_agent(**kwargs):
     defaults = {"name": "A", "description": "D", "prompt": "P", "model_id": "gpt-4o", "api_key": "k"}
     defaults.update(kwargs)
-    return IkaBaseAgent(**defaults)
+    return IkaBaseAgent(**agent_kwargs(defaults))
 
 
 class TestValidateRequiredFields:
@@ -58,14 +61,14 @@ class TestBuildMemoryAccessDefaults:
 class TestFinalAnswerCheckValidation:
     def test_rejects_non_callable_check(self):
         with pytest.raises(ValueError, match="callable"):
-            _minimal_agent(final_answer_check=["not-callable"])
+            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=("not-callable",)))
 
     def test_rejects_check_without_docstring(self):
         def no_docstring(_history) -> bool:
             return True
 
         with pytest.raises(ValueError, match="docstring"):
-            _minimal_agent(final_answer_check=[no_docstring])
+            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(no_docstring,)))
 
     def test_rejects_check_with_non_bool_annotation(self):
         def wrong_annotation(_history) -> str:
@@ -73,7 +76,7 @@ class TestFinalAnswerCheckValidation:
             return "yes"
 
         with pytest.raises(ValueError, match="return type annotation"):
-            _minimal_agent(final_answer_check=[wrong_annotation])
+            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(wrong_annotation,)))
 
     def test_rejects_check_returning_non_bool(self):
         def wrong_result(_history):
@@ -81,14 +84,14 @@ class TestFinalAnswerCheckValidation:
             return "yes"
 
         with pytest.raises(ValueError, match="must return a boolean"):
-            _minimal_agent(final_answer_check=[wrong_result])
+            _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(wrong_result,)))
 
     def test_accepts_valid_check(self):
         def valid_check(_history) -> bool:
             """Return whether the final answer is acceptable."""
             return True
 
-        a = _minimal_agent(final_answer_check=[valid_check])
+        a = _minimal_agent(policy=ExecutionPolicy(final_answer_checks=(valid_check,)))
         assert a.final_answer_checks == [valid_check]
 
 
@@ -107,7 +110,7 @@ class TestInitialMessageHistory:
 
 class TestFinalPrompt:
     def test_uses_start_stage_end(self):
-        a = _minimal_agent(start_prompt="Start", end_prompt="End")
+        a = _minimal_agent(prompts=PromptConfig(start_prompt="Start", end_prompt="End"))
         stage = IkaStage("S1", "Stage prompt", [])
         out = a.final_prompt(stage)
         assert "Start" in out
@@ -115,7 +118,7 @@ class TestFinalPrompt:
         assert "End" in out
 
     def test_fallback_to_description(self):
-        a = _minimal_agent(start_prompt="", end_prompt="")
+        a = _minimal_agent(prompts=PromptConfig(start_prompt="", end_prompt=""))
         stage = IkaStage("S", "", [])
         out = a.final_prompt(stage)
         assert a.description in out
@@ -287,7 +290,7 @@ class TestExecutionRuntimeHelpers:
         a.logger.log_hitl_input.assert_called_once_with("Review", "human answer")
 
     def test_stage_extension_policy_appends_redirect_then_forces_answer(self):
-        a = _minimal_agent(max_stage_extensions=1, extend_stage_steps_by=2)
+        a = _minimal_agent(policy=ExecutionPolicy(max_stage_extensions=1, extend_stage_steps_by=2))
         barebone = MagicMock()
         messages = []
 
@@ -367,7 +370,7 @@ class TestExecutionRuntimeHelpers:
 
     def test_simple_run_extension_appends_redirect_and_respects_extension_limit(self):
         cli = MagicMock()
-        a = _minimal_agent(maxsteps=2, max_step_extensions=1, extend_steps_by=4)
+        a = _minimal_agent(limits=ExecutionLimits(maxsteps=2), policy=ExecutionPolicy(max_step_extensions=1, extend_steps_by=4))
         barebone_summary = SimpleNamespace()
         a.get_barebone = MagicMock(return_value=barebone_summary)
         messages = []
@@ -410,7 +413,7 @@ class TestExecutionRuntimeHelpers:
 
     def test_finalize_simple_after_max_steps_prefers_agent_end_text(self):
         cli = MagicMock()
-        a = _minimal_agent(maxsteps=5)
+        a = _minimal_agent(limits=ExecutionLimits(maxsteps=5))
         a.get_barebone = MagicMock()
         cli.get_step.return_value = 4
         summarizer = MagicMock()
@@ -441,7 +444,7 @@ class TestExecutionRuntimeHelpers:
 
     def test_finalize_simple_after_max_steps_forces_or_falls_back_to_last_content(self):
         cli = MagicMock()
-        a = _minimal_agent(maxsteps=5)
+        a = _minimal_agent(limits=ExecutionLimits(maxsteps=5))
         barebone_final = SimpleNamespace()
         a.get_barebone = MagicMock(return_value=barebone_final)
         cli.get_step.return_value = None
@@ -513,7 +516,7 @@ class TestExecutionRuntimeHelpers:
 
     def test_prepare_simple_runtime_builds_start_prompt_tools_and_context_budget(self):
         cli = MagicMock()
-        a = _minimal_agent(system_prompt="system", prompt="agent prompt")
+        a = _minimal_agent(prompts=PromptConfig(system_prompt="system"), prompt="agent prompt")
         a.message_history["first_input"]["message"] = "history prompt"
         a.context_budget = 42
         barebone = SimpleNamespace()
@@ -619,7 +622,7 @@ class TestExecutionRuntimeHelpers:
 
 
     def test_run_simple_extends_after_text_only_progress_at_step_limit(self):
-        a = _minimal_agent(maxsteps=1, max_step_extensions=1, extend_steps_by=1)
+        a = _minimal_agent(limits=ExecutionLimits(maxsteps=1), policy=ExecutionPolicy(max_step_extensions=1, extend_steps_by=1))
         runtime = SimpleRuntimeContext(
             system_prompt="system",
             current_hierarchy=["A"],
@@ -665,7 +668,7 @@ class TestExecutionRuntimeHelpers:
 
     def test_staged_dispatch_resumes_stage_checkpoint_and_builds_final_output(self):
         stage = IkaStage("Review", "Review prompt", [])
-        a = _minimal_agent(Stages=[stage], maxsteps=10)
+        a = _minimal_agent(Stages=[stage], limits=ExecutionLimits(maxsteps=10))
         resume_history = _minimal_agent().message_history
         resume_cp = {
             "scope": "stage",
@@ -698,7 +701,7 @@ class TestExecutionRuntimeHelpers:
             "interrupt_status": "awaiting_user_input",
             "interrupt_data": {"question": "Proceed?"},
         }
-        a = _minimal_agent(Stages=[stage], maxsteps=10)
+        a = _minimal_agent(Stages=[stage], limits=ExecutionLimits(maxsteps=10))
         a.execute_stage = MagicMock()
 
         replay = a._run_staged_execution("", resume_cp, last_content="")
@@ -707,7 +710,7 @@ class TestExecutionRuntimeHelpers:
         assert replay["interrupt_data"]["question"] == "Proceed?"
         a.execute_stage.assert_not_called()
 
-        b = _minimal_agent(Stages=[stage], maxsteps=10)
+        b = _minimal_agent(Stages=[stage], limits=ExecutionLimits(maxsteps=10))
         b.execute_stage = MagicMock(return_value=StageExecutionResult(1, "done", True, "done", 1))
         b.get_barebone = MagicMock(return_value=SimpleNamespace())
         b._build_final_output = MagicMock(return_value={"final_message": "done"})
@@ -731,7 +734,7 @@ class TestExecutionRuntimeHelpers:
     def test_next_agent_dispatch_uses_summary_or_final_message_as_next_input(self):
         next_agent = _minimal_agent(name="Next")
         next_agent.execution = MagicMock(return_value={"final_message": "next done"})
-        a = _minimal_agent(next_agent=next_agent, summarize_final=True)
+        a = _minimal_agent(topology=AgentTopology(next_agent=next_agent), output=OutputConfig(summarize_final=True))
         a.run_simple = MagicMock(return_value=("final", "final"))
         barebone = SimpleNamespace()
         a.get_barebone = MagicMock(return_value=barebone)
@@ -750,14 +753,14 @@ class TestExecutionRuntimeHelpers:
 
         other_next = _minimal_agent(name="OtherNext")
         other_next.execution = MagicMock(return_value={"final_message": "other done"})
-        b = _minimal_agent(next_agent=other_next, summarize_final=False)
+        b = _minimal_agent(topology=AgentTopology(next_agent=other_next), output=OutputConfig(summarize_final=False))
         b.run_simple = MagicMock(return_value=("plain final", "plain final"))
 
         assert b._run_next_agent_execution() == {"final_message": "other done"}
         assert other_next.message_history["first_input"]["message"] == "Previous agent summary:\nplain final\n\nP"
 
     def test_simple_final_output_builds_summary_from_run_simple_result(self):
-        a = _minimal_agent(system_prompt="system")
+        a = _minimal_agent(prompts=PromptConfig(system_prompt="system"))
         a.run_simple = MagicMock(return_value=("final", "unused"))
         barebone = SimpleNamespace()
         a.get_barebone = MagicMock(return_value=barebone)
@@ -780,7 +783,7 @@ class TestExecutionRuntimeHelpers:
             """Return whether the output is good."""
             return output["final_message"] == "good"
 
-        a = _minimal_agent(maxsteps=3, prompt="original prompt")
+        a = _minimal_agent(limits=ExecutionLimits(maxsteps=3), prompt="original prompt")
         a.final_answer_checks = [requires_good]
         a._run_simple_final_output = MagicMock(
             side_effect=[
@@ -808,7 +811,7 @@ class TestExecutionRuntimeHelpers:
             """Always reject the final answer."""
             return False
 
-        a = _minimal_agent(maxsteps=3, prompt="original prompt")
+        a = _minimal_agent(limits=ExecutionLimits(maxsteps=3), prompt="original prompt")
         a.logger = MagicMock()
         a.final_answer_checks = [always_fail]
         final_output = {"final_message": "still bad"}
@@ -834,7 +837,7 @@ class TestExecutionRuntimeHelpers:
         staged._run_staged_execution.assert_called_once_with(None, None, "")
 
         next_agent = _minimal_agent(name="Next")
-        chained = _minimal_agent(next_agent=next_agent)
+        chained = _minimal_agent(topology=AgentTopology(next_agent=next_agent))
         chained._run_next_agent_execution = MagicMock(return_value={"final_message": "next"})
         assert chained.execution() == {"final_message": "next"}
 
@@ -886,7 +889,7 @@ class TestRuntimeHelpers:
 
     def test_get_chat_client_returns_async_client_without_constructing_httpx(self):
         client = object()
-        a = _minimal_agent(use_async=True)
+        a = _minimal_agent(policy=ExecutionPolicy(use_async=True))
         a.client = client
 
         assert a._get_chat_client() is client
@@ -1067,7 +1070,7 @@ class TestBuildFinalOutput:
         assert out["summary"] == "Final text"
 
     def test_build_final_output_has_keys(self):
-        a = _minimal_agent(summarize_final=True)
+        a = _minimal_agent(output=OutputConfig(summarize_final=True))
         mock_bm = MagicMock()
         out = a._build_final_output("Final", mock_bm)
         assert "final_message" in out
@@ -1077,7 +1080,7 @@ class TestBuildFinalOutput:
 
     def test_build_final_output_logs_and_emits_summary(self):
         cli = MagicMock()
-        a = _minimal_agent(summarize_final=True)
+        a = _minimal_agent(output=OutputConfig(summarize_final=True))
         a.logger = MagicMock()
         a._parent_hierarchy = ["Parent"]
         mock_bm = MagicMock(model_id="gpt-4o")
@@ -1141,7 +1144,7 @@ class TestChatWrapper:
         assert a._total_cost["total_cost"] == 1.1
 
     def test_run_chat_round_uses_async_chat_when_enabled(self):
-        a = _minimal_agent(use_async=True)
+        a = _minimal_agent(policy=ExecutionPolicy(use_async=True))
         response = {"usage": {}, "cost": {}}
         calls = []
 

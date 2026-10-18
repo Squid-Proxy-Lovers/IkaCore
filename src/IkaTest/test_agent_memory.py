@@ -2,12 +2,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from IkaCore.agents import IkaBaseAgent
+from IkaTest.agent_config_fixtures import agent_kwargs
 
 
 def _minimal_agent(**kwargs):
     defaults = {"name": "A", "description": "D", "prompt": "P", "model_id": "gpt-4o", "api_key": "k"}
     defaults.update(kwargs)
-    return IkaBaseAgent(**defaults)
+    return IkaBaseAgent(**agent_kwargs(defaults))
 
 
 def test_short_term_memory_save_and_error_paths():

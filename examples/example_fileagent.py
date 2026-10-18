@@ -1,6 +1,6 @@
 import os
 
-from IkaCore import IkaBaseAgent, IkaTools
+from IkaCore import ExecutionLimits, IkaBaseAgent, IkaTools, OutputConfig, PromptConfig, ProviderConfig
 
 MODEL_ID = "qwen/qwen3-coder-next"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -77,14 +77,14 @@ def main():
     agent = IkaBaseAgent(
         name="example_system",
         description="A simple example system",
-        api_url=OPENROUTER_URL,
-        system_prompt=SYSTEM_PROMPT,
+        provider=ProviderConfig(api_url=OPENROUTER_URL),
+        prompts=PromptConfig(system_prompt=SYSTEM_PROMPT),
         prompt=PROMPT,
         tools=[get_pwd, read_file, list_files],
         model_id=MODEL_ID,
         api_key=api_key,
-        maxsteps=30,
-        logging_level=3,
+        limits=ExecutionLimits(maxsteps=30),
+        output=OutputConfig(logging_level=3),
     )
     agent.execution()
 

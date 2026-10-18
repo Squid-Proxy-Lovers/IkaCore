@@ -1,7 +1,7 @@
 import os
 from typing import List
 
-from IkaCore import IkaBaseAgent, IkaStage
+from IkaCore import ExecutionLimits, IkaBaseAgent, IkaStage, OutputConfig, PromptConfig
 from IkaCore.workflow import IkaWorkflow, WorkflowCompressionHook, WorkflowEdge, WorkflowNode
 
 
@@ -34,47 +34,47 @@ def build_sync_workflow(compress_hook: WorkflowCompressionHook, api_key: str, mo
     orchestrator = IkaBaseAgent(
         name="orchestrator",
         description="Staged coordinator",
-        system_prompt="You are a coordinator. Follow each stage and call stage_end when done.",
+        prompts=PromptConfig(system_prompt="You are a coordinator. Follow each stage and call stage_end when done."),
         prompt="Process the topic you receive: first gather and expand, then refine.",
         tools=[],
         Stages=[stg0, stg1],
         model_id=model_id,
         api_key=api_key,
-        maxsteps=50,
-        logging_level=2,
+        limits=ExecutionLimits(maxsteps=50),
+        output=OutputConfig(logging_level=2),
     )
 
     researcher = IkaBaseAgent(
         name="researcher",
         description="Expands and researches",
-        system_prompt="You are a researcher. Reply in one short paragraph.",
+        prompts=PromptConfig(system_prompt="You are a researcher. Reply in one short paragraph."),
         prompt="Expand on the topic given. Be concise.",
         tools=[],
         model_id=model_id,
         api_key=api_key,
-        logging_level=2,
+        output=OutputConfig(logging_level=2),
     )
 
     critic = IkaBaseAgent(
         name="critic",
         description="Critiques and refines",
-        system_prompt="You are a critic. Reply in one short paragraph.",
+        prompts=PromptConfig(system_prompt="You are a critic. Reply in one short paragraph."),
         prompt="Critically refine or improve the text you receive. Be concise.",
         tools=[],
         model_id=model_id,
         api_key=api_key,
-        logging_level=2,
+        output=OutputConfig(logging_level=2),
     )
 
     synthesizer = IkaBaseAgent(
         name="synthesizer",
         description="Final synthesis",
-        system_prompt="You are a synthesizer. Produce a short final answer.",
+        prompts=PromptConfig(system_prompt="You are a synthesizer. Produce a short final answer."),
         prompt="Synthesize the information you receive into a clear, final answer in 2-3 sentences.",
         tools=[],
         model_id=model_id,
         api_key=api_key,
-        logging_level=2,
+        output=OutputConfig(logging_level=2),
     )
 
     nodes = [
@@ -104,23 +104,23 @@ def build_async_workflow(api_key: str, model_id: str) -> IkaWorkflow:
     brainstorm = IkaBaseAgent(
         name="brainstorm",
         description="Brainstorms from multiple angles",
-        system_prompt="You are a brainstormer. Reply in one short paragraph.",
+        prompts=PromptConfig(system_prompt="You are a brainstormer. Reply in one short paragraph."),
         prompt="Analyze the topic you receive.",
         tools=[],
         model_id=model_id,
         api_key=api_key,
-        logging_level=2,
+        output=OutputConfig(logging_level=2),
     )
 
     decider = IkaBaseAgent(
         name="decider",
         description="Picks and summarizes",
-        system_prompt="You are a decider. Produce a short conclusion.",
+        prompts=PromptConfig(system_prompt="You are a decider. Produce a short conclusion."),
         prompt="From the analyses you receive, pick the best points and give a 2-3 sentence conclusion.",
         tools=[],
         model_id=model_id,
         api_key=api_key,
-        logging_level=2,
+        output=OutputConfig(logging_level=2),
     )
 
     nodes = [

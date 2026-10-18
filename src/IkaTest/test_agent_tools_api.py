@@ -7,6 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from IkaCore import AgentTopology, MemoryConfig, PromptConfig
+from IkaTest.agent_config_fixtures import agent_kwargs
+
 mock_ika_mem = MagicMock()
 with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
     from IkaCore.agents import IkaBaseAgent
@@ -20,7 +23,7 @@ from IkaModel.openai.openai import openai_fill_payload
 def _minimal_agent(**kwargs):
     defaults = {"name": "TestAgent", "description": "Desc", "prompt": "Do it", "model_id": "gpt-4o", "api_key": "k"}
     defaults.update(kwargs)
-    return IkaBaseAgent(**defaults)
+    return IkaBaseAgent(**agent_kwargs(defaults))
 
 
 class TestConvertToolsToAgentTools:
@@ -60,7 +63,7 @@ class TestConvertToolsToAgentTools:
 class TestConvertSubagentsToTools:
     def test_subagents_become_agent_tools(self):
         sub = _minimal_agent(name="Worker")
-        a = _minimal_agent(subagents=[sub])
+        a = _minimal_agent(topology=AgentTopology(subagents=[sub]))
         tools = a._convert_subagents_to_tools()
         assert len(tools) == 1
         assert tools[0].name == "Worker"
@@ -162,17 +165,17 @@ class TestBuildToolExecutors:
     def test_subagent_executor_calls_execution(self):
         sub = _minimal_agent(name="Sub")
         sub.execution = MagicMock(return_value={"final_message": "Sub result", "summary": "Sub result"})
-        a = _minimal_agent(subagents=[sub])
+        a = _minimal_agent(topology=AgentTopology(subagents=[sub]))
         executors = a.build_tool_executors(a.build_simple_tools())
         out = executors["Sub"]({"input": "Do task"})
         assert "Sub result" in out
         sub.execution.assert_called_once()
 
     def test_subagent_executor_keeps_task_separate_from_instructions(self):
-        sub = _minimal_agent(name="Sub", prompt="Sub base", system_prompt="Sub system")
+        sub = _minimal_agent(name="Sub", prompt="Sub base", prompts=PromptConfig(system_prompt="Sub system"))
 
         sub.execution = MagicMock(return_value={"final_message": "Sub result", "summary": "Sub result"})
-        a = _minimal_agent(subagents=[sub])
+        a = _minimal_agent(topology=AgentTopology(subagents=[sub]))
         executor = a._build_subagent_executor(sub, parent_hierarchy=["Parent"])
         out = executor({"input": "Do task"})
 
@@ -186,7 +189,7 @@ class TestBuildToolExecutors:
         sub_run = sub.clone_for_run()
         sub_run.execution = MagicMock(side_effect=RuntimeError("boom"))
         sub.clone_for_run = MagicMock(return_value=sub_run)
-        a = _minimal_agent(subagents=[sub])
+        a = _minimal_agent(topology=AgentTopology(subagents=[sub]))
 
         executors = a.build_tool_executors([])
 
@@ -198,7 +201,7 @@ class TestBuildToolExecutors:
         sub_run.execution.assert_called_once()
 
     def test_memory_executors_enforce_rate_limit_and_delegate(self):
-        a = _minimal_agent(memory_access={})
+        a = _minimal_agent(memory=MemoryConfig(access={}))
         a.short_term_memory = MagicMock()
         a.long_term_memory = MagicMock()
         a._enforce_rate_limit_tool = MagicMock()
@@ -280,7 +283,7 @@ class TestApiPayloadToolSchema:
         assert "input" in fn["parameters"]["required"]
 
     def test_memory_tool_schema_is_structured(self):
-        a = _minimal_agent(memory=True, memory_access={"long_term_save": True, "long_term_search": True})
+        a = _minimal_agent(memory=MemoryConfig(enabled=True, access={"long_term_save": True, "long_term_search": True}))
         a.long_term_memory = MagicMock()
         tools = a._build_memory_tools(a.memory_access, "long_term")
         names = {t.name for t in tools}
@@ -291,7 +294,7 @@ class TestApiPayloadToolSchema:
         assert search_tool.args.properties["__required__"] == ["query"]
 
     def test_long_term_save_executor_accepts_structured_payload(self):
-        a = _minimal_agent(memory=True, memory_access={"long_term_save": True})
+        a = _minimal_agent(memory=MemoryConfig(enabled=True, access={"long_term_save": True}))
         a.long_term_memory = MagicMock()
         a.long_term_memory.save = MagicMock()
         result = a._save_to_long_term({"task": "research", "output": "done", "metadata": {"source": "unit-test"}})

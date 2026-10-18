@@ -36,6 +36,18 @@ V2 intentionally breaks compatibility with v1. See the
   Other providers/models and long-running application behavior require
   separate live validation. Historical quality/benchmark figures identify their revision.
 
+### Agent configuration
+
+- Agent options are frozen `ProviderConfig`, `PromptConfig`, `ExecutionLimits`,
+  `ExecutionPolicy`, `AgentTopology`, and `OutputConfig` values. Pass them using
+  `provider=`, `prompts=`, `limits=`, `policy=`, `topology=`, and `output=`.
+  The corresponding flat constructor keywords are removed. Name, description,
+  prompt, model_id, api_key, Stages, and tools remain flat.
+- `agent.config` retains configured defaults; `agent.state` owns mutable run budgets,
+  transcripts, usage, counters and replay state. Extensions do not mutate config.
+  Final checks and automatic continuation settings are one explicit execution policy;
+  defaults preserve three validation retries and the existing extension behavior.
+
 ### Fixed
 
 - Preserve zero remaining steps in legacy staged HITL snapshots without `loop_state`

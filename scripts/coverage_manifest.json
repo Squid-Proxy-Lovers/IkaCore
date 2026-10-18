@@ -274,7 +274,9 @@
         "src/IkaCore/agents.py",
         "src/IkaCore/execution_types.py",
         "src/IkaCore/prompts.py",
-        "src/IkaCore/stages.py"
+        "src/IkaCore/stages.py",
+        "src/IkaCore/config.py",
+        "src/IkaCore/agent_state.py"
       ],
       "required_tests": [
         "src/IkaTest/test_agent_helpers.py::TestFinalPrompt::test_execute_stage_refreshes_first_input_for_each_stage",

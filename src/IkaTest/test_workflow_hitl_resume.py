@@ -1,12 +1,11 @@
 """Workflow replay continues the saved child, including independently answered children."""
-
 from collections import Counter
 from copy import deepcopy
 from unittest.mock import MagicMock
 
 import pytest
 
-from IkaCore import IkaBaseAgent, IkaStage, IkaTools
+from IkaCore import ExecutionLimits, ExecutionPolicy, IkaBaseAgent, IkaStage, IkaTools, OutputConfig
 from IkaCore.workflow import IkaWorkflow, WorkflowEdge, WorkflowNode
 from IkaModel.chat_interface.tool_execution_sync import execute_tool
 from IkaTest.test_snapshot_resume_state import _turn
@@ -22,7 +21,7 @@ def approval_workflow(tmp_path, monkeypatch):
         for name in names:
             stages = [IkaStage('approve', 'ask approval', [tool] if tool else [], hitl=True)] if name in approvals else []
             agent = IkaBaseAgent(name, 'test', 'task', model_id='gpt-4o', api_key='test', Stages=stages,
-                                maxsteps=6, max_stage_extensions=0, show_usage_level0=False, use_async=use_async)
+                                limits=ExecutionLimits(maxsteps=6), policy=ExecutionPolicy(max_stage_extensions=0, use_async=use_async), output=OutputConfig(show_usage_level0=False))
             agent._test_version_root = version_root
             agents.append(agent)
             nodes.append(WorkflowNode(name, agent))

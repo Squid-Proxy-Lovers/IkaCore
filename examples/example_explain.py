@@ -1,6 +1,6 @@
 import os
 
-from IkaCore import IkaBaseAgent, IkaTools
+from IkaCore import AgentTopology, ExecutionLimits, IkaBaseAgent, IkaTools, OutputConfig, PromptConfig
 
 AsynPrompt = """
 For maximum efficiency, whenever you need to perform multiple independent operations, invoke all relevant tools simultaneously rather than sequentially.
@@ -68,7 +68,7 @@ def main():
     Subagent = IkaBaseAgent(
         name="subagent",
         description="File reader subagent",
-        system_prompt=SUBAGENT_SYSTEM_PROMPT,
+        prompts=PromptConfig(system_prompt=SUBAGENT_SYSTEM_PROMPT),
         prompt=SUBAGENT_PROMPT,
         tools=[read_file],
         model_id=model_id,
@@ -78,14 +78,14 @@ def main():
     ManagerAgent = IkaBaseAgent(
         name="example_system",
         description="A simple example system",
-        system_prompt=SYSTEM_PROMPT,
+        prompts=PromptConfig(system_prompt=SYSTEM_PROMPT),
         prompt=PROMPT,
         tools=[get_pwd, list_files],
         model_id=model_id,
         api_key=api_key,
-        subagents=[Subagent],
-        maxsteps=30,
-        logging_level=2,
+        topology=AgentTopology(subagents=(Subagent,)),
+        limits=ExecutionLimits(maxsteps=30),
+        output=OutputConfig(logging_level=2),
     )
     ManagerAgent.execution()
 

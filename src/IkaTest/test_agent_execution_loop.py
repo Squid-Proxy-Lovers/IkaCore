@@ -1,17 +1,17 @@
 """Behavioral contracts shared by simple agents and staged agents."""
-
 import json
 from copy import deepcopy
 from unittest.mock import MagicMock
 
 import pytest
 
-from IkaCore import IkaBaseAgent, IkaStage
+from IkaCore import IkaBaseAgent, IkaStage, OutputConfig
 from IkaCore.execution_types import AgentChatTurn, ExecutionLoopState
 from IkaModel.base import AgentEndException
 from IkaModel.execution_hooks import ExecutionHooks, execution_hooks
 from IkaModel.request_control import check_request_controls, request_controls
 from IkaModel.runtime_errors import IkaRequestCancelled
+from IkaTest.agent_config_fixtures import agent_kwargs
 
 
 def _call(name, text='done'):
@@ -32,7 +32,7 @@ def scenario(monkeypatch):
         defaults.update(options)
         agent = IkaBaseAgent('fixture', 'fixture', 'test task', model_id='gpt-4o', api_key='fixture',
                             Stages=[IkaStage('phase', 'stage task', [])] if staged else [],
-                            show_usage_level0=False, **defaults)
+                            output=OutputConfig(show_usage_level0=False), **agent_kwargs(defaults))
         agents.append(agent)
         calls = []
         iterator = iter(responses)

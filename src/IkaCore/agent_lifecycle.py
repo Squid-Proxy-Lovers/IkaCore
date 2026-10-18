@@ -10,7 +10,11 @@ if TYPE_CHECKING:
 
 
 class _WorkflowContextState(Protocol):
-    message_history: Dict[str, Dict[str, object]]
+    @property
+    def message_history(self) -> Dict[str, Dict[str, object]]: ...
+
+    @message_history.setter
+    def message_history(self, value: Dict[str, Dict[str, object]]) -> None: ...
     Stages: List[IkaStage]
     start_prompt: Optional[str]
     end_prompt: Optional[str]
@@ -19,7 +23,11 @@ class _WorkflowContextState(Protocol):
 
 class _CloneConfigState(_WorkflowContextState, Protocol):
     name: str
-    prompt: str
+    @property
+    def prompt(self) -> str: ...
+
+    @prompt.setter
+    def prompt(self, value: str) -> None: ...
     system_prompt: Optional[str]
     tools: List[Any]
     model_id: str
@@ -29,7 +37,11 @@ class _CloneConfigState(_WorkflowContextState, Protocol):
     temperature: float
     subagents: List["IkaBaseAgent"]
     next_agent: Optional["IkaBaseAgent"]
-    maxsteps: int
+    @property
+    def maxsteps(self) -> int: ...
+
+    @maxsteps.setter
+    def maxsteps(self, value: int) -> None: ...
     step_timeout: int
     rate_limit_per_min: Optional[float]
     per_tool_rate_limit: Dict[str, float]
@@ -98,42 +110,20 @@ class AgentWorkflowContextMixin:
 class AgentCloneConfigMixin:
 
     def _clone_constructor_kwargs(self: _CloneConfigState, name: Optional[str], prompt: Optional[str]) -> dict:
+        from dataclasses import replace
+        config = getattr(self, "config")
         return {
-            "name": name or self.name,
-            "description": self.description,
+            "name": name or self.name, "description": self.description,
             "prompt": self.prompt if prompt is None else prompt,
-            "system_prompt": self.system_prompt,
-            "start_prompt": self.start_prompt,
-            "end_prompt": self.end_prompt,
-            "tools": list(self.tools),
-            "model_id": self.model_id,
-            "api_key": self.api_key,
-            "api_url": self.api_url,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "use_responses_api": getattr(self, "use_responses_api", True),
+            "model_id": self.model_id, "api_key": self.api_key, "tools": list(self.tools),
             "Stages": [self._clone_stage_for_run(stage) for stage in self.Stages],
-            "subagents": list(self.subagents),
-            "next_agent": self.next_agent,
-            "maxsteps": self.maxsteps,
-            "step_timeout": self.step_timeout,
-            "rate_limit_per_min": self.rate_limit_per_min,
-            "per_tool_rate_limit": dict(self.per_tool_rate_limit),
-            "memory": self.memory,
-            "memory_access": deepcopy(self.memory_access),
-            "final_answer_check": None,
-            "logging_level": 0,
-            "logging_file": self.logging_file,
-            "summarize_final": self.summarize_final,
-            "use_async": self.use_async,
-            "max_tool_rounds": self.max_tool_rounds,
-            "max_tool_calls": getattr(self, "max_tool_calls", None),
-            "max_step_extensions": getattr(self, "max_step_extensions", 2),
-            "extend_steps_by": getattr(self, "extend_steps_by", 3),
-            "max_stage_extensions": getattr(self, "max_stage_extensions", 2),
-            "extend_stage_steps_by": getattr(self, "extend_stage_steps_by", 3),
-            "reasoning_effort": getattr(self, "reasoning_effort", None),
+            "provider": config.provider, "prompts": config.prompts,
+            "limits": replace(config.limits, maxsteps=self.maxsteps),
+            "policy": replace(config.policy, final_answer_checks=()),
+            "topology": config.topology, "output": replace(config.output, logging_level=0),
+            "memory": config.memory,
         }
+
 
 
 class AgentCloneStateMixin(AgentCloneConfigMixin):

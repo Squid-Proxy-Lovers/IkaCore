@@ -6,6 +6,8 @@ import asyncio
 import json
 from pathlib import Path
 
+from IkaCore import ExecutionLimits, ExecutionPolicy, OutputConfig, ProviderConfig
+
 
 def setup(case: str, directory: Path):
     import httpx
@@ -37,9 +39,8 @@ def setup(case: str, directory: Path):
 def make_agent(asynchronous=False):
     from IkaCore import IkaBaseAgent
     return IkaBaseAgent(name='benchmark', description='offline benchmark', prompt='finish', model_id='gpt-4o',
-                        api_key='benchmark-placeholder', api_url='https://benchmark.invalid/v1/responses',
-                        logging_level=0, show_usage_level0=False, use_async=asynchronous, maxsteps=1,
-                        max_step_extensions=0)
+                        api_key='benchmark-placeholder', provider=ProviderConfig(api_url='https://benchmark.invalid/v1/responses'),
+                        output=OutputConfig(logging_level=0, show_usage_level0=False), policy=ExecutionPolicy(use_async=asynchronous, max_step_extensions=0), limits=ExecutionLimits(maxsteps=1))
 
 
 def request_case(case, directory, httpx):

@@ -75,6 +75,13 @@ The permanent suite also checks these behaviors across both execution modes.
 ## Breaking changes and migration
 
 | Previous call or behavior | V2 behavior / migration |
+| Flat `api_url`, `max_tokens`, `temperature`, `use_responses_api`, `reasoning_effort` | `provider=ProviderConfig(...)` |
+| Flat `system_prompt`, `start_prompt`, `end_prompt` | `prompts=PromptConfig(...)` |
+| Flat `maxsteps`, `step_timeout`, tool budgets and rate limits | `limits=ExecutionLimits(...)` |
+| Flat `final_answer_check`, extension settings and `use_async` | `policy=ExecutionPolicy(final_answer_checks=(check,), ...)`; validation retries and extra steps are explicit. |
+| Flat `subagents`, `next_agent` | `topology=AgentTopology(subagents=(child,), next_agent=...)` |
+| Flat logging/usage/summary settings | `output=OutputConfig(...)` |
+| Configuration mixed with live counters/history | `agent.config` is frozen; `agent.state` stores the current run's budgets, transcript, usage and replay state. |
 | --- | --- |
 | `CheckpointStore`, `load_checkpoint()`, `checkpoint=True`, `checkpoint_db_path=...`, stage `checkpoint` | Removed. Call `agent.enable_snapshots(path)` or `workflow.enable_snapshots(path)`. V1 checkpoint databases are not converted. |
 | `agent.execution(checkpoint_uid=...)` / returned `checkpoint_uid` | Call `agent.resume_from_snapshot(snapshot_id, resume_input=...)`; returned IDs are `snapshot_id`. |

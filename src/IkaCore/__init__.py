@@ -6,6 +6,14 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from IkaCore.agents import IkaBaseAgent as IkaBaseAgent
+    from IkaCore.config import AgentConfig as AgentConfig
+    from IkaCore.config import AgentTopology as AgentTopology
+    from IkaCore.config import ExecutionLimits as ExecutionLimits
+    from IkaCore.config import ExecutionPolicy as ExecutionPolicy
+    from IkaCore.config import MemoryConfig as MemoryConfig
+    from IkaCore.config import OutputConfig as OutputConfig
+    from IkaCore.config import PromptConfig as PromptConfig
+    from IkaCore.config import ProviderConfig as ProviderConfig
     from IkaCore.runtime_control import RuntimeControl as RuntimeControl
     from IkaCore.snapshot_store import SnapshotStore as SnapshotStore
     from IkaCore.stages import IkaStage as IkaStage
@@ -21,6 +29,15 @@ except PackageNotFoundError:
     __version__ = "2.0.0"
 
 __all__ = [
+    "AgentConfig",
+    "ProviderConfig",
+    "PromptConfig",
+    "ExecutionLimits",
+    "ExecutionPolicy",
+    "AgentTopology",
+    "OutputConfig",
+    "MemoryConfig",
+
     "__version__",
     "IkaBaseAgent",
     "IkaStage",
@@ -34,6 +51,15 @@ __all__ = [
 ]
 
 _EXPORTS: dict[str, tuple[str, str]] = {
+    "AgentConfig": ("IkaCore.config", "AgentConfig"),
+    "ProviderConfig": ("IkaCore.config", "ProviderConfig"),
+    "PromptConfig": ("IkaCore.config", "PromptConfig"),
+    "ExecutionLimits": ("IkaCore.config", "ExecutionLimits"),
+    "ExecutionPolicy": ("IkaCore.config", "ExecutionPolicy"),
+    "AgentTopology": ("IkaCore.config", "AgentTopology"),
+    "OutputConfig": ("IkaCore.config", "OutputConfig"),
+    "MemoryConfig": ("IkaCore.config", "MemoryConfig"),
+
     "IkaBaseAgent": ("IkaCore.agents", "IkaBaseAgent"),
     "IkaStage": ("IkaCore.stages", "IkaStage"),
     "IkaTools": ("IkaCore.tools", "IkaTools"),

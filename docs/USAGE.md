@@ -222,6 +222,7 @@ with literal substring matching. It needs no Mem0 dependency or credentials, and
 lasts only for the lifetime of the backend instance.
 
 ```python
+from IkaCore import MemoryConfig, ProviderConfig
 from datetime import datetime
 from typing import Any
 
@@ -258,8 +259,7 @@ agent = IkaBaseAgent(
     prompt="Analyze and remember relevant results.",
     model_id="gpt-4o-mini",
     api_key="...",
-    memory=True,
-    memory_access=memory_access,
+    memory=MemoryConfig(enabled=True, access=memory_access),
 )
 agent.short_term_memory = STMemory(storage=LocalStorage())
 agent.short_term_memory.agent = agent.name
@@ -295,13 +295,14 @@ Default behavior:
 Example:
 
 ```python
+from IkaCore import ProviderConfig
 agent = IkaBaseAgent(
     name="chat_agent",
     description="Uses OpenAI chat completions",
     prompt="Reply briefly.",
     model_id="gpt-4o-mini",
     api_key="...",
-    use_responses_api=False,
+    provider=ProviderConfig(use_responses_api=False),
 )
 ```
 
@@ -312,6 +313,7 @@ IkaCore supports the Codex backend at `https://chatgpt.com/backend-api/codex/res
 The provider does not read local credentials automatically. `api_key` is treated as the literal bearer token, matching the other providers. You can source that bearer from an environment variable, a secret store, or the optional `codex_auth.get_bearer()` helper.
 
 ```python
+from IkaCore import ProviderConfig
 import os
 
 from IkaCore import IkaBaseAgent
@@ -325,7 +327,7 @@ agent = IkaBaseAgent(
     prompt="Reply briefly.",
     model_id="gpt-5.3-codex",
     api_key=bearer,
-    api_url=CODEX_API_URL,
+    provider=ProviderConfig(api_url=CODEX_API_URL),
 )
 ```
 

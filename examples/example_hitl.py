@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from IkaCore import IkaBaseAgent, IkaStage, IkaTools
+from IkaCore import ExecutionLimits, IkaBaseAgent, IkaStage, IkaTools, OutputConfig, PromptConfig
 
 SYSTEM_PROMPT = """You are a general purpose agent. You can use the tools provided to you to achieve your goal."""
 
@@ -180,14 +180,14 @@ def main():
     agent = IkaBaseAgent(
         name="example_system",
         description="A simple example system",
-        system_prompt=SYSTEM_PROMPT,
+        prompts=PromptConfig(system_prompt=SYSTEM_PROMPT),
         prompt=PROMPT,
         tools=[],
         Stages=[list_stage, read_stage, summarize_stage],
         model_id=model_id,
         api_key=api_key,
-        logging_level=2,
-        maxsteps=100,
+        output=OutputConfig(logging_level=2),
+        limits=ExecutionLimits(maxsteps=100),
     )
     agent.enable_snapshots("runtime-data/example-hitl.db")
     result = agent.execution()
