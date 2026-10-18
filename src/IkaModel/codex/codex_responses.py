@@ -32,6 +32,7 @@ from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict,
 
 from ..base import AgentTool, BareBoneModel
 from ..model_metadata import CODEX_KNOWN_MODELS as CODEX_KNOWN_MODELS
+from ..reasoning_replay import ordered_replay_messages, replay_items
 from ..tool_output import codex_output_limit_enabled, truncate_codex_tool_output
 from ..tool_schema import build_provider_tool_payload
 
@@ -117,6 +118,9 @@ def _codex_tool_output_item(message: JsonDict) -> JsonDict:
 
 
 def _codex_assistant_items(message: JsonDict) -> list[JsonDict]:
+    native_items = replay_items(message, "responses")
+    if native_items is not None:
+        return native_items
     content = message.get("content", "")
     raw_tool_calls = message.get("tool_calls")
     tool_calls = cast(list[object], raw_tool_calls) if isinstance(raw_tool_calls, list) else []
@@ -179,15 +183,8 @@ def _codex_items_for_message(message: object) -> list[JsonDict]:
 
 
 def _build_codex_input_items(messages: list[JsonDict], message_history: JsonDict) -> list[JsonDict]:
-    input_items: list[JsonDict] = []
-    _append_codex_context(input_items, message_history)
-    first_input_content = string_value(history_section(message_history, "first_input").get("message"))
-    skip_first = _first_message_matches(messages, first_input_content)
-    for index, message in enumerate(messages):
-        if skip_first and index == 0:
-            continue
-        input_items.extend(_codex_items_for_message(message))
-    return input_items
+    return [item for message in ordered_replay_messages(messages, message_history)
+            for item in _codex_items_for_message(message)]
 
 
 def _required_non_control_tools(agent_tools: list[AgentTool]) -> list[AgentTool]:
@@ -232,6 +229,7 @@ def codex_responses_fill_payload(
         "input": _build_codex_input_items(messages, message_history),
         "stream": True,   # codex backend rejects stream:false; see chat_helpers_codex
         "store": False,
+        "include": ["reasoning.encrypted_content"],
     }
     if instructions:
         payload["instructions"] = instructions

@@ -89,7 +89,7 @@ class _SSEDecoder:
                 try:
                     return self.event, json.loads(data)
                 except json.JSONDecodeError:
-                    LOG.debug("Skipping unparseable SSE data line: %r", data[:200])
+                    LOG.debug("Skipping unparseable SSE data line")
         return None
 
 

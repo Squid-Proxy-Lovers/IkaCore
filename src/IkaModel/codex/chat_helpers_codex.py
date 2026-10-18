@@ -33,6 +33,7 @@ from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict,
 from ..base import BareBoneModel
 from ..codex_constants import CODEX_API_URL
 from ..model_metadata import CODEX_KNOWN_MODELS
+from ..reasoning_replay import take_response_replay
 from ..request_control import check_request_controls, effective_max_retries, effective_timeout, request_lifecycle_active
 from ..request_interface import agent_tools_for_payload
 from ..request_lifecycle import sleep_with_controls
@@ -373,9 +374,8 @@ def parse_codex_response(
                 },
             })
         elif item_type == "reasoning":
-            # The codex backend serves reasoning summaries (and optionally
-            # encrypted_content). We only keep the summary text here; the
-            # encrypted_content carry-over is a future optimization.
+            # Display summaries only. Opaque items are captured separately by
+            # parse_provider_response when the caller supplies message_history.
             raw_summary: object = item_data.get("summary") or []
             summary = cast(list[object], raw_summary) if isinstance(raw_summary, list) else []
             if summary:
@@ -415,6 +415,9 @@ def append_codex_tool_messages(
     ``function_call_output`` form when it next reads ``messages``.
     """
     assistant_msg: JsonDict = {"role": "assistant", "content": content}
+    provider_data = take_response_replay(message_history)
+    if provider_data:
+        assistant_msg["provider_data"] = provider_data
     if reasoning_content:
         assistant_msg["reasoning_content"] = reasoning_content
     if executed_tool_call_list:

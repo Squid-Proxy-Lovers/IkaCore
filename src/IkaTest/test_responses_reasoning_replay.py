@@ -24,7 +24,8 @@ OUTPUT = [REASON, {"type": "message", "id": "msg_1", "role": "assistant",
 FINAL = {"output": [{"type": "message", "id": "msg_final", "role": "assistant",
                      "content": [{"type": "output_text", "text": "done"}]}],
          "usage": {"input_tokens": 4, "output_tokens": 2}}
-URLS = {"openai_responses": "https://api.openai.com/v1/responses"}
+URLS = {"codex": "https://chatgpt.com/backend-api/codex/responses",
+        "openai_responses": "https://api.openai.com/v1/responses"}
 
 
 def model_for(provider):

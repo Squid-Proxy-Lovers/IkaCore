@@ -23,3 +23,21 @@ Snapshots and explicit JSON request/history debug files may persist it.
 
 Sources: [reasoning and stateless replay](https://developers.openai.com/api/docs/guides/reasoning),
 [Responses item schema and completed SSE items](https://developers.openai.com/api/reference/resources/responses/methods/retrieve).
+
+## Codex
+
+Codex shares the Responses history envelope. It always sends stream: true,
+store: false and include: ["reasoning.encrypted_content"], without unsupported
+max_output_tokens or temperature fields. Completed SSE output items carry the
+cipher; output_item.added may contain incomplete data and is never used for replay.
+Malformed SSE data is no longer echoed into debug output.
+
+The 21 benchmark checksum checks remain in place. Only the three Codex reasoning
+model request fixtures change: codex:10:0, codex:100:10 and codex:1000:10. In every
+case the sole difference is the required encrypted-reasoning include. Removing
+that field reproduces each original SHA-256 exactly. The other 18 checksums,
+including the three non-reasoning OpenAI Responses fixtures, remain unchanged.
+
+Sources: the OpenAI Responses references above and the existing Codex endpoint
+request contract in codex_responses.py. Endpoint compatibility is checked separately
+by the bounded live replay probe when local login and network are available.
