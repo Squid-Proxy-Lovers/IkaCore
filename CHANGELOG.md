@@ -7,6 +7,9 @@ V2 intentionally breaks compatibility with v1. See the
 
 ### Fixed (final core review)
 
+- Snapshots persist each pending chat message and whether it has entered the transcript,
+  preserving later turns exactly once when a fresh agent restores any model/frame boundary.
+
 - Delegated cancellation and deadlines propagate to callers. Optional memory operations,
   filters, and output sinks also preserve request control exceptions instead of hiding them.
 

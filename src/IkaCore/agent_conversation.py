@@ -14,6 +14,7 @@ def replace_prompt(agent: IkaBaseAgent, value: str) -> None:
     """Assigning prompt starts a fresh task; send() retains the conversation."""
     agent.state.prompt = value
     agent.state.turn_message = None
+    agent.state.turn_message_consumed = False
     agent.state.message_history = initial_message_history(getattr(agent, "system_prompt", None))
     agent.state._resume_state = None
     agent._snapshot_resume_messages = None
@@ -42,6 +43,7 @@ def send(agent: IkaBaseAgent, message: str) -> dict[str, Any]:
             raise ValueError("Resume the pending turn before sending a new message")
     agent.state.prompt = message
     agent.state.turn_message = message
+    agent.state.turn_message_consumed = False
     agent.maxsteps = agent.config.limits.maxsteps
     return agent.execution()
 

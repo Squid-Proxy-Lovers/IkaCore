@@ -154,6 +154,7 @@ class AgentPreparation:
         message_history = agent.message_history
         stage = agent.Stages[stage_index]
         agent.state.turn_message = None
+        agent.state.turn_message_consumed = True
         system_prompt = agent.preparation._stage_system_prompt(stage)
         history_section(message_history, "system")["message"] = system_prompt
         agent_tools = agent.build_stage(stage)
@@ -207,11 +208,11 @@ class AgentPreparation:
         initial = not history_section(message_history, "messages")
         if not first_msg or initial:
             history_section(message_history, "first_input")["message"] = start_prompt
-        if turn_message or not first_msg or initial:
+        if (turn_message and not agent.state.turn_message_consumed) or not first_msg or initial:
             from uuid import uuid4
             history_section(message_history, "messages")[str(uuid4())] = {
                 "type": "user_input", "message": start_prompt, "tokens": max(1, len(start_prompt) // 4)}
-        agent.state.turn_message = None
+        agent.state.turn_message_consumed = True
         barebone_model = agent.get_barebone(
             system_prompt, dynamic_tools, parent_hierarchy=current_hierarchy, content_prompt_override=start_prompt
         )

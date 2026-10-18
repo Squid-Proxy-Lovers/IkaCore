@@ -142,6 +142,7 @@ class AgentPolicy:
         descriptions = [f"{_string_attr(check, '__name__')}: {getattr(check, '__doc__', None) or 'Return True'}"
                         for check in agent.final_answer_checks if _string_attr(check, "__name__") in failed]
         agent.state.validation_attempts = attempt
+        agent.state.turn_message_consumed = False
         agent.state.turn_message = (
             f"Correct your previous final answer: {output.get('final_message', '')}\n"
             "Failed check requirements:\n" + "\n".join(descriptions)

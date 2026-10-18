@@ -46,6 +46,8 @@ def capture_state(session: SnapshotSession, label: str, payload: dict[str, Any])
         "last_content": session.last_content, "message_history": deepcopy(session.agent.message_history),
         "maxsteps": session.agent.maxsteps,
         "prompt": getattr(session.agent, "prompt", ""),
+        "turn_message": session.agent.state.turn_message,
+        "turn_message_consumed": session.agent.state.turn_message_consumed,
         "compaction_count": getattr(session.agent, "compaction_count", 0),
         "validation_attempts": getattr(getattr(session.agent, "state", None), "validation_attempts", 0),
         "validation_remaining_steps": getattr(session.agent.state, "remaining_steps", None),

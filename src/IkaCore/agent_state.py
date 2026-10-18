@@ -10,6 +10,7 @@ class AgentRunState:
     maxsteps: int = 100
     prompt: str = ""
     turn_message: str | None = None
+    turn_message_consumed: bool = False
     compaction_count: int = 0
     validation_attempts: int = 0
     validation_maxsteps: int | None = None

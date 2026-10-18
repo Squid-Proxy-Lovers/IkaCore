@@ -101,6 +101,8 @@ class AgentSnapshots:
         agent.maxsteps = state.get("maxsteps", agent.maxsteps)
         agent.state.remaining_steps = state.get("validation_remaining_steps")
         agent.state.prompt = state.get("prompt", agent.prompt)
+        agent.state.turn_message = state.get("turn_message")
+        agent.state.turn_message_consumed = state.get("turn_message_consumed", True)
         agent.state.compaction_count = state.get("compaction_count", 0)
         agent.state.validation_attempts = state.get("validation_attempts", 0)
         agent.state.validation_maxsteps = state.get("validation_maxsteps")

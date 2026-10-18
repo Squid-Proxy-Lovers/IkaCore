@@ -327,3 +327,32 @@ def test_output_sink_propagates_request_controls():
             _route_to_sink(None, "rendered")
     finally:
         set_output_sink(None)
+
+
+@pytest.mark.parametrize("boundary", ["frame_entry", "pre_model", "post_model"])
+@pytest.mark.parametrize("turn_number", [2, 3])
+def test_fresh_restore_preserves_pending_later_chat_turn(make_agent, tmp_path, boundary, turn_number):
+    agent = make_agent()
+    db = str(tmp_path / "chat.db")
+    agent.enable_snapshots(db)
+    with MockProvider(responder=lambda u, p: provider_response(u, p, end("previous answer"))):
+        agent.execution()
+        if turn_number == 3:
+            agent.send("SECOND_COMPLETED_TURN")
+    message = f"TURN_{turn_number}_MUST_APPEAR_ONCE"
+    agent.request_pause_at(boundary)
+    with MockProvider(responder=lambda u, p: provider_response(u, p, end("saved answer"))):
+        paused = agent.send(message)
+    assert paused["status"] == "paused"
+    fresh = make_agent()
+    fresh.enable_snapshots(db)
+    with MockProvider(responder=lambda u, p: provider_response(u, p, end("restored answer"))) as mock:
+        result = fresh.resume_from_snapshot(paused["snapshot_id"])
+    assert fresh.prompt == message
+    assert result["final_message"] == ("saved answer" if boundary == "post_model" else "restored answer")
+    inputs = [item["message"] for item in fresh.transcript["messages"].values() if item.get("type") == "user_input"]
+    assert sum(message in item for item in inputs) == 1
+    if boundary != "post_model":
+        assert message in json.dumps(mock.requests[-1])
+    else:
+        assert not mock.requests
