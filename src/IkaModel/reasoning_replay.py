@@ -106,8 +106,8 @@ def _merge_live_assistants(entries: list[JsonDict], messages: list[JsonDict]) ->
             kept.append(entry)
         else:
             matched.add(index)
-            if entry.get("provider_data"):
-                live[index] = {**live[index], "provider_data": entry["provider_data"]}
+            fields = {key: entry[key] for key in ("provider_data", "reasoning_content") if key in entry}
+            live[index] = {**live[index], **deepcopy(fields)}
     return list(reversed(kept)), live
 
 
