@@ -1,4 +1,4 @@
-"""The same 42 normalized traces produced by the unmodified dc9efbd runtime."""
+"""Historical scenarios with reviewed v2 corrections to persisted step accounting."""
 import hashlib
 import importlib.util
 import json
@@ -15,7 +15,8 @@ def test_execution_parity_with_dc9efbd(staged, tmp_path):
     spec = importlib.util.spec_from_file_location('execution_parity_fixture', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    baseline = json.loads((Path(__file__).parent / 'fixtures/execution-parity-dc9efbd.json').read_text())
+    fixtures = Path(__file__).parent / 'fixtures'
+    corrected = json.loads((fixtures / 'execution-parity-v2-core-fixes.json').read_text())
     for index, (name, maxsteps, extensions, pause) in enumerate(module.cases()):
         folder = tmp_path / str(index)
         folder.mkdir()
@@ -24,4 +25,11 @@ def test_execution_parity_with_dc9efbd(staged, tmp_path):
         trace = module.normalize(raw)
         actual = hashlib.sha256(json.dumps(trace, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         case = f'{"stage" if staged else "simple"}:{name}'
-        assert actual == baseline['sha256'][case], f'execution diverged from dc9efbd: {case}\n{trace}'
+        assert actual == corrected['sha256'][case], f'execution diverged from reviewed budget traces: {case}\n{trace}'
+        # Keep the pre-fix model calls, outputs, usage and summaries byte-identical
+        # in every scenario that only gained corrected snapshot accounting.
+        if case in corrected['preserved_behavior_sha256']:
+            observable = {key: value for key, value in trace.items() if key != 'snapshots'}
+            digest = hashlib.sha256(json.dumps(observable, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+            assert digest == corrected['preserved_behavior_sha256'][case], case
+        assert all(boundary.get('remaining_steps', 0) >= 0 for boundary in trace['snapshots'])

@@ -103,8 +103,7 @@ zero attempts. A failed check permits at most `validation_retries` correction pa
 Corrections use the existing transcript and only `agent_end`; they cannot repeat application
 tools or stages. Corrections retain unspent task steps and receive `validation_extra_steps`
 additional steps per retry. Consumed task steps are not replenished. The configured extension
-policy still applies to simple correction
-passes. With `fail_closed=True`, exhaustion raises `IkaCore.FinalAnswerValidationError`;
+policy still applies to simple correction passes. With `fail_closed=True`, exhaustion raises `IkaCore.FinalAnswerValidationError`;
 `.result` retains the rejected answer and status. The default returns that result with
 `validation.status == "failed"`. Consumers must inspect it before accepting an answer.
 Snapshot replay preserves correction mode, consumed steps and the retry budget.
