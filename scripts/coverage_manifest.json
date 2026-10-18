@@ -154,7 +154,9 @@
         "src/IkaTest/test_agent_snapshots.py::test_resume_does_not_require_approval_for_effects_before_snapshot",
         "src/IkaTest/test_agent_snapshots.py::test_nested_agent_snapshots_belong_to_child_and_support_frame_restart",
         "src/IkaTest/test_snapshot_resume_state.py::test_hitl_resume_consumes_saved_transcript_before_entering_next_stage",
-        "src/IkaTest/test_snapshot_resume_state.py::test_fresh_execution_starts_at_first_stage_after_replay"
+        "src/IkaTest/test_snapshot_resume_state.py::test_fresh_execution_starts_at_first_stage_after_replay",
+        "src/IkaTest/test_snapshot_resume_state.py::test_snapshot_without_loop_state_uses_only_remaining_budget",
+        "src/IkaTest/test_snapshot_resume_state.py::test_snapshot_without_loop_state_subtracts_only_current_stage_steps"
       ],
       "known_gap": "In-process mocked models; mid-tool replay restarts execution rather than restoring Python stacks.",
       "min_lines": 95,

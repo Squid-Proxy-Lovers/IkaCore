@@ -297,8 +297,9 @@ class ExecutionDispatchRuntimeMixin(ValidatedSimpleExecutionMixin):
             raw_message_history = resume_cp.get("message_history")
             if isinstance(raw_message_history, dict):
                 self.message_history = cast(JsonDict, raw_message_history)
-            maxsteps = resume_cp.get("maxsteps", resume_cp.get("remaining_steps", self.maxsteps))
-            self.maxsteps = max(1, maxsteps if isinstance(maxsteps, int) else self.maxsteps)
+            budget = "maxsteps" if "loop_state" in resume_cp else "remaining_steps"
+            maxsteps = resume_cp.get(budget, self.maxsteps)
+            self.maxsteps = max(0, maxsteps if isinstance(maxsteps, int) else self.maxsteps)
 
         if not self.final_answer_checks:
             return self._run_simple_final_output()

@@ -844,7 +844,7 @@ class TestExecutionRuntimeHelpers:
         simple._run_simple_final_output = MagicMock(return_value={"final_message": "simple"})
         assert simple.execution() == {"final_message": "simple"}
         assert simple.message_history is resume_history
-        assert simple.maxsteps == 1
+        assert simple.maxsteps == 0  # An exhausted older snapshot must not regain a model turn.
 
         validated = _minimal_agent()
         validated.final_answer_checks = [lambda _out: True]

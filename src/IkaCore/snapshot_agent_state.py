@@ -5,6 +5,7 @@
 import uuid
 from typing import Any, Optional, cast
 
+from IkaCore.agent_execution_helpers import stage_step_limit
 from IkaCore.agent_runtime_payloads import JsonDict, history_section
 from IkaCore.execution_types import ExecutionLoopState
 from IkaModel.base import AgentEndException
@@ -17,10 +18,21 @@ def clear_resume_state(agent: Any) -> None:
 
 
 def restore_loop_state(agent: Any, step_limit: int, remaining_steps: int) -> ExecutionLoopState:
-    resume = getattr(agent, "_resume_state", None)
-    saved = cast(JsonDict, resume).pop("loop_state", None) if isinstance(resume, dict) else None
-    state = ExecutionLoopState(**saved) if saved is not None else ExecutionLoopState(step_limit, remaining_steps=remaining_steps)
+    raw_resume = getattr(agent, "_resume_state", None)
+    resume = cast(JsonDict, raw_resume) if isinstance(raw_resume, dict) else None
+    saved = resume.get("loop_state") if resume is not None else None
     session = getattr(agent, "_snapshot_runtime", None)
+    if saved is None and resume is not None and resume.get("scope") in {"stage", "hitl"} and session is not None:
+        # Older v2 snapshots have remaining budgets but no counters. The stage's
+        # entry boundary lets us subtract its consumed allowance without migration.
+        entries: list[JsonDict] = session.store.list_snapshots(session.run_id, session.stage_frame_id)
+        entry: JsonDict = next((s["state_json"] for s in entries if s["snapshot_kind"] == "frame_entry"), dict[str, Any]())
+        initial = entry.get("remaining_steps", remaining_steps)
+        consumed = max(0, initial - remaining_steps)
+        stage = agent.Stages[resume.get("stage_index", 0)]
+        step_limit = max(0, stage_step_limit(stage, initial) - consumed)
+    state = ExecutionLoopState(**saved) if saved is not None else ExecutionLoopState(step_limit, remaining_steps=remaining_steps)
+    agent._resume_state = None
     if session is not None:
         session.loop_state = state
     return state

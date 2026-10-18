@@ -185,3 +185,52 @@ def test_exhausted_hitl_resume_extends_or_finalizes_before_stage_completion(
     assert any(item.get('message') == 'YES' for item in summaries[0][0]['messages'].values())
     if extensions:
         assert {'role': 'user', 'content': 'YES'} in calls[1]
+
+
+@pytest.mark.parametrize('staged', [False, True])
+@pytest.mark.parametrize('use_async', [False, True])
+def test_snapshot_without_loop_state_uses_only_remaining_budget(agent_factory, monkeypatch, staged, use_async):
+    options = {'maxsteps': 6 if staged else 3, 'use_async': use_async,
+               'Stages': [IkaStage('phase', 'work', [], stage_max_step=3)] if staged else []}
+    agent = agent_factory(**options)
+    calls = []
+    def chat(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            agent.request_pause_at('pre_model')
+        return _turn()
+    async def async_chat(*args, **kwargs):
+        return chat(*args, **kwargs)
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    monkeypatch.setattr('IkaCore.agent_chat_support.async_chat', async_chat)
+    paused = agent.execution()
+    store = agent._snapshot_runtime.store
+    snapshot = store.load_snapshot(paused['snapshot_id'])
+    old_state = snapshot['state_json']
+    del old_state['loop_state']
+    historical = store.create_snapshot(snapshot['run_id'], snapshot['frame_id'], 'pre_model', old_state)
+    other = agent_factory(**options)
+    other.enable_snapshots(store.db_path)
+    other.resume_from_snapshot(historical)
+    assert len(calls) == 3
+
+
+def test_snapshot_without_loop_state_subtracts_only_current_stage_steps(agent_factory, monkeypatch):
+    agent = agent_factory(maxsteps=6, Stages=[IkaStage('first', 'start', [], stage_max_step=1),
+                                             IkaStage('second', 'finish', [], stage_max_step=3)])
+    calls = []
+    def chat(*args, **kwargs):
+        calls.append(kwargs['current_stage_index'])
+        if len(calls) == 2:
+            agent.request_pause_at('pre_model')
+        return _turn()
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    paused = agent.execution()
+    store = agent._snapshot_runtime.store
+    snapshot = store.load_snapshot(paused['snapshot_id'])
+    state = snapshot['state_json']
+    del state['loop_state']
+    historical = store.create_snapshot(snapshot['run_id'], snapshot['frame_id'], 'pre_model', state)
+    agent.clear_pause_requests()
+    agent.resume_from_snapshot(historical)
+    assert calls == [0, 1, 1, 1]
