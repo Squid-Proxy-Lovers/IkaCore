@@ -7,6 +7,9 @@ V2 intentionally breaks compatibility with v1. See the
 
 ### Fixed (final core review)
 
+- Delegated cancellation and deadlines propagate to callers. Optional memory operations,
+  filters, and output sinks also preserve request control exceptions instead of hiding them.
+
 - Delegated HITL and checkpoint pauses suspend the parent with the child snapshot identity.
   Parent replay routes answers to the child before continuing; repeated questions and fresh
   restores retain that continuation. Without snapshots, pauses explicitly report nonresumability.

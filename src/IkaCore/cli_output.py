@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from threading import Lock, local
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Protocol, Tuple, cast
 
+from IkaModel.runtime_errors import IkaRequestControlError
+
 from .events import OutputType
 
 _stdout_lock = Lock()
@@ -38,6 +40,8 @@ def _route_to_sink(ctx: "OutputContext", rendered: str) -> None:
         return
     try:
         _output_sink(ctx, rendered)
+    except IkaRequestControlError:
+        raise
     except Exception:
         pass
 

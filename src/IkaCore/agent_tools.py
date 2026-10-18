@@ -10,6 +10,7 @@ from IkaCore.stages import IkaStage
 from IkaCore.tool_runtime_metadata import runtime_executor
 from IkaCore.tools import IkaTools, ToolExecutor, ToolParameters
 from IkaModel.base import AgentTool, HumanInputRequired, ToolArgs
+from IkaModel.runtime_errors import IkaRequestControlError
 
 "AgentTools component; owns one execution responsibility."
 ToolExecutorMap = dict[str, ToolExecutor]
@@ -186,7 +187,7 @@ class AgentTools:
                 return json.dumps({"error": "No input provided for subagent"})
             try:
                 return agent.tool_runtime._run_subagent_tool(subagent, task_input, parent_hierarchy)
-            except HumanInputRequired:
+            except (HumanInputRequired, IkaRequestControlError):
                 raise
             except Exception as e:
                 error_msg = f"Error executing subagent '{subagent.name}': {str(e)}"

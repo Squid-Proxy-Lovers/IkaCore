@@ -7,6 +7,7 @@ from typing import Any, Optional, cast
 
 from IkaCore.tools import ToolExecutor
 from IkaMem import LTMemItem, LTMemory, STMemory
+from IkaModel.runtime_errors import IkaRequestControlError
 
 JsonDict = dict[str, Any]
 ToolExecutorMap = dict[str, ToolExecutor]
@@ -29,6 +30,8 @@ class MemoryOperations:
         try:
             self.short_term_memory.save(data, metadata or {})
             return f'saved to short-term memory: {data[:50]}...'
+        except IkaRequestControlError:
+            raise
         except Exception as e:
             return f'error saving to short-term memory: {str(e)}'
 
@@ -52,6 +55,8 @@ class MemoryOperations:
                 else:
                     structured.append({'data': str(result), 'metadata': {}})
             return {'query': query, 'limit': limit, 'score_threshold': score_threshold, 'count': len(structured), 'results': structured}
+        except IkaRequestControlError:
+            raise
         except Exception as e:
             return {'error': f'error searching short-term memory: {str(e)}'}
 
@@ -69,6 +74,8 @@ class MemoryOperations:
             item = LTMemItem(agent=self.name, task=task, expected_output=output, datetime=datetime.now().isoformat(), quality=1.0, metadata=metadata)
             self.long_term_memory.save(item)
             return f'saved to long-term memory - task: {task[:30]}...'
+        except IkaRequestControlError:
+            raise
         except Exception as e:
             return f'error saving to long-term memory: {str(e)}'
 
@@ -85,6 +92,8 @@ class MemoryOperations:
             if filter_func:
                 try:
                     filtered: object = filter_func(results)
+                except IkaRequestControlError:
+                    raise
                 except Exception as e:
                     return {'error': f'long-term memory filter failed: {str(e)}'}
                 if not isinstance(filtered, list):
@@ -104,5 +113,7 @@ class MemoryOperations:
                 else:
                     structured.append({'task': str(result), 'output': '', 'metadata': {}})
             return {'query': query, 'limit': limit, 'score_threshold': score_threshold, 'count': len(structured), 'results': structured}
+        except IkaRequestControlError:
+            raise
         except Exception as e:
             return {'error': f'error searching long-term memory: {str(e)}'}

@@ -19,6 +19,7 @@ from IkaCore import (
     WorkflowNode,
 )
 from IkaCore.testing import MockProvider, provider_response
+from IkaModel import IkaRequestCancelled, IkaRequestDeadlineExceeded
 
 
 @pytest.fixture
@@ -265,3 +266,64 @@ def test_fork_preserves_nested_delegated_continuations(make_agent, tmp_path):
     assert result["final_message"] == "parent done"
     assert result["runtime"]["run_id"] != paused["runtime"]["run_id"]
     assert store.get_run(paused["runtime"]["run_id"])["status"] == "paused"
+
+
+@pytest.mark.parametrize("error_type", [IkaRequestCancelled, IkaRequestDeadlineExceeded])
+@pytest.mark.parametrize("use_async", [False, True])
+def test_delegated_request_controls_propagate(make_agent, tmp_path, error_type, use_async):
+    child = make_agent("child", "CHILD_TASK", policy=ExecutionPolicy.bounded(use_async=use_async))
+    parent = make_agent("parent", topology=AgentTopology(subagents=(child,)),
+                        policy=ExecutionPolicy.bounded(use_async=use_async))
+    store = parent.enable_snapshots(str(tmp_path / "cancel.db"))
+    calls = []
+    def respond(url, payload):
+        calls.append(payload)
+        if len(calls) == 1:
+            return provider_response(url, payload, ("child", {"input": "delegated work"}))
+        if len(calls) == 2:
+            raise error_type("child cancelled")
+        return provider_response(url, payload, end("should not succeed"))
+    with MockProvider(responder=respond), pytest.raises(error_type, match="child cancelled"):
+        parent.execution()
+    assert len(calls) == 2
+    assert "child cancelled" not in json.dumps(parent.transcript)
+    session = parent._snapshot_runtime
+    assert store.get_run(session.run_id)["status"] == "cancelled"
+
+
+@pytest.mark.parametrize("operation", ["save_short", "search_short", "save_long", "search_long", "filter"])
+def test_memory_operations_propagate_request_controls(operation):
+    from IkaMem.agent_memory import MemoryOperations
+
+    class Backend:
+        def save(self, *args, **kwargs):
+            raise IkaRequestCancelled("memory cancelled")
+        def search(self, *args, **kwargs):
+            if operation == "filter":
+                return []
+            raise IkaRequestCancelled("memory cancelled")
+    memory = MemoryOperations("test", Backend(), Backend())
+    def cancel_filter(results):
+        raise IkaRequestCancelled("memory cancelled")
+    calls = {
+        "save_short": lambda: memory.save_short_term("data"),
+        "search_short": lambda: memory.search_short_term("query"),
+        "save_long": lambda: memory.save_long_term({"task": "task", "output": "answer"}),
+        "search_long": lambda: memory.search_long_term("query"),
+        "filter": lambda: memory.search_long_term("query", filter_func=cancel_filter),
+    }
+    with pytest.raises(IkaRequestCancelled, match="memory cancelled"):
+        calls[operation]()
+
+
+def test_output_sink_propagates_request_controls():
+    from IkaCore.cli_output import _route_to_sink, set_output_sink
+
+    def cancel(ctx, rendered):
+        raise IkaRequestCancelled("sink cancelled")
+    set_output_sink(cancel)
+    try:
+        with pytest.raises(IkaRequestCancelled, match="sink cancelled"):
+            _route_to_sink(None, "rendered")
+    finally:
+        set_output_sink(None)
