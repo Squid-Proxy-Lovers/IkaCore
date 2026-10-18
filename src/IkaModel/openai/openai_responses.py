@@ -15,31 +15,6 @@ def _default_message_history() -> Dict[str, Any]:
     }
 
 
-def _message_content(message: Any) -> str:
-    if isinstance(message, dict):
-        return (message["content"] if "content" in message else str(message))
-    return str(message)
-
-
-def _should_skip_first_message(messages: List[Dict[str, Any]], first_input_content: str) -> bool:
-    return bool(first_input_content and messages and _message_content(messages[0]) == first_input_content)
-
-
-def _append_responses_context(input_items: List[Dict[str, Any]], message_history: Dict[str, Any]) -> None:
-    if message_history["summary"]["message"]:
-        input_items.append({
-            "type": "message",
-            "role": "assistant",
-            "content": message_history["summary"]["message"],
-        })
-    if message_history["first_input"]["message"]:
-        input_items.append({
-            "type": "message",
-            "role": "user",
-            "content": message_history["first_input"]["message"],
-        })
-
-
 def _tool_message_item(message: Dict[str, Any]) -> Dict[str, Any]:
     content = message.get("content", "")
     return {

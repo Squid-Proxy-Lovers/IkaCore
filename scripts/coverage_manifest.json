@@ -331,7 +331,8 @@
         "src/IkaTest/test_compaction_policy.py::test_opt_in_compaction_threshold_and_snapshot_boundaries_sync_and_async",
         "src/IkaTest/test_compaction_retention.py::test_controlled_compaction_contains_facts_and_keeps_pending_structure",
         "src/IkaTest/test_compaction_retention.py::test_compaction_also_bounds_the_live_request_buffer",
-        "src/IkaTest/test_compaction_retention.py::test_context_overflow_retry_uses_compacted_live_buffer"
+        "src/IkaTest/test_compaction_retention.py::test_context_overflow_retry_uses_compacted_live_buffer",
+        "src/IkaTest/test_reasoning_merge_contracts.py::test_compaction_keeps_every_reasoning_item_in_a_native_call_group"
       ],
       "known_gap": "Controlled fact fixtures, pairing, reasoning and live-buffer bounds are checked offline. Four bounded Codex fixtures scored 19/20 strict follow-up facts; one constraint answer missed the strict scorer. This does not establish general task retention.",
       "min_lines": 99,
@@ -393,7 +394,9 @@
         "src/IkaTest/test_anthropic_reasoning_replay.py::test_signed_and_redacted_blocks_replayed_verbatim",
         "src/IkaTest/test_gemini_reasoning_replay.py::test_gemini_keeps_each_signed_part_at_its_original_position",
         "src/IkaTest/test_openrouter_reasoning_replay.py::test_openrouter_reasoning_details_survive_tool_loop",
-        "src/IkaTest/test_reasoning_snapshot_replay.py::test_public_snapshot_resume_mid_tool_loop_preserves_reasoning"
+        "src/IkaTest/test_reasoning_snapshot_replay.py::test_public_snapshot_resume_mid_tool_loop_preserves_reasoning",
+        "src/IkaTest/test_reasoning_merge_contracts.py::test_malformed_native_reasoning_items_fail_at_parse_boundary",
+        "src/IkaTest/test_reasoning_merge_contracts.py::test_compaction_replays_reasoning_with_its_own_tool_exchange"
       ],
       "known_gap": "Provider schemas/metadata can drift; eight provider routes have an opt-in installed-wheel 15-case live matrix. Offline CI tests the harness with MockTransport; unsupported thinking/SSE capabilities are explicit skips.",
       "min_lines": 99,
@@ -411,7 +414,8 @@
         "src/IkaModel/chat_interface/chat_tool_loop_async.py",
         "src/IkaModel/chat_interface/chat_tool_loop_sync.py",
         "src/IkaModel/chat_interface/response_usage.py",
-        "src/IkaModel/chat_interface/types.py"
+        "src/IkaModel/chat_interface/types.py",
+        "src/IkaModel/chat_interface/debug_dump.py"
       ],
       "required_tests": [
         "src/IkaTest/test_chat_runtime.py::test_public_chat_dependency_override_does_not_leak_into_next_call",

@@ -36,6 +36,7 @@ STRICT_TYPE_FILES = (
     REPO_ROOT / "src" / "IkaModel" / "chat_interface" / "chat_runtime.py",
     REPO_ROOT / "src" / "IkaModel" / "chat_interface" / "chat_request.py",
     REPO_ROOT / "src" / "IkaModel" / "chat_interface" / "chat_response.py",
+    REPO_ROOT / "src" / "IkaModel" / "chat_interface" / "debug_dump.py",
     REPO_ROOT / "src" / "IkaModel" / "chat_interface" / "chat_tool_common.py",
     REPO_ROOT / "src" / "IkaModel" / "chat_interface" / "chat_tool_loop_async.py",
     REPO_ROOT / "src" / "IkaModel" / "chat_interface" / "chat_tool_loop_sync.py",

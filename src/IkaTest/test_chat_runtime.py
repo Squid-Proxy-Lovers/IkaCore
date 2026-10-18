@@ -12,6 +12,7 @@ from IkaModel.chat_interface import chat_runtime as cr
 from IkaModel.chat_interface import chat_tool_common as _test_chat_tool_common
 from IkaModel.chat_interface import chat_tool_loop_async as _test_chat_tool_loop_async
 from IkaModel.chat_interface import chat_tool_loop_sync as _test_chat_tool_loop_sync
+from IkaModel.chat_interface.debug_dump import dump_api_round
 from IkaModel.chat_interface.types import ToolRuntimeState, UsageInfo
 from IkaModel.request_interface import IkaAPIError
 from IkaModel.runtime_errors import IkaContextWindowError, IkaProviderResponseError
@@ -42,7 +43,7 @@ def test_dump_api_round_writes_debug_file_when_enabled(tmp_path, monkeypatch):
     payload = {"messages": [{"role": "user", "content": "hello"}]}
 
     monkeypatch.setenv("IKA_DUMP_REQUESTS", str(tmp_path))
-    _test_chat_response._dump_api_round(model, payload, {"ok": True})
+    dump_api_round(model, payload, {"ok": True})
 
     files = list(tmp_path.glob("*.json"))
     assert len(files) == 1

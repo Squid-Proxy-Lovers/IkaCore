@@ -54,7 +54,11 @@ def test_public_snapshot_resume_mid_tool_loop_preserves_reasoning(provider, tmp_
 
     def request(url, headers, payload, **kwargs):
         requests.append(deepcopy(payload))
-        return httpx.Response(200, json=response_for(provider, final=len(requests) > 1),
+        data = response_for(provider, final=len(requests) > 1)
+        data["usage"] = {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6}
+        if provider == "gemini":
+            data["usageMetadata"] = {"promptTokenCount": 4, "candidatesTokenCount": 2, "totalTokenCount": 6}
+        return httpx.Response(200, json=data,
                               request=httpx.Request("POST", url))
 
     monkeypatch.setattr("IkaModel.request_interface.api_request_retry", request)
@@ -75,6 +79,8 @@ def test_public_snapshot_resume_mid_tool_loop_preserves_reasoning(provider, tmp_
         assert interrupted["status"] == "awaiting_user_input"
         snapshot = store.load_snapshot(interrupted["snapshot_id"])
         assert OPAQUE in json.dumps(snapshot["state_json"])
+        assert first._total_usage["input_tokens"] == 4
+        assert first._total_usage["output_tokens"] == 2
     finally:
         first.shutdown()
 
@@ -84,8 +90,24 @@ def test_public_snapshot_resume_mid_tool_loop_preserves_reasoning(provider, tmp_
     try:
         result = resumed_agent.resume_from_snapshot(interrupted["snapshot_id"], resume_input="Yes")
         assert result["final_message"] == "done"
+        assert resumed_agent._total_usage["input_tokens"] == 8
+        assert resumed_agent._total_usage["output_tokens"] == 4
+        usage = dict(resumed_agent._total_usage)
+        cost = dict(resumed_agent._total_cost)
+        completed = result["runtime"]["last_snapshot_id"]
     finally:
         resumed_agent.shutdown()
+    # Recover the completed boundary in another fresh instance: reasoning and
+    # accounting survive together, without a third provider request.
+    recovered = create()
+    recovered.enable_snapshots(path)
+    try:
+        assert recovered.resume_from_snapshot(completed)["final_message"] == "done"
+        assert recovered._total_usage == usage
+        assert recovered._total_cost == cost
+        assert OPAQUE in json.dumps(recovered.message_history)
+    finally:
+        recovered.shutdown()
     assert len(requests) == 2
     assert OPAQUE in json.dumps(requests[1])
     if provider in {"codex", "openai_responses"}:

@@ -29,7 +29,8 @@ from ..runtime_errors import (
     IkaProviderResponseError,
     IkaRequestControlError,
 )
-from .chat_response import _SUMMARY_FALLBACK_EXCEPTIONS, _dump_api_round
+from .chat_response import _SUMMARY_FALLBACK_EXCEPTIONS
+from .debug_dump import dump_api_round
 from .response_usage import extract_usage
 
 LOG = logging.getLogger(__name__)
@@ -189,9 +190,9 @@ def _dump_response_round(
     error: str,
 ) -> None:
     try:
-        _dump_api_round(barebone_model, payload, json_dict(response.json()))
+        dump_api_round(barebone_model, payload, json_dict(response.json()))
     except ValueError:
-        _dump_api_round(barebone_model, payload, None, error=error)
+        dump_api_round(barebone_model, payload, None, error=error)
 
 
 def _request_provider_round(
@@ -251,7 +252,7 @@ def _api_request_with_context_fallback(
         raise
     except (IkaAPIError, httpx.HTTPError) as e:
         if not _is_context_length_error(e):
-            _dump_api_round(barebone_model, payload, None, error=repr(e))
+            dump_api_round(barebone_model, payload, None, error=repr(e))
             raise
         LOG.warning("Context length exceeded. Forcing summarization and retrying.")
         get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
@@ -301,7 +302,7 @@ async def _api_request_with_context_fallback_async(
         raise
     except (IkaAPIError, httpx.HTTPError) as e:
         if not _is_context_length_error(e):
-            _dump_api_round(barebone_model, payload, None, error=repr(e))
+            dump_api_round(barebone_model, payload, None, error=repr(e))
             raise
         LOG.warning("Context length exceeded. Forcing summarization and retrying.")
         get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)

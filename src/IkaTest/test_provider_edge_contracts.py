@@ -87,7 +87,7 @@ def test_responses_content_wrapping_preserves_mixed_block_order(module):
         assert module._wrap_assistant_content(["text", 7]) == [{"type": "output_text", "text": "text"}, {"type": "output_text", "text": "7"}]
         assert module._wrap_assistant_content(7) == [{"type": "output_text", "text": "7"}]
     else:
-        assert module._message_content(7) == "7"
+        assert module._responses_items_for_message(7)[0]["content"] == "7"
         assert module._responses_items_for_message({"role": "developer", "content": "policy"})[0]["role"] == "developer"
         assert module.openai_responses_fill_payload(BareBoneModel("gpt-4o", "test", "url", suppress_init_output=True), [], None)["input"] == []
 
@@ -127,11 +127,10 @@ def test_defensive_message_wrappers_keep_scalar_content_and_required_tool_choice
     from IkaModel.anthropic.claude import _message_content, _without_blank_text
     from IkaModel.deepseek.deepseek import _message_content as deepseek_content
     from IkaModel.openai.openai import _history_message, _normalise_openai_message
-    from IkaModel.openai.openai import _message_content as openai_content
     from IkaModel.tool_schema import _ensure_object_root
 
     assert _without_blank_text({"role": "assistant", "content": None}) == {"role": "assistant", "content": None}
-    assert _message_content(7) == deepseek_content(7) == openai_content(7) == "7"
+    assert _message_content(7) == deepseek_content(7) == "7"
     assert _normalise_openai_message(7) == {"role": "user", "content": "7"}
     assert _history_message({"system": "bad"}, "system") == ""
     assert openai_responses._responses_items_for_message(7)[0]["content"] == "7"

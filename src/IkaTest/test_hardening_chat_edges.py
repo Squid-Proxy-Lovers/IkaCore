@@ -12,6 +12,7 @@ from IkaCore.logging_utils import IkaLogger
 from IkaModel import execution_hooks, model_metadata, request_interface, retry_policy, summarization
 from IkaModel.base import AgentEndException, BareBoneModel
 from IkaModel.chat_interface import chat_request, chat_response
+from IkaModel.chat_interface.debug_dump import dump_api_round
 from IkaModel.chat_interface.response_usage import extract_usage
 from IkaModel.chat_interface.tool_result_formatters import _coerce_gemini_tool_result, format_gemini_results
 from IkaModel.chat_interface.types import ToolRuntimeState, UsageInfo
@@ -25,6 +26,8 @@ def test_force_completion_never_converts_cancellation_to_success(monkeypatch, as
     monkeypatch.setattr(summarization, "run_summarization", Mock(side_effect=error))
     monkeypatch.setattr(summarization, "async_summarise_message_history", AsyncMock(side_effect=error))
     history = chat_request.init_message_history()
+    history["_pending_provider_data"] = {"provider": "responses", "items": [
+        {"type": "reasoning", "summary": [], "encrypted_content": "opaque-pending"}]}
     before = copy.deepcopy(history)
     model = BareBoneModel("gpt-4o", "test", "url")
     with pytest.raises(IkaRequestCancelled) as caught:
@@ -57,7 +60,7 @@ def test_chat_payload_validation_and_debug_dump_failure(monkeypatch, tmp_path):
         asyncio.run(chat_request._api_request_with_context_fallback_async(build, None, {}, client=SimpleNamespace()))
     monkeypatch.setenv("IKA_DUMP_REQUESTS", str(tmp_path / "not-directory"))
     (tmp_path / "not-directory").write_text("file")
-    chat_response._dump_api_round(SimpleNamespace(agent_name="test"), {}, None)
+    dump_api_round(SimpleNamespace(agent_name="test"), {}, None)
     assert (tmp_path / "not-directory").read_text() == "file"
     assert chat_response._estimate_tokens("") == 0
 

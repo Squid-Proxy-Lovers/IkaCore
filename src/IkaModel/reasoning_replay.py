@@ -19,21 +19,29 @@ JsonDict = dict[str, Any]
 _PENDING = "_pending_provider_data"
 
 
+def _native_items(value: object) -> list[JsonDict]:
+    # Parsers may ignore unknown blocks for display, but replay must never store
+    # scalar items that fail later during finalization or poison the next request.
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise ValueError("native reasoning replay requires a list of objects")
+    return cast(list[JsonDict], value)
+
+
 def capture_response_replay(provider: str, data: JsonDict, history: JsonDict) -> None:
     """Capture complete output items, including empty-summary encrypted reasoning."""
     history.pop(_PENDING, None)
     if provider in {"codex", "openai_responses"}:
-        output = data.get("output") or []
-        if any(isinstance(item, dict) and item.get("type") == "reasoning" for item in output):
+        output = _native_items(data.get("output") or [])
+        if any(item.get("type") == "reasoning" for item in output):
             history[_PENDING] = {"provider": "responses", "items": deepcopy(output)}
     elif provider == "anthropic":
-        blocks = data.get("content") or []
-        if any(isinstance(block, dict) and block.get("type") in {"thinking", "redacted_thinking"} for block in blocks):
+        blocks = _native_items(data.get("content") or [])
+        if any(block.get("type") in {"thinking", "redacted_thinking"} for block in blocks):
             history[_PENDING] = {"provider": "anthropic", "items": deepcopy(blocks)}
     elif provider == "gemini":
         candidates = data.get("candidates") or []
-        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
-        if any(isinstance(part, dict) and ("thoughtSignature" in part or "thought_signature" in part or part.get("thought"))
+        parts = _native_items(candidates[0].get("content", {}).get("parts", []) if candidates else [])
+        if any("thoughtSignature" in part or "thought_signature" in part or part.get("thought")
                for part in parts):
             history[_PENDING] = {"provider": "gemini", "items": deepcopy(parts)}
     elif provider == "openrouter":

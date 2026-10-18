@@ -82,32 +82,6 @@ def _default_message_history() -> JsonDict:
     }
 
 
-def _first_message_matches(messages: list[JsonDict], first_input_content: str) -> bool:
-    if not first_input_content or not messages:
-        return False
-    first_msg = messages[0]
-    content = first_msg.get("content", "")
-    return isinstance(content, str) and content == first_input_content
-
-
-def _append_codex_context(input_items: list[JsonDict], message_history: JsonDict) -> None:
-    summary_msg = string_value(history_section(message_history, "summary").get("message"))
-    if summary_msg:
-        input_items.append({
-            "type": "message",
-            "role": "assistant",
-            "content": _wrap_assistant_content(summary_msg),
-        })
-
-    first_input_content = string_value(history_section(message_history, "first_input").get("message"))
-    if first_input_content:
-        input_items.append({
-            "type": "message",
-            "role": "user",
-            "content": _wrap_user_content(first_input_content),
-        })
-
-
 def _codex_tool_output_item(message: JsonDict) -> JsonDict:
     content = message.get("content", "")
     return {

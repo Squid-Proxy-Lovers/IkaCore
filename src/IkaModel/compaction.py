@@ -58,7 +58,9 @@ def retained_compaction_entries(message_history: JsonDict) -> JsonDict:
         entry = json_dict(raw)
         message = _history_message_object(entry)
         native_kind = message.get("type")
-        if native_kind == "reasoning" or previous_kind not in {"reasoning", "function_call"}:
+        # A native output group may contain multiple reasoning items before
+        # parallel calls; every item belongs to the same retained exchange.
+        if previous_kind not in {"reasoning", "function_call"}:
             native_start = index
         previous_kind = native_kind
         if entry.get("type") in {"stage_input", "hitl_input"}:
