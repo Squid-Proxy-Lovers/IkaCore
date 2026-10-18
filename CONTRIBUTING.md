@@ -10,6 +10,17 @@ Unless a separate agreement states otherwise, contributions intentionally submit
 pip install -e ".[test,dev]"
 ```
 
+Install the secret-scanning hook once per clone. CI runs the same pinned
+[Gitleaks](https://github.com/gitleaks/gitleaks) scan on every pull request and push to `main`:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Keep credentials in environment variables; never commit `keys.cfg`, `.env` files,
+`auth.json`, raw model transcripts, or snapshot databases.
+
 ## Test Commands
 
 Run the main suite:
