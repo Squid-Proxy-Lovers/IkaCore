@@ -40,17 +40,18 @@ class SnapshotSession:
 
 def capture_state(session: SnapshotSession, label: str, payload: dict[str, Any]) -> dict[str, Any]:
     remaining = session.remaining_steps if session.remaining_steps is not None else session.agent.maxsteps
+    agent_state = getattr(session.agent, "state", None)
     state = {
         "scope": "agent" if session.stage_index is None else "stage",
         "agent_name": session.agent.name, "remaining_steps": remaining,
         "last_content": session.last_content, "message_history": deepcopy(session.agent.message_history),
         "maxsteps": session.agent.maxsteps,
         "prompt": getattr(session.agent, "prompt", ""),
-        "turn_message": session.agent.state.turn_message,
-        "turn_message_consumed": session.agent.state.turn_message_consumed,
+        "turn_message": getattr(agent_state, "turn_message", None),
+        "turn_message_consumed": getattr(agent_state, "turn_message_consumed", False),
         "compaction_count": getattr(session.agent, "compaction_count", 0),
         "validation_attempts": getattr(getattr(session.agent, "state", None), "validation_attempts", 0),
-        "validation_remaining_steps": getattr(session.agent.state, "remaining_steps", None),
+        "validation_remaining_steps": getattr(agent_state, "remaining_steps", None),
         "validation_maxsteps": getattr(getattr(session.agent, "state", None), "validation_maxsteps", None),
         "timestamp": time.time(),
     }
