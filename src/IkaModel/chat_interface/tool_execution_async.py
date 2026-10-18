@@ -131,6 +131,7 @@ async def _execute_parallel_tool_plan_async(
             if isinstance(result, AgentEndException):
                 raise result
             if isinstance(result, HumanInputRequired):
+                plan.interrupted_tool_call_id = tool_call_id
                 interrupt_data = result.payload
                 plan.tool_call_id_to_result[tool_call_id] = json.dumps({"__ika_interrupt__": True, **(result.payload or {})})
                 break
@@ -155,6 +156,7 @@ async def _execute_sequential_tool_plan_async(
         try:
             result = await async_execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
         except HumanInputRequired as exc:
+            plan.interrupted_tool_call_id = tool_call_id
             interrupt_data = exc.payload
             plan.tool_call_id_to_result[tool_call_id] = json.dumps({"__ika_interrupt__": True, **(exc.payload or {})})
             tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1

@@ -73,7 +73,8 @@ IkaCore 2.0 intentionally breaks compatibility with v1. Start with the
 - Stop workflow dependents and chained agents while approval is pending, including without snapshots;
   workflow results expose interruption status and snapshot resume guidance.
 - Route nested and workflow human answers to interrupted children; retain completed
-  siblings and invalidate stale downstream results during selective replay.
+  siblings and invalidate stale downstream results during selective replay. Delegated
+  continuation identity survives small tool-output caps, repeated pauses and forks.
 - Propagate cancellation, deadlines and worker errors with their original identity;
   WorkflowError includes node/instance details and partial results.
 - Retain constraints, latest input, complete tool exchanges and reasoning during compaction;

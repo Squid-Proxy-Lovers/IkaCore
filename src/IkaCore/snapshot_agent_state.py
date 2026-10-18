@@ -134,10 +134,29 @@ def _replace_interrupt(value: Any, snapshot_id: str, output: str) -> Any:
     return value
 
 
+def _set_continuation_output(message: JsonDict, continuation: JsonDict, output: str) -> None:
+    path = continuation["content_path"]
+    target: Any = message
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = {"result": output} if continuation["structured"] else output
+
+
 def _update_parent_result(agent: Any, state: dict[str, Any], snapshot_id: str, output: str) -> None:
-    agent.message_history = _replace_interrupt(agent.message_history, snapshot_id, output)
-    agent._snapshot_resume_messages = _replace_interrupt(agent._snapshot_resume_messages, snapshot_id, output)
-    agent._snapshot_runtime.live_messages = _replace_interrupt(agent._snapshot_runtime.live_messages, snapshot_id, output)
+    continuation = state.get("interrupt_data", {}).get("tool_result_continuation")
+    if continuation is None:
+        # Compatibility with snapshots written before structured continuation metadata.
+        agent.message_history = _replace_interrupt(agent.message_history, snapshot_id, output)
+        agent._snapshot_resume_messages = _replace_interrupt(agent._snapshot_resume_messages, snapshot_id, output)
+        agent._snapshot_runtime.live_messages = _replace_interrupt(agent._snapshot_runtime.live_messages, snapshot_id, output)
+    else:
+        entry = agent.message_history["messages"][continuation["history_key"]]
+        message = json.loads(entry["message"])
+        _set_continuation_output(message, continuation, output)
+        entry["message"] = json.dumps(message)
+        for messages in (agent._snapshot_resume_messages, agent._snapshot_runtime.live_messages):
+            if messages is not None:
+                _set_continuation_output(messages[continuation["message_index"]], continuation, output)
     state["message_history"] = deepcopy(agent.message_history)
 
 def _validate_delegated_snapshot(session: Any, pending: JsonDict) -> None:
@@ -171,7 +190,10 @@ def resume_delegation(agent: Any, state: dict[str, Any], answer: str | None) -> 
     finally:
         child.shutdown()
     if result.get("status") in {"awaiting_user_input", "paused"}:
-        data = delegation_interrupt(child, pending["task_input"], result, pending.get("tool_frame_id"))
+        updated = delegation_interrupt(child, pending["task_input"], result, pending.get("tool_frame_id"))
+        if "tool_result_continuation" in data:
+            updated["tool_result_continuation"] = data["tool_result_continuation"]
+        data = updated
         _update_parent_result(agent, state, pending["snapshot_id"], json.dumps({"__ika_interrupt__": True, **data}))
         return {"status": result["status"], "last_content": result.get("final_message", ""),
                 "interrupt_data": data}

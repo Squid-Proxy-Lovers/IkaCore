@@ -451,6 +451,8 @@ def _interrupt_response_if_needed(
     interrupt_content = string_value(interrupt_data.get("question") or content or "Awaiting human input")
     if hitl_stage_name and logger:
         logger.log_hitl_prompt(hitl_stage_name)
+    message_index = len(messages) + 1  # The appender first adds the assistant turn.
+    previous_keys = set(message_history.get("messages", {}))
     _append_tool_messages(
         provider,
         messages,
@@ -462,6 +464,20 @@ def _interrupt_response_if_needed(
         tool_results,
         tokens,
     )
+    continuation = interrupt_data.get("tool_result_continuation")
+    if continuation is not None:
+        index = continuation["call_index"]
+        tool_keys = [key for key, entry in message_history["messages"].items()
+                     if key not in previous_keys and entry.get("type") == "tool"]
+        if provider == "gemini":
+            path = ["parts", index, "functionResponse", "response"]
+            index = 0  # Gemini groups the batch into one tool response message.
+        elif provider == "anthropic":
+            path = ["content", 0, "content"]
+        else:
+            path = ["content"]
+        continuation.update({"message_index": message_index + index, "history_key": tool_keys[index],
+                             "content_path": path, "structured": provider == "gemini"})
     return _build_interrupt_response(
         barebone_model,
         logger,

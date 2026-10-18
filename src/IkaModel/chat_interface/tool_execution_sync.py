@@ -40,6 +40,7 @@ class ToolCallPlan:
     tool_call_id_to_result: dict[str, str] = field(default_factory=lambda: {})
     parallel_calls: list[ScheduledToolCall] = field(default_factory=lambda: [])
     sequential_calls: list[ScheduledToolCall] = field(default_factory=lambda: [])
+    interrupted_tool_call_id: str | None = None
 
 
 def _ensure_tool_executor_pool() -> ThreadPoolExecutor:
@@ -365,6 +366,7 @@ def _execute_parallel_tool_plan(
                     pending.cancel()
                 raise
             except HumanInputRequired as exc:
+                plan.interrupted_tool_call_id = tool_call_id
                 interrupt_data = exc.payload
                 plan.tool_call_id_to_result[tool_call_id] = json.dumps({"__ika_interrupt__": True, **(exc.payload or {})})
                 tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
@@ -403,6 +405,7 @@ def _execute_sequential_tool_plan(
         try:
             result = execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
         except HumanInputRequired as exc:
+            plan.interrupted_tool_call_id = tool_call_id
             interrupt_data = exc.payload
             result = json.dumps({"__ika_interrupt__": True, **(exc.payload or {})})
             plan.tool_call_id_to_result[tool_call_id] = result
@@ -432,6 +435,13 @@ def _finalize_tool_call_plan(
     tool_call_counts: dict[str, int],
     interrupt_data: Optional[JsonDict],
 ) -> ToolCallBatchResult:
+    if interrupt_data and interrupt_data.get("delegated") and plan.interrupted_tool_call_id is not None:
+        call_index = next(i for i, call in enumerate(plan.tool_call_order)
+                          if str(call.get("id") or _tool_function_payload(call).get("id") or f"call_{i}")
+                          == plan.interrupted_tool_call_id)
+        interrupt_data = {**interrupt_data, "tool_result_continuation": {
+            "tool_call_id": plan.interrupted_tool_call_id, "call_index": call_index,
+        }}
     tool_results = _ordered_tool_results(plan)
     formatted_messages = format_provider_tool_results(provider, plan.tool_call_order, tool_results)
     return formatted_messages, tool_results, tool_call_counts, plan.tool_call_order, interrupt_data

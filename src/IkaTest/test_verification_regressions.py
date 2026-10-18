@@ -23,8 +23,9 @@ from IkaCore.testing import MockProvider, provider_response
 def agents():
     with ExitStack() as resources:
         def make(name, asynchronous=False, **kwargs):
+            model_id = kwargs.pop("model_id", "gpt-4o-mini")
             agent = IkaBaseAgent(
-                name, prompt=name + " task", model_id="gpt-4o-mini", api_key="fixture",
+                name, prompt=name + " task", model_id=model_id, api_key="fixture",
                 output=OutputConfig(cli=False), limits=ExecutionLimits.bounded(),
                 policy=ExecutionPolicy.bounded(async_requests=asynchronous), **kwargs,
             )
@@ -101,3 +102,95 @@ def test_later_empty_truncation_stays_interrupted(agents, tmp_path, asynchronous
     if snapshots:
         saved = agent._snapshot_runtime.store.load_snapshot(result["snapshot_id"])["state_json"]
         assert saved["interrupt_data"]["type"] == "provider_response_truncated"
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("repeat", [False, True])
+@pytest.mark.parametrize("restore", ["same", "fresh", "fork"])
+@pytest.mark.parametrize("model_id", ["gpt-4o-mini", "claude-sonnet-4-5", "gemini-2.5-flash", "deepseek-chat"])
+def test_small_cap_preserves_delegated_continuation(agents, tmp_path, asynchronous, repeat, restore, model_id):
+    from IkaModel import request_controls
+
+    def create():
+        child = agents("child", asynchronous, stages=[IkaStage("approve", "Approval", [], hitl=True)])
+        return agents("parent", asynchronous, model_id=model_id, topology=AgentTopology(subagents=(child,)))
+    parent = create()
+    db = str(tmp_path / "pause.db")
+    store = parent.enable_snapshots(db)
+    actions = [("child", {"input": "need approval"}), ("ask_user", {"question": "Approve?"})]
+    if repeat:
+        actions.append(("ask_user", {"question": "Approve again?"}))
+    actions += [("agent_end", {"input": "CHILD_APPROVED_OUTPUT"}), ("agent_end", {"input": "parent done"})]
+    scripted = iter(actions)
+    with request_controls(tool_result_max_chars=128), MockProvider(
+        responder=lambda u, p: provider_response(u, p, next(scripted))
+    ) as mock:
+        paused = parent.execution()
+        if restore == "fresh":
+            parent = create()
+            parent.enable_snapshots(db)
+        snapshot_id = paused["snapshot_id"]
+        if restore == "fork":
+            snapshot_id = store.fork_run_from_snapshot(snapshot_id, allow_unsafe_replay=True)["snapshot_id"]
+        if repeat:
+            paused = parent.resume_from_snapshot(snapshot_id, resume_input="YES", allow_unsafe_replay=restore == "fork")
+            snapshot_id = paused["snapshot_id"]
+        result = parent.resume_from_snapshot(snapshot_id, resume_input="YES", allow_unsafe_replay=restore == "fork")
+    assert result["final_message"] == "parent done"
+    payload = mock.requests[-1]
+    if "input" in payload:
+        outputs = [item["output"] for item in payload["input"] if item.get("type") == "function_call_output"]
+    elif "contents" in payload:
+        outputs = [part["functionResponse"]["response"]["result"] for message in payload["contents"]
+                   for part in message["parts"] if "functionResponse" in part]
+    else:
+        outputs = []
+        for message in payload["messages"]:
+            if message.get("role") == "tool":
+                outputs.append(message["content"])
+            elif isinstance(message.get("content"), list):
+                outputs.extend(block["content"] for block in message["content"] if block.get("type") == "tool_result")
+    assert any("CHILD_APPROVED_OUTPUT" in output for output in outputs)
+    assert all(len(output) <= 128 for output in outputs)
+    assert "__ika_interrupt__" not in str(mock.requests[-1])
+    assert "CHILD_APPROVED_OUTPUT" in str(parent.transcript)
+
+
+def test_legacy_delegated_snapshot_still_resumes(agents, tmp_path):
+    child = agents("child", stages=[IkaStage("approve", "Approval", [], hitl=True)])
+    parent = agents("parent", topology=AgentTopology(subagents=(child,)))
+    store = parent.enable_snapshots(str(tmp_path / "legacy.db"))
+    actions = iter([("child", {"input": "approval"}), ("ask_user", {"question": "Approve?"}),
+                    ("agent_end", {"input": "legacy approved"}), ("agent_end", {"input": "done"})])
+    with MockProvider(responder=lambda u, p: provider_response(u, p, next(actions))) as mock:
+        paused = parent.execution()
+        snapshot = store.load_snapshot(paused["snapshot_id"])
+        state = snapshot["state_json"]
+        state["interrupt_data"].pop("tool_result_continuation")
+        legacy = store.create_snapshot(snapshot["run_id"], snapshot["frame_id"], "human_input", state)
+        result = parent.resume_from_snapshot(legacy, resume_input="YES")
+    assert result["final_message"] == "done"
+    assert "legacy approved" in str(mock.requests[-1])
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("parallel", [False, True])
+def test_batch_keeps_continuation_identity_outside_capped_text(asynchronous, parallel):
+    import asyncio
+
+    from IkaModel import request_controls
+    from IkaModel.base import HumanInputRequired
+    from IkaModel.chat_interface.tool_execution_async import async_execute_tool_calls
+    from IkaModel.chat_interface.tool_execution_sync import execute_tool_calls
+
+    def pause(args):
+        raise HumanInputRequired({"question": "Approve?", "delegated": {"snapshot_id": "identity-must-survive"}})
+    calls = [{"id": "normal", "function": {"name": "normal", "arguments": "{}"}},
+             {"id": "approval", "function": {"name": "pause", "arguments": "{}"}}]
+    kwargs = {"tool_metadata": {"normal": {"parallel": parallel}, "pause": {"parallel": parallel}}}
+    with request_controls(tool_result_max_chars=1):
+        args = (calls, {"normal": lambda args: "normal", "pause": pause}, "openai")
+        batch = asyncio.run(async_execute_tool_calls(*args, **kwargs)) if asynchronous else execute_tool_calls(*args, **kwargs)
+    assert batch[4]["delegated"]["snapshot_id"] == "identity-must-survive"
+    assert batch[4]["tool_result_continuation"] == {"tool_call_id": "approval", "call_index": 1}
+    assert all(len(output) <= 1 for output in batch[1])
