@@ -33,11 +33,13 @@ def _run_async_workflow_agent(
             result = run_async(cast(Callable[[], Coroutine[Any, Any, Any]], async_execution))
         else:
             result = agent.execution()
+        interrupted = isinstance(result, dict) and result.get("status") in {"paused", "awaiting_user_input"}
         return {
             "node_name": node_name,
             "instance_id": instance_id,
             "result": result,
-            "success": True,
+            "success": not interrupted,
+            "interrupted": interrupted,
             "transcript": getattr(agent, "transcript", getattr(agent, "message_history", {})),
         }
     except RuntimePauseRequested as paused:

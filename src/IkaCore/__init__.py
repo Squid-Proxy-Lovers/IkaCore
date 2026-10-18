@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from IkaCore.workflow import WorkflowResult as WorkflowResult
     from IkaCore.workflow_types import WorkflowError as WorkflowError
     from IkaCore.workflow_types import WorkflowNodeError as WorkflowNodeError
+    from IkaCore.workflow_types import WorkflowRunResult as WorkflowRunResult
 
 try:
     __version__ = version("ikacore")
@@ -59,11 +60,13 @@ __all__ = [
     "WorkflowEdge",
     "WorkflowNode",
     "WorkflowResult",
+    "WorkflowRunResult",
     "SnapshotStore",
     "RuntimeControl",
 ]
 
 _EXPORTS: dict[str, tuple[str, str]] = {
+    "WorkflowRunResult": ("IkaCore.workflow_types", "WorkflowRunResult"),
     "WorkflowNodeError": ("IkaCore.workflow_types", "WorkflowNodeError"),
     "WorkflowError": ("IkaCore.workflow_types", "WorkflowError"),
     "FinalAnswerValidationError": ("IkaCore.results", "FinalAnswerValidationError"),

@@ -70,6 +70,8 @@ IkaCore 2.0 intentionally breaks compatibility with v1. Start with the
   Cleanup workers preserve runtime context. Blocking DNS/custom code can finish later.
 - Preserve ordered pending turns, final answers, usage and consumed step/extension budgets
   exactly once across fresh-process resume, stage transitions and validation corrections.
+- Stop workflow dependents and chained agents while approval is pending, including without snapshots;
+  workflow results expose interruption status and snapshot resume guidance.
 - Route nested and workflow human answers to interrupted children; retain completed
   siblings and invalidate stale downstream results during selective replay.
 - Propagate cancellation, deadlines and worker errors with their original identity;

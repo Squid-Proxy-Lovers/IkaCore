@@ -156,6 +156,8 @@ class AgentExecution:
         if next_agent is None:
             raise RuntimeError("next_agent execution requested without a next_agent")
         final_message, _ = agent.run_simple()
+        if agent._last_interrupt:
+            return agent.execution_runtime._interrupt_output(agent._last_interrupt)
         if agent.summarize_final:
             current_hierarchy = getattr(agent, "_parent_hierarchy", []) + [agent.name]
             barebone_model = agent.get_barebone(

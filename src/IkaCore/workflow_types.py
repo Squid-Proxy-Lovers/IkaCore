@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Protocol
 
@@ -59,6 +60,23 @@ class WorkflowResult:
     child_summaries: dict[str, str] = field(default_factory=lambda: {})
 
 
+class WorkflowRunResult(dict[str, WorkflowResult]):
+    """Completed nodes plus workflow status and interruption/resume guidance."""
+
+    def __init__(self, results: dict[str, WorkflowResult], interruptions: dict[str, dict[str, Any]],
+                 snapshot_id: str | None = None, paused: bool = False):
+        super().__init__(results)
+        self.status: str = ("awaiting_user_input" if any(
+            result.get("status") == "awaiting_user_input" for result in interruptions.values()
+        ) else "paused" if interruptions or paused else "completed")
+        self.snapshot_id: str | None = snapshot_id
+        self.interrupt_data: dict[str, Any] = ({
+            "instances": deepcopy(interruptions), "resumable": bool(snapshot_id),
+            "guidance": ("Resume with workflow.resume_from_snapshot(result.snapshot_id, resume_input=...)."
+                         if snapshot_id else "Call workflow.enable_snapshots() before execution to resume interrupted workflows."),
+        } if self.status != "completed" else {})
+
+
 @dataclass(frozen=True)
 class WorkflowNodeError:
     node_name: str
@@ -85,6 +103,7 @@ class WorkflowStateProtocol(Protocol):
     async_executor: Any
     _node_index: dict[str, WorkflowNode]
     _results: dict[str, WorkflowResult]
+    _interruptions: dict[str, dict[str, Any]]
     _node_dependencies: dict[str, set[str]]
     _node_dependents: dict[str, set[str]]
     _edges_by_source: dict[str, list[WorkflowEdge]]

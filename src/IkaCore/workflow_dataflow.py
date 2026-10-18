@@ -78,6 +78,9 @@ class _DataflowNodePhases:
         results = self.instance_results.pop(node_name)
         blocked = any(not result.get("success") for result in results)
         if blocked:
+            for result in results:
+                if result.get("interrupted"):
+                    self.workflow._interruptions[f"{node_name}:{result['instance_id']}"] = result["result"]
             errors = [WorkflowNodeError(node_name, r.get("instance_id"),
                         r["result"].get("error_type", "Exception"), r["result"].get("error", "Worker failed"))
                       for r in results if not r.get("success") and not r.get("interrupted")]

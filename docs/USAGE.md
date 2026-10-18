@@ -457,6 +457,14 @@ Bare `gpt-5.x` model names do not auto-route to Codex because they overlap with 
 
 ### Workflows
 
+`workflow.run()` returns a dict-compatible `WorkflowRunResult` containing completed
+nodes. Check `result.status` for `completed`, `paused`, or `awaiting_user_input`;
+interrupted prerequisites never release their dependents. `result.interrupt_data`
+contains per-instance details, `resumable`, and resume guidance. Enable workflow
+snapshots before execution to resume a pause with `result.snapshot_id` and
+`workflow.resume_from_snapshot(..., resume_input=...)`. Without snapshots, pauses
+are reported with `resumable=False`; snapshot resume raises a clear error.
+
 `IkaWorkflow` runs multi-agent graphs.
 
 ```python

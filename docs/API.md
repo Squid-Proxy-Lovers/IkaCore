@@ -301,7 +301,7 @@ IkaWorkflow(name: 'str', description: 'str', nodes: 'List[WorkflowNode]', edges:
 - `IkaWorkflow.enable_snapshots(self: Any, db_path: str = 'runtime-data/snapshots.db', control: Optional[IkaCore.runtime_control.RuntimeControl] = None) -> IkaCore.snapshot_store.SnapshotStore`
 - `IkaWorkflow.fork_from_snapshot(self: Any, snapshot_id: str, *, allow_unsafe_replay: bool = False, resume_input: str | dict[str, str] | None = None) -> Any`
 - `IkaWorkflow.resume_from_snapshot(self: Any, snapshot_id: str, *, allow_unsafe_replay: bool = False, resume_input: str | dict[str, str] | None = None) -> Any`
-- `IkaWorkflow.run(self, initial_context: 'Optional[str]' = None, parallel: 'bool' = False, *, concurrency: 'int | None' = None) -> 'Dict[str, WorkflowResult]'`
+- `IkaWorkflow.run(self, initial_context: 'Optional[str]' = None, parallel: 'bool' = False, *, concurrency: 'int | None' = None) -> 'WorkflowRunResult'`
 - `IkaWorkflow.snapshot_runtime_info(self: Any) -> dict[str, typing.Any]`
 
 ### `IkaCore.WorkflowEdge`
@@ -341,6 +341,17 @@ WorkflowResult(name: 'str', final: 'str', summary: 'str', output: 'dict[str, Any
 Stored result for a completed workflow node.
 
 Declared fields: `name`, `final`, `summary`, `output`, `transcript`, `instance_outputs`, `instance_transcripts`, `child_summaries`.
+
+
+### `IkaCore.WorkflowRunResult`
+
+Import: `from IkaCore import WorkflowRunResult`.
+
+```python
+WorkflowRunResult(results: 'dict[str, WorkflowResult]', interruptions: 'dict[str, dict[str, Any]]', snapshot_id: 'str | None' = None, paused: 'bool' = False)
+```
+
+Completed nodes plus workflow status and interruption/resume guidance.
 
 
 ### `IkaCore.SnapshotStore`

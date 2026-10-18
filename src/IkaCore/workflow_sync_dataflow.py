@@ -7,7 +7,6 @@ from typing import Any, Optional
 from IkaModel.request_control import check_request_controls
 from IkaModel.runtime_errors import IkaRequestControlError
 
-from .runtime_control import RuntimePauseRequested
 from .workflow_async_executor import _run_async_workflow_agent
 from .workflow_snapshot_execution import wrap_snapshot_instance
 from .workflow_types import WorkflowError, WorkflowNodeError, WorkflowResult
@@ -44,7 +43,8 @@ def run_sync_dataflow(workflow: Any, initial_context: Optional[str]) -> dict[str
                     agent.inject_workflow_context(context)
                 result = _run_async_workflow_agent(name, agent, "", instance)
                 if result.get("interrupted"):
-                    raise RuntimePauseRequested("workflow_instance", result["result"].get("snapshot_id"))
+                    workflow._interruptions[f"{name}:{instance}"] = result["result"]
+                    return stored_results
                 if not result["success"]:
                     error = result["result"]
                     raise WorkflowError([WorkflowNodeError(name, instance, error["error_type"], error["error"])],
