@@ -358,7 +358,7 @@
         "src/IkaTest/test_quality_properties.py::test_history_replay_conserves_multiplicity_order_and_inputs",
         "src/IkaTest/test_provider_payload_equivalence.py::test_all_provider_payloads_match_baseline_without_mutating_inputs"
       ],
-      "known_gap": "Provider schemas/metadata can drift; six live-provider checks are opt-in and skipped in offline CI.",
+      "known_gap": "Provider schemas/metadata can drift; eight provider routes have an opt-in installed-wheel 15-case live matrix. Offline CI tests the harness with MockTransport; unsupported thinking/SSE capabilities are explicit skips.",
       "min_lines": 90,
       "min_branches": 80
     },
