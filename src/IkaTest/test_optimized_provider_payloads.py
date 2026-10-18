@@ -50,7 +50,7 @@ def test_optimized_builders_accept_empty_history_and_explicit_tool_override(fill
 @pytest.mark.parametrize("required, forced, expected", [
     ([], None, {"type": "auto", "disable_parallel_tool_use": True}),
     (["a"], None, {"type": "tool", "name": "a"}),
-    (["a", "b"], None, {"type": "required", "disable_parallel_tool_use": True}),
+    (["a", "b"], None, {"type": "any", "disable_parallel_tool_use": True}),
     (["a"], "b", {"type": "tool", "name": "b"}),
 ])
 def test_anthropic_explicit_choice_survives_optimized_policy(required, forced, expected):

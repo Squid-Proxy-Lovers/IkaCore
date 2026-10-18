@@ -128,3 +128,22 @@ def test_codex_incomplete_terminal_event_is_already_rejected(asynchronous):
 def test_direct_responses_summary_parser_rejects_incomplete_envelope():
     with pytest.raises(RuntimeError, match=r"truncated.*max_output_tokens"):
         parse_summary_response("codex", httpx.Response(200, json=response_data("codex", True)))
+
+
+@pytest.mark.parametrize("data,reason", [
+    ({"status": "incomplete", "incomplete_details": None, "output": []}, "incomplete"),
+    ({"status": "incomplete", "incomplete_details": {"reason": "content_filter"}, "output": []}, "content_filter"),
+])
+def test_empty_incomplete_responses_keep_the_interrupt_reason(data, reason):
+    model = BareBoneModel("gpt-4o", "fixture", ROUTES["openai_responses"][1])
+    with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=data))) as client:
+        result = chat(model, [{"role": "user", "content": "task"}], client=client)
+    assert result["content"] == ""
+    assert result["interrupted"]
+    assert result["interrupt_data"]["reason"] == reason
+
+
+def test_anthropic_context_window_truncation_is_not_a_complete_summary():
+    data = {"content": [{"type": "text", "text": "partial"}], "stop_reason": "model_context_window_exceeded"}
+    with pytest.raises(RuntimeError, match="model_context_window_exceeded"):
+        parse_summary_response("anthropic", httpx.Response(200, json=data))

@@ -29,4 +29,4 @@ def test_borrowed_clients_apply_request_timeout_without_changing_defaults(contro
         assert client.timeout.read is None
         assert not client.is_closed
     asyncio.run(run())
-    assert seen == [dict(connect=0.01, read=0.01, write=0.01, pool=0.01)] * 2
+    assert seen == [{"connect": 0.01, "read": 0.01, "write": 0.01, "pool": 0.01}] * 2
