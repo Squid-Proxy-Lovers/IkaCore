@@ -151,9 +151,10 @@ def _parse_provider_round(
     data: JsonDict,
     model_id: str,
     usage_token_fallback: Optional[int] = None,
+    message_history: Optional[JsonDict] = None,
 ) -> ProviderRound:
     try:
-        content, reasoning_content, tool_calls, tokens = parse_provider_response(provider, data, model_id)
+        content, reasoning_content, tool_calls, tokens = parse_provider_response(provider, data, model_id, message_history)
         usage_info = extract_usage(provider, data)
     except (KeyError, IndexError, TypeError, ValueError) as e:
         raise IkaProviderResponseError(
@@ -202,7 +203,7 @@ def _request_provider_round(
     response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout, client)
     response.raise_for_status()
     data = _response_json_or_raise(response, provider)
-    return _parse_provider_round(provider, data, barebone_model.model_id, usage_token_fallback)
+    return _parse_provider_round(provider, data, barebone_model.model_id, usage_token_fallback, message_history)
 
 
 async def _request_provider_round_async(
@@ -220,7 +221,7 @@ async def _request_provider_round_async(
     response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client)
     response.raise_for_status()
     data = _response_json_or_raise(response, provider)
-    return _parse_provider_round(provider, data, barebone_model.model_id, usage_token_fallback)
+    return _parse_provider_round(provider, data, barebone_model.model_id, usage_token_fallback, message_history)
 
 
 def _api_request_with_context_fallback(

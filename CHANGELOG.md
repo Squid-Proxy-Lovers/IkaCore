@@ -130,3 +130,11 @@ V2 intentionally breaks compatibility with v1. See the
   budgets across resume, including in a new agent. Avoid charging prior steps twice to
   later stages.
 - Close SQLite connections when snapshot setup fails.
+
+
+### Reasoning replay: OpenAI Responses
+
+- Preserve ordered native reasoning items (including opaque encrypted content) in
+  assistant history through tool turns, final answers and snapshot persistence.
+  Stateless reasoning requests ask for encrypted reasoning. Display text and
+  tool arguments exclude opaque replay data. See [provider reasoning replay](docs/v2/REASONING_REPLAY.md).

@@ -36,6 +36,7 @@ from .openrouter.chat_helpers_openrouter import (
     build_openrouter_request,
     parse_openrouter_response,
 )
+from .reasoning_replay import capture_response_replay
 
 BuildRequestFn = Callable[[Any, list[JsonDict], JsonDict], tuple[str, dict[str, str], JsonDict]]
 ParseResponseFn = Callable[[JsonDict, str], tuple[str, Optional[str], list[JsonDict], int]]
@@ -148,12 +149,16 @@ def build_provider_request(
 def parse_provider_response(
     provider: str,
     data: JsonDict,
-    model_id: str
+    model_id: str,
+    message_history: Optional[JsonDict] = None,
 ) -> tuple[str, Optional[str], list[JsonDict], int]:
     parser = PROVIDER_RESPONSE_PARSERS.get(provider)
     if parser is None:
         return "", None, [], 0
-    return parser(data, model_id)
+    result = parser(data, model_id)
+    if message_history is not None:
+        capture_response_replay(provider, data, message_history)
+    return result
 
 
 def append_provider_tool_messages(

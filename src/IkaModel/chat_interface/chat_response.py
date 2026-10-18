@@ -20,6 +20,7 @@ from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict,
 from .. import summarization as _summaries
 from ..base import AgentEndException, AgentTool, BareBoneModel
 from ..chat_helpers_common import append_provider_tool_messages
+from ..reasoning_replay import take_response_replay
 from ..request_interface import IkaAPIError
 from ..runtime_errors import IkaDebugDumpError
 from .tool_result_formatters import format_gemini_results
@@ -97,6 +98,13 @@ def _record_model_message(
 ) -> None:
     msg_id = str(uuid.uuid4())
     history_entry: JsonDict = {"message": content, "tokens": tokens}
+    provider_data = take_response_replay(message_history)
+    if provider_data:
+        # Control tools terminate locally and have no function_call_output to replay.
+        provider_data = dict(provider_data)
+        provider_data["items"] = [item for item in provider_data.get("items", [])
+                                  if item.get("type") not in {"function_call", "tool_use"}]
+        history_entry["provider_data"] = provider_data
     if reasoning_content:
         history_entry["reasoning_content"] = reasoning_content
     history_section(message_history, "messages")[msg_id] = history_entry

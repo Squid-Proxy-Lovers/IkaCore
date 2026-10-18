@@ -104,7 +104,7 @@ def is_user_entry(entry: JsonDict) -> bool:
 
 
 def _is_empty_model_text(entry: JsonDict) -> bool:
-    if entry.get("type", "assistant") in _ROUND_TYPES or is_user_entry(entry):
+    if entry.get("provider_data") or entry.get("type", "assistant") in _ROUND_TYPES or is_user_entry(entry):
         return False
     raw = entry.get("message", "")
     return isinstance(raw, str) and not raw.strip()

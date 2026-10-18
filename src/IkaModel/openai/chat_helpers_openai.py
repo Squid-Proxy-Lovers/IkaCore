@@ -8,6 +8,7 @@ from typing import Optional, cast
 from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
 
 from ..base import BareBoneModel
+from ..reasoning_replay import take_response_replay
 from ..request_interface import agent_tools_for_payload
 from .openai import openai_fill_payload
 from .openai_responses import openai_responses_fill_payload
@@ -202,6 +203,9 @@ def append_openai_responses_tool_messages(
     # Store the assistant turn with its tool_calls (Chat-Completions-compatible
     # dict — the payload builder in openai_responses.py converts them).
     assistant_msg: JsonDict = {"role": "assistant", "content": content}
+    provider_data = take_response_replay(message_history)
+    if provider_data:
+        assistant_msg["provider_data"] = provider_data
     if reasoning_content:
         assistant_msg["reasoning_content"] = reasoning_content
     if executed_tool_call_list:
