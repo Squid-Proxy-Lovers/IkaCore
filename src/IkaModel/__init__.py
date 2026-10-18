@@ -1,7 +1,14 @@
 from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
+try:
+    __version__ = version("ikacore")
+except PackageNotFoundError:
+    __version__ = "2.0.0"
+
 __all__ = [
+    "__version__",
     "AgentTool",
     "BareBoneModel",
     "ToolArgs",

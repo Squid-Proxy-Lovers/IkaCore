@@ -1,4 +1,5 @@
 import importlib
+import importlib.metadata
 from typing import ClassVar
 
 import pytest
@@ -99,3 +100,18 @@ def test_lazy_package_exports_cache_values_and_reject_unknowns():
 
 def test_load_gemini_payload_success_path():
     assert load_gemini_payload() is importlib.import_module("IkaModel.gemini.google").gemini_fill_payload
+
+
+@pytest.mark.parametrize("package", [IkaCore, IkaModel, IkaMem])
+def test_package_version_uses_distribution_metadata_and_source_fallback(package, monkeypatch):
+    assert package.__version__ == importlib.metadata.version("ikacore")
+
+    with monkeypatch.context() as patch:
+        def missing_distribution(name):
+            raise importlib.metadata.PackageNotFoundError(name)
+
+        patch.setattr(importlib.metadata, "version", missing_distribution)
+        importlib.reload(package)
+        assert package.__version__ == "2.0.0"
+    importlib.reload(package)
+    assert package.__version__ == importlib.metadata.version("ikacore")

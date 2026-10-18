@@ -1,6 +1,7 @@
 # pyright: strict
 
 from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -14,7 +15,13 @@ if TYPE_CHECKING:
     from IkaCore.workflow import WorkflowNode as WorkflowNode
     from IkaCore.workflow import WorkflowResult as WorkflowResult
 
+try:
+    __version__ = version("ikacore")
+except PackageNotFoundError:
+    __version__ = "2.0.0"
+
 __all__ = [
+    "__version__",
     "IkaBaseAgent",
     "IkaStage",
     "IkaTools",

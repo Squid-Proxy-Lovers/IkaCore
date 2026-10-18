@@ -97,6 +97,9 @@ def _verify_wheel() -> None:
             raise RuntimeError(f"wheel/source module mismatch: missing={sorted(expected_modules - packaged_modules)}, "
                                f"unexpected={sorted(packaged_modules - expected_modules)}")
         required_suffixes = (
+            "IkaCore/py.typed",
+            "IkaModel/py.typed",
+            "IkaMem/py.typed",
             "IkaModel/summary_prompt",
             "IkaModel/data/model_metadata.json",
             ".dist-info/licenses/LICENSE",
@@ -133,7 +136,8 @@ def _verify_wheel() -> None:
             [
                 sys.executable,
                 "-c",
-                "import IkaCore, IkaModel, IkaMem",
+                "import IkaCore, IkaModel, IkaMem; from importlib.metadata import version; "
+                "assert IkaCore.__version__ == IkaModel.__version__ == IkaMem.__version__ == version('ikacore')",
             ],
             cwd=temp,
             env=env,
