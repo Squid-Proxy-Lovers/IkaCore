@@ -11,6 +11,7 @@ import httpx
 from IkaCore.agent_runtime_payloads import JsonDict, history_message_text, history_section, json_dict, string_value
 
 from .base import BareBoneModel
+from .chat_helpers_common import provider_response_interruption
 from .compaction import compact_live_messages as compact_live_messages
 from .compaction import retained_compaction_entries
 from .model_metadata import (
@@ -21,7 +22,7 @@ from .model_metadata import (
     uses_openai_max_completion_tokens,
 )
 from .request_interface import api_request_retry, async_api_request_retry, get_provider
-from .runtime_errors import IkaRequestControlError
+from .runtime_errors import IkaProviderResponseError, IkaRequestControlError
 
 _LOG = logging.getLogger(__name__)
 
@@ -287,6 +288,9 @@ SUMMARY_RESPONSE_PARSERS: dict[str, SummaryResponseParser] = {
 
 def parse_summary_response(provider: str, response: httpx.Response) -> str:
     data = json_dict(response.json())
+    interruption = provider_response_interruption(provider, data)
+    if interruption is not None:
+        raise IkaProviderResponseError(f"Cannot use truncated {provider} summary: {interruption['reason']}")
     provider = _normalize_provider_for_summary(provider)
     parser = SUMMARY_RESPONSE_PARSERS.get(provider)
     if parser is None:

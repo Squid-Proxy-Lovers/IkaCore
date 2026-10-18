@@ -146,6 +146,33 @@ def build_provider_request(
     return builder(barebone_model, messages, message_history)
 
 
+def provider_response_interruption(provider: str, data: JsonDict) -> Optional[JsonDict]:
+    """Normalize explicit truncation signals without discarding partial text/usage."""
+    details: JsonDict = {}
+    if data.get("status") == "incomplete":
+        raw_details = data.get("incomplete_details")
+        details = raw_details if isinstance(raw_details, dict) else {}
+        reason = details.get("reason") or "incomplete"
+    elif provider == "anthropic":
+        reason = data.get("stop_reason")
+        if reason not in {"max_tokens", "model_context_window_exceeded"}:
+            return None
+    elif provider == "gemini":
+        candidates = data.get("candidates") or []
+        reason = candidates[0].get("finishReason") if candidates else None
+        if reason != "MAX_TOKENS":
+            return None
+    else:
+        choices = data.get("choices") or []
+        reason = choices[0].get("finish_reason") if choices else None
+        if reason != "length":
+            return None
+    interruption = {"type": "provider_response_truncated", "provider": provider, "reason": reason}
+    if details:
+        interruption["incomplete_details"] = details
+    return interruption
+
+
 def parse_provider_response(
     provider: str,
     data: JsonDict,

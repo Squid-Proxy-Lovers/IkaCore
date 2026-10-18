@@ -60,7 +60,7 @@ def _finalize_state_response(
     message_history: JsonDict,
     state: ChatLoopState,
 ) -> JsonDict:
-    return _finalize_chat_response(
+    response = _finalize_chat_response(
         barebone_model,
         logger,
         state.content,
@@ -73,6 +73,11 @@ def _finalize_state_response(
         state.hijacked,
         state.tokens,
     )
+
+    if state.interruption is not None:
+        response["interrupted"] = True
+        response["interrupt_data"] = state.interruption
+    return response
 
 
 def chat(

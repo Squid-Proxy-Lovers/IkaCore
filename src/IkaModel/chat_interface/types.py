@@ -66,9 +66,11 @@ class ChatLoopState:
     rounds: int = 0
     total_tool_calls_in_cycle: int = 0
     hijacked: bool = False
+    interruption: Optional[dict[str, Any]] = None
 
     def add_usage(self, usage: Optional[dict[str, Any]]) -> None:
         self.usage.add_mapping(usage)
+        self.interruption = (usage or {}).get("_provider_interruption")
 
 
 @dataclass
