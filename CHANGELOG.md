@@ -5,6 +5,11 @@
 V2 intentionally breaks compatibility with v1. See the
 [migration guide](docs/v2/README.md#breaking-changes-and-migration).
 
+### Fixed (final core review)
+
+- Chained runs execute isolated downstream clones and close their owned resources, including
+  on errors; concurrent workflow instances leave downstream templates and histories intact.
+
 ### Application ergonomics and intentional behavior changes
 
 - Final validators are never called at construction; only the callable signature is checked.

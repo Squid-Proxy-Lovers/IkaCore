@@ -166,14 +166,12 @@ class AgentExecution:
             summary = summarise_message_history(barebone_model, agent.message_history) or final_message
         else:
             summary = final_message
-        next_agent.message_history = {
-            "system": {"message": next_agent.system_prompt or "", "tokens": 0},
-            "first_input": {"message": "", "tokens": 0},
-            "summary": {"message": "", "tokens": 0},
-            "messages": {},
-        }
-        next_agent.inject_workflow_context(summary, label="Previous agent summary:")
-        return next_agent.execution()
+        downstream = next_agent.clone_for_run()
+        try:
+            downstream.inject_workflow_context(summary, label="Previous agent summary:")
+            return downstream.execution()
+        finally:
+            downstream.shutdown()
 
     def _run_simple_final_output(self) -> JsonDict:
         agent = self.agent

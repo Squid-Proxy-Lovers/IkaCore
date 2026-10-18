@@ -741,7 +741,7 @@ class TestExecutionRuntimeHelpers:
             out = a.execution_runtime._run_next_agent_execution()
 
         assert out == {"final_message": "next done"}
-        assert next_agent.message_history["first_input"]["message"] == "Previous agent summary:\nshort summary\n\nP"
+        assert next_agent.message_history["first_input"]["message"] == ""
         summarizer.assert_called_once_with(barebone, a.message_history)
         next_agent.execution.assert_called_once_with()
 
@@ -751,7 +751,7 @@ class TestExecutionRuntimeHelpers:
         b.run_simple = MagicMock(return_value=("plain final", "plain final"))
 
         assert b.execution_runtime._run_next_agent_execution() == {"final_message": "other done"}
-        assert other_next.message_history["first_input"]["message"] == "Previous agent summary:\nplain final\n\nP"
+        assert other_next.message_history["first_input"]["message"] == ""
 
     def test_simple_final_output_builds_summary_from_run_simple_result(self):
         a = _minimal_agent(prompts=PromptConfig(system_prompt="system"))
