@@ -101,8 +101,9 @@ Simple and staged completion use the same policy. `result["validation"]` contain
 and `failed_checks` (callback names). No checks or an interrupted run means `not_run` with
 zero attempts. A failed check permits at most `validation_retries` correction passes.
 Corrections use the existing transcript and only `agent_end`; they cannot repeat application
-tools or stages. Every correction receives the original step allowance plus
-`validation_extra_steps`. The configured extension policy still applies to simple correction
+tools or stages. Corrections retain unspent task steps and receive `validation_extra_steps`
+additional steps per retry. Consumed task steps are not replenished. The configured extension
+policy still applies to simple correction
 passes. With `fail_closed=True`, exhaustion raises `IkaCore.FinalAnswerValidationError`;
 `.result` retains the rejected answer and status. The default returns that result with
 `validation.status == "failed"`. Consumers must inspect it before accepting an answer.

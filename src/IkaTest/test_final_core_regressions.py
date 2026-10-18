@@ -472,3 +472,31 @@ def test_delegated_resume_without_tool_frame_identity(make_agent, tmp_path):
         historical = store.create_snapshot(snapshot["run_id"], snapshot["frame_id"], "human_input", state)
         result = parent.resume_from_snapshot(historical, resume_input="YES")
     assert result["final_message"] == "done"
+
+
+@pytest.mark.parametrize("boundary", ["pre_model", "post_model"])
+@pytest.mark.parametrize("staged", [False, True])
+def test_restored_validation_correction_keeps_remaining_allowance(make_agent, tmp_path, boundary, staged):
+    options = {"limits": ExecutionLimits.bounded(maxsteps=2, max_tool_rounds=1),
+               "policy": ExecutionPolicy.bounded(final_answer_checks=(lambda result: False,),
+                                                  validation_retries=1, validation_extra_steps=0),
+               "stages": [IkaStage("answer", "Answer", [])] if staged else []}
+    agent = make_agent(**options)
+    db = str(tmp_path / "correction.db")
+    agent.enable_snapshots(db)
+    calls = []
+    def respond(url, payload):
+        if not payload.get("tools"):
+            return provider_response(url, payload, "forced final")
+        calls.append(payload)
+        if len(calls) == 1:
+            agent.request_pause_at(boundary)
+            return provider_response(url, payload, end("initial"))
+        return provider_response(url, payload, "partial correction")
+    with MockProvider(responder=respond):
+        paused = agent.execution()
+        fresh = make_agent(**options)
+        fresh.enable_snapshots(db)
+        fresh.resume_from_snapshot(paused["snapshot_id"])
+    assert len(calls) == 2
+
