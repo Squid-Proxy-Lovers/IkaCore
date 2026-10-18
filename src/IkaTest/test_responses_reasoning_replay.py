@@ -117,3 +117,15 @@ def test_direct_parse_history_contract(provider):
     assert "_pending_provider_data" not in history
     assert messages[0]["provider_data"]["items"] == OUTPUT
     assert "provider_data" not in calls[0]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_sse_merges_completed_envelope_with_partial_or_out_of_order_done_events(asynchronous):
+    events = [
+        {"type": "response.output_item.done", "output_index": 2, "item": CALL},
+        {"type": "response.output_item.done", "output_index": 0, "item": REASON},
+        {"type": "response.completed", "response": {"status": "completed", "output": OUTPUT}},
+    ]
+    response = httpx.Response(200, text="\n\n".join("data: " + json.dumps(e) for e in events) + "\n\n")
+    result = asyncio.run(async_collect_stream(response)) if asynchronous else collect_stream(response)
+    assert result["output"] == OUTPUT

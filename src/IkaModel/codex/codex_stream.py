@@ -38,7 +38,7 @@ def _empty_json_dict() -> JsonDict:
     return {}
 
 
-def _empty_json_list() -> list[JsonDict]:
+def _empty_json_list() -> list[tuple[Optional[int], JsonDict]]:
     return []
 
 
@@ -49,7 +49,7 @@ def _empty_string_list() -> list[str]:
 @dataclass
 class _StreamState:
     envelope: JsonDict = field(default_factory=_empty_json_dict)
-    collected_items: list[JsonDict] = field(
+    collected_items: list[tuple[Optional[int], JsonDict]] = field(
         default_factory=_empty_json_list
     )
     output_text_chunks: list[str] = field(
@@ -189,11 +189,27 @@ def _apply_stream_event(
     elif event_type == "response.output_item.done":
         item = json_dict(obj_data.get("item"))
         if item:
-            state.collected_items.append(item)
+            index = obj_data.get("output_index")
+            state.collected_items.append((index if type(index) is int else None, item))
     elif event_type == "response.output_text.delta":
         delta = obj_data.get("delta")
         if isinstance(delta, str):
             state.output_text_chunks.append(delta)
+
+
+
+def _merge_completed_items(state: _StreamState) -> list[JsonDict]:
+    # A completed envelope may contain items for which no done event was emitted.
+    # Keep those, and prefer completed done-event data at its original output index.
+    raw = state.envelope.get("output")
+    output = cast(list[JsonDict], raw) if isinstance(raw, list) else []
+    items = dict(enumerate(output))
+    for index, item in state.collected_items:
+        if index is None:
+            index = next((i for i, existing in items.items()
+                          if item.get("id") and existing.get("id") == item["id"]), len(items))
+        items[index] = item
+    return [items[index] for index in sorted(items)]
 
 
 def _finalize_stream(state: _StreamState) -> JsonDict:
@@ -206,7 +222,7 @@ def _finalize_stream(state: _StreamState) -> JsonDict:
             f"{envelope_detail}"
         )
     if state.collected_items:
-        state.envelope["output"] = state.collected_items
+        state.envelope["output"] = _merge_completed_items(state)
     elif state.output_text_chunks and not state.envelope.get("output"):
         state.envelope["output"] = [{
             "type": "message",
