@@ -34,8 +34,8 @@ The initial consolidation carried two generations of behavior at once. This pass
 - Collapses the workflow mixin/type-contract chains. Function and module size checks remain;
   whole-class line limits that encouraged tiny inheritance layers are removed.
 
-The current offline quality and wheel measurements below cover the merged runtime at
-`402d1ae`. Historical benchmarks and live checks retain their original revision labels.
+The current offline quality and wheel measurements below cover runtime/test revision
+`0ec020a`. Historical benchmarks and live checks retain their original revision labels.
 Live-provider and application behavior remain separate release checks.
 
 ## Persistence and provider optimization
@@ -214,19 +214,21 @@ offline coverage does not establish live compatibility. Reproduce the Codex run 
 
 ## Measured quality and footprint
 
-The full local quality run measured at runtime/test revision `d8c9b93` on CPython
-3.13.15 passed **834 tests**, with **6 live-provider checks skipped**:
-**95.74% line coverage**, **87.23% branch
-coverage**, and **93.87% combined coverage**. Ruff, Pyright, compilation, and the isolated
+The full local quality run measured at runtime/test revision `0ec020a` on CPython
+3.13.15 passed **872 tests**, with **6 live-provider checks skipped**:
+**95.72% line coverage**, **87.19% branch
+coverage**, and **93.85% combined coverage**. Ruff, Pyright, compilation, and the isolated
 wheel build/import check also passed. The matrix assigns all **121 runtime modules** to
-**16 areas** and passed all **93 required scenarios**, with zero gate failures. Coverage
+**16 areas** and passed all **102 required scenarios**, with zero gate failures. Coverage
 excludes 458 lines, including type-only and abstract declarations. Existing global and
-per-area coverage floors are unchanged.
+per-area coverage floors are unchanged. At the same revision, the **28 HTTP/HTTPS
+real-socket tests passed 20 consecutive rounds (560 cases)**, including deadline timing
+and deterministic cancellation after a response hook releases a pooled connection.
 
-The fresh `ikacore-2.0.0-py3-none-any.whl` measured at `d8c9b93` is **205.81 KiB**
-(210,751 bytes), with **670.94 KiB** of unpacked content (687,039 bytes). The runtime
+The fresh `ikacore-2.0.0-py3-none-any.whl` measured at `0ec020a` is **206.22 KiB**
+(211,173 bytes), with **672.89 KiB** of unpacked content (689,041 bytes). The runtime
 retains **6 settings** and one direct dependency (`httpx`). The three runtime packages
-contain 17,180 physical Python lines, **2,128 more** than `origin/main` at `0f6234c`
+contain 17,213 physical Python lines, **2,161 more** than `origin/main` at `0f6234c`
 (15,052 lines); this count includes blank and comment lines and excludes tests/docs.
 
 The following historical benchmark results at `183ce24` have not been remeasured after
@@ -288,22 +290,22 @@ CI publishes package/runtime and all-provider reports. See the
 Persistence still dominates this trivial local agent fixture, and the runtime retains
 architectural complexity. Further removal should follow observed use and product needs.
 
-### Local coverage snapshot (`d8c9b93`)
+### Local coverage snapshot (`0ec020a`)
 
 | Area | Modules | Lines | Branches | Floors L/B | Tests observed | Excluded lines |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Public API / package imports | 4 | 98.00% | 90.91% | 95/90% | 357 | 12 |
-| Request controls / cancellation | 6 | 95.51% | 90.91% | 95/90% | 260 | 0 |
-| HTTP ownership / TLS / connection reuse | 5 | 96.33% | 92.86% | 95/90% | 185 | 2 |
+| Public API / package imports | 4 | 98.00% | 90.91% | 95/90% | 377 | 12 |
+| Request controls / cancellation | 6 | 95.51% | 90.91% | 95/90% | 298 | 0 |
+| HTTP ownership / TLS / connection reuse | 5 | 95.95% | 92.86% | 95/90% | 219 | 2 |
 | Retries / request errors | 2 | 87.34% | 77.38% | 85/75% | 175 | 0 |
-| Tools / schemas / output bounds | 14 | 95.57% | 88.74% | 95/85% | 274 | 161 |
-| Snapshot storage / privacy / replay rules | 8 | 94.89% | 91.38% | 90/90% | 79 | 0 |
-| Agent snapshots / human resume | 6 | 98.61% | 93.27% | 95/90% | 100 | 0 |
-| Workflow snapshots / selective replay | 3 | 98.56% | 91.38% | 95/85% | 37 | 0 |
-| Workflows / fan-in / instance isolation | 9 | 98.25% | 93.24% | 95/90% | 86 | 66 |
+| Tools / schemas / output bounds | 14 | 95.57% | 88.74% | 95/85% | 294 | 161 |
+| Snapshot storage / privacy / replay rules | 8 | 94.67% | 90.32% | 90/90% | 99 | 0 |
+| Agent snapshots / human resume | 6 | 98.61% | 93.27% | 95/90% | 120 | 0 |
+| Workflow snapshots / selective replay | 3 | 98.65% | 92.19% | 95/85% | 53 | 0 |
+| Workflows / fan-in / instance isolation | 9 | 98.25% | 93.24% | 95/90% | 104 | 66 |
 | Memory integration | 9 | 93.30% | 77.27% | 90/75% | 19 | 10 |
-| Logging / CLI | 3 | 96.76% | 88.46% | 95/85% | 307 | 69 |
-| Agent runtime / stages | 15 | 98.17% | 87.41% | 95/80% | 419 | 138 |
+| Logging / CLI | 3 | 96.76% | 88.46% | 95/85% | 344 | 69 |
+| Agent runtime / stages | 15 | 98.17% | 87.41% | 95/80% | 439 | 138 |
 | Summarization / compaction | 1 | 97.81% | 84.62% | 95/80% | 34 | 0 |
 | Codex auth / streaming / payloads | 7 | 94.70% | 88.94% | 90/80% | 143 | 0 |
 | Provider payloads / metadata / history | 19 | 94.25% | 83.74% | 90/80% | 172 | 0 |
