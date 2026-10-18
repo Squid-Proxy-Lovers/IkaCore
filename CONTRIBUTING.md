@@ -79,9 +79,11 @@ limit. `--case CASE` selects individual checks. The report at `artifacts/live/co
 contains model/runtime identity and sanitized outcomes, without credentials or raw model
 output. A failed connectivity check stops the run; inspect requested/completed cases.
 
-On 2026-10-13, all eight checks passed against `gpt-5.6-sol` using the local Codex login
-and the installed v2 wheel at runtime revision `344348c`. This verifies that specific
-model/endpoint/account combination. Other providers, model variants, malformed/truncated
+The earlier 8/8 result recorded at `183ce24` on 2026-10-13 used `gpt-5.6-sol`, the local
+Codex login, and the installed v2 wheel at runtime revision `344348c`. It predates the
+correctness fixes merged into `402d1ae`; live checks have not been rerun for that tree.
+This verifies that specific model/endpoint/account combination. Other providers,
+model variants, malformed/truncated
 streams, crashes during external tool effects and long-running workloads need separate
 validation. Offline CI continues to run without credentials.
 

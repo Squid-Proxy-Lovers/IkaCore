@@ -189,6 +189,10 @@ if result.get("status") == "awaiting_user_input":
 ```
 
 The interrupt payload includes the stage name, question, and snapshot identifier when snapshots are enabled.
+Resume consumes the saved transcript once and appends the human answer before continuing.
+Consumed steps, step limits, extension counts, and the remaining overall stage budget
+survive snapshot resume, including when a new agent opens the database. Resuming partway
+through a stage does not reset its allowance or charge prior steps twice to later stages.
 
 ### Memory
 
@@ -365,6 +369,7 @@ Current workflow semantics:
 - `"child"` edges do not auto-execute as standalone workflow nodes.
 - A `"child"` edge without `stage_index` is invalid.
 - Sync and async workflow execution now use the same child-edge semantics.
+- With workflow snapshots enabled, an instance returning `paused` or `awaiting_user_input` pauses the workflow and blocks its dependents in both execution modes. Interrupted outputs are not completed results.
 
 ### Snapshots
 
@@ -381,6 +386,23 @@ A newly constructed, equivalently configured agent can enable the same database 
 resume a saved ID. Snapshots are immutable. A boundary's snapshot, event, and explicit
 pause status commit together; failed writes roll back. Connections are scoped to the
 operation/transaction, and SQLite's default durability is retained.
+Snapshot setup failures close their SQLite connection. Nested agents record snapshots
+under their own frames and restore the parent's execution context when they return.
+
+Historical agent resume checks tool effects recorded after the selected snapshot,
+including nested calls. If resuming would repeat unsafe effects, explicit approval is
+required: `agent.resume_from_snapshot(snapshot_id, allow_unsafe_replay=True)`.
+Mid-tool replay also requires this approval. Completed snapshots return saved output;
+post-model resume consumes the saved response without counting usage again. Fresh
+executions clear replay state, including after a failed resume.
+
+Enable workflow persistence with `workflow.enable_snapshots(path, control)` and inspect
+`workflow.snapshot_runtime_info()` for `paused` and `last_snapshot_id`. Workflow
+`resume_from_snapshot(snapshot_id, allow_unsafe_replay=False)` may reuse completed
+instances, but interrupted instances run again. Selective replay and historically cached
+interruptions invalidate downstream results; nested or unfinished unsafe tool effects
+require replay approval. Workflow resume does not accept `resume_input`; that argument
+belongs to agent resume.
 
 V2 removes `CheckpointStore`, `load_checkpoint()`, constructor `checkpoint` and
 `checkpoint_db_path` options, stage `checkpoint`, and `execution(checkpoint_uid=...)`.

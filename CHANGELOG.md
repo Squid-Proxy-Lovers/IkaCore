@@ -30,6 +30,26 @@ V2 intentionally breaks compatibility with v1. See the
   now covers functional memory setup, current snapshot APIs and offline validation.
 - Validation includes deterministic provider payload, retry, execution, workflow,
   snapshot, memory and cancellation tests; type/lint/coverage gates; and wheel checks.
-  Only Codex `gpt-5.6-sol` was verified live: eight checks at revision `344348c` on
-  2026-10-13. Other providers/models and long-running application behavior require
+  Only Codex `gpt-5.6-sol` was verified live: 8/8 checks recorded at `183ce24` on
+  2026-10-13 using the installed wheel at runtime revision `344348c`. That result
+  predates the fixes below; live checks have not been rerun for the merged tree.
+  Other providers/models and long-running application behavior require
   separate live validation. Historical quality/benchmark figures identify their revision.
+
+### Fixed
+
+- Require explicit `allow_unsafe_replay=True` approval before historical snapshot
+  resume repeats unsafe tool effects, including nested calls.
+- Pause snapshot-enabled workflows when an agent waits for human input, blocking its
+  dependents in sync and async runs. Do not reuse interrupted outputs as completed
+  results; invalidate their downstream cached results during replay.
+- Close only the active HTTP response on synchronous deadline or cancellation, keeping
+  caller-owned HTTPX clients usable.
+- Keep nested-agent snapshots in the child's frame and restore the parent's execution
+  context when the child returns.
+- Restore the saved HITL transcript once and append the human answer before continuing.
+- Clear stale replay state before fresh executions, including after failed resumes.
+- Preserve consumed steps, step limits, extension counts and remaining overall stage
+  budgets across resume, including in a new agent. Avoid charging prior steps twice to
+  later stages.
+- Close SQLite connections when snapshot setup fails.

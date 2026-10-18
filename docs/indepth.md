@@ -73,6 +73,7 @@ Current boundary rules:
 - delegated task input is treated as untrusted content
 - the delegated task is not merged into the subagent's instruction prompt
 - original subagent prompt state is restored after execution
+- nested-agent snapshot hooks belong to the child frame; the parent's execution context is restored on return
 
 That change closed the prompt-injection bug found during the security scan.
 
@@ -106,6 +107,7 @@ Important current behavior:
 - OpenAI Chat Completions requires `use_responses_api=False`
 - Codex is a separate provider that targets `CODEX_API_URL`
 - explicit non-OpenAI URLs are respected
+- synchronous deadline/cancellation aborts close the active HTTP response and preserve caller-owned HTTPX clients
 
 Codex auth is intentionally not automatic in the request path. The Codex provider treats `BareBoneModel.api_key` as the literal bearer token. Users can pass their own bearer token, or explicitly import `get_bearer` with `from IkaModel.codex.auth import get_bearer` and call `get_bearer()` to read and refresh the Codex CLI credentials from `~/.codex/auth.json` or `$CODEX_HOME/auth.json`.
 
@@ -117,7 +119,8 @@ Current behavior:
 
 - `ask_user` raises a structured interrupt
 - the interrupt can be saved as a snapshot
-- `resume_from_snapshot(snapshot_id, resume_input=...)` continues the run
+- `resume_from_snapshot(snapshot_id, resume_input=...)` consumes the saved transcript once, appends the answer, and continues the run
+- with workflow snapshots enabled, `paused` and `awaiting_user_input` instance results pause the workflow and block dependents in both sync and async runs; interrupted outputs are not completed results
 
 Regression coverage lives in [`test_hitl_interrupt_resume.py`](../src/IkaTest/test_hitl_interrupt_resume.py).
 
@@ -139,15 +142,26 @@ The SQLite model has three related records:
 
 A boundary's snapshot, event and requested pause status commit atomically. Connections
 are scoped to operations/transactions; no database lock spans a provider or tool call.
+Snapshot setup failures also close their SQLite connection.
 Post-model resume consumes the saved response without counting usage twice, and completed
 snapshots return their saved output. `SnapshotStore.fork_run_from_snapshot()` creates a
 new run with cloned lineage; `restart_frame()` forks from the frame's entry snapshot.
 Replay checks tool-effect safety and requires `allow_unsafe_replay=True` for unsafe effects.
+Historical agent resume checks effects recorded after the selected snapshot, including
+nested calls, before allowing those effects to repeat. Mid-tool replay requires the same
+explicit approval.
 It cannot restore a Python stack or undo external side effects.
 
+Snapshots persist consumed steps, current step limits, extension counts and the remaining
+overall stage budget. Mid-stage resume restores those values even in a new agent, without
+charging consumed steps twice to later stages. Fresh executions clear replay state,
+including after a failed resume.
+
 Workflow `resume_from_snapshot()` reuses completed instance results. Selective instance
-replay invalidates downstream results; nested or unfinished tool effects are checked
-before replay. `snapshot_runtime_info()` exposes run/frame IDs and the last snapshot ID.
+replay and historically cached interruptions invalidate downstream results. Interrupted
+instances run again; workflow resume does not accept `resume_input`. Nested or unfinished
+tool effects are checked before replay. `snapshot_runtime_info()` exposes run/frame IDs,
+the last snapshot ID and whether the workflow is paused.
 Snapshot JSON filters known credential patterns; redacted state is refused for replay
 by default. Keep databases private because filtering cannot identify all private content.
 
