@@ -124,14 +124,32 @@ retry-count overrides, and optional general/Codex output caps. Nested deadlines 
 extend their parent. `IkaTools(..., timeout=30)` sets an individual tool timeout.
 Synchronous functions must cooperate with cancellation; a timed-out worker may finish later.
 
-Synchronous HTTP posts register abort before headers, clamp connect/read/write/pool
-timeouts to the remaining deadline, and close only the response or stream they own.
-Caller-owned clients stay open, and cancellation never shuts down a raw pooled socket.
-The timeout clamp uses HTTPX's optional [trace extension](https://www.python-httpx.org/advanced/extensions/).
-Explicit cancellation of a blocked sync read may take effect only at the next clamped
-I/O timeout. Deadlines bound each I/O wait rather than guaranteeing a hard wall-clock
-return: DNS/TLS, trickled bodies, and custom transports can delay the next control check.
-Async requests support task cancellation throughout the request.
+Synchronous JSON posts and Codex SSE requests with a deadline or cancellation scope
+run in a context-preserving worker. The caller's wait uses the absolute deadline,
+so trickled headers/bodies, stalled TLS handshakes, and blocked hooks cannot extend
+it. Abort registration wakes the caller immediately; a cancellation checker without
+a registrar is polled at most every 10 ms. These are wall-clock bounds subject to
+normal OS/Python thread scheduling, rather than renewed per-I/O timeout budgets.
+Async requests retain native task cancellation throughout the request.
+
+For HTTPX's built-in transport, each controlled synchronous request uses a private
+httpcore pool with the caller's TLS, proxy/mount, auth, cookie, hook, redirect, and
+protocol settings. No connection enters the caller's pool. Abort shuts down only
+duplicated descriptors from that private pool, preserving socket identity even
+during TLS wrapping or after a response hook consumes the body. Stream cleanup
+callbacks also cover connection/TLS hand-offs before httpcore attaches the stream
+to its connection. The worker closes its client, streams, pool, and descriptors. Caller-owned clients/transports remain open;
+concurrent and subsequently pooled requests are unaffected. Without a lifecycle
+scope the existing direct transport path is unchanged and creates no worker.
+
+The caller also returns on time during blocking DNS, pre-connect system calls,
+client initialization, or arbitrary custom transport/hook code. Python cannot
+forcibly stop those operations: their daemon worker and resources remain until
+they return. Code that prevents Python thread scheduling, such as a C extension
+holding the GIL, can also delay observation. Custom transports are borrowed, never closed or inspected
+for sockets; response cleanup is attempted separately and must cooperate to reclaim
+resources promptly. The pool adapter uses HTTPX/httpcore 1.x internals and is tested
+with HTTPX 0.27.0 and the current supported version.
 
 The remaining runtime settings are `shared_ssl_context`, `reuse_connections`,
 `parallel_context_preparation`, `recover_truncated_control_calls`, `compact_at_fraction`,

@@ -64,9 +64,16 @@
         "src/IkaTest/test_transport_lifecycle.py::test_sync_abort_never_accesses_transport_sockets",
         "src/IkaTest/test_transport_pool_ownership.py::test_preloaded_response_does_not_abort_another_request",
         "src/IkaTest/test_transport_pool_ownership.py::test_sync_socket_and_pool",
-        "src/IkaTest/test_transport_pool_ownership.py::test_async_socket_and_pool"
+        "src/IkaTest/test_transport_pool_ownership.py::test_async_socket_and_pool",
+        "src/IkaTest/test_transport_deadline_accuracy.py::test_sync_wall_clock_budget_and_worker_cleanup",
+        "src/IkaTest/test_transport_deadline_accuracy.py::test_dns_can_finish_later_without_delaying_the_sync_caller",
+        "src/IkaTest/test_transport_deadline_accuracy.py::test_uncontrolled_request_has_no_worker_or_pool_copy",
+        "src/IkaTest/test_transport_pool_ownership.py::test_private_abort_preserves_already_in_flight_caller_request",
+        "src/IkaTest/test_transport_lifecycle.py::test_controlled_client_retains_mounts_auth_cookies_redirects_and_hooks",
+        "src/IkaTest/test_transport_lifecycle.py::test_sync_worker_preserves_exception_identity",
+        "src/IkaTest/test_transport_lifecycle.py::test_custom_response_cancelled_before_httpx_adopts_it_is_closed"
       ],
-      "known_gap": "Real loopback HTTP/HTTPS header/body timeouts and pooled-response cancellation are tested; proxy handshakes and real HTTP/2 are not. Blocked sync reads may observe explicit cancellation only at their next clamped I/O timeout; deadlines are not hard wall-clock guarantees.",
+      "known_gap": "Hard caller wall-clock budgets, HTTP/HTTPS trickled headers/body, TLS handshake/SSE stalls, explicit/check-only cancellation, worker/descriptor reclamation and response-hook pool races are tested. Proxy handshakes and real HTTP/2 are not exercised over sockets. DNS, pre-connect system calls and uncooperative custom transport/hook code may outlive the caller and release resources later.",
       "min_lines": 95,
       "min_branches": 90
     },

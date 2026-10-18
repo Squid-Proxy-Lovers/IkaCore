@@ -63,6 +63,8 @@ STRICT_TYPE_DIRECTIVE = "# pyright: strict"
 STRICT_HEADER_LINES = 20
 
 KNOWN_BROAD_EXCEPTION_BOUNDARIES = Counter({
+    # The HTTP worker transports every failure unchanged back to its caller.
+    ("src/IkaModel/request_lifecycle.py", "run_sync_with_controls.work"): 1,
     # Snapshot instrumentation records failures and re-raises every exception.
     ("src/IkaModel/execution_hooks.py", "invoke_tool"): 1,
     ("src/IkaModel/execution_hooks.py", "invoke_async_tool"): 1,

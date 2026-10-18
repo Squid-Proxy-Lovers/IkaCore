@@ -242,3 +242,42 @@ def test_async_codex_keeps_cancel_checker_and_registrar(monkeypatch):
 
     asyncio.run(run())
     assert not registered
+
+
+def test_legacy_control_setters_reach_sync_worker_and_restore():
+    observed, callbacks = [], []
+    def register(callback):
+        callbacks.append(callback)
+        return lambda: callbacks.remove(callback)
+    def respond(request):
+        observed.append((effective_max_retries(9), request_cancelled()))
+        return httpx.Response(200, json={})
+    old_checker = requests.set_request_cancel_checker(lambda: False)
+    old_registrar = requests.set_request_abort_registrar(register)
+    old_retries = requests.set_request_max_retries(1)
+    try:
+        with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+            assert requests.api_request_retry(URL, {}, {}, client=client).json() == {}
+        assert observed == [(1, False)] and not callbacks
+    finally:
+        requests.set_request_max_retries(old_retries)
+        requests.set_request_abort_registrar(old_registrar)
+        requests.set_request_cancel_checker(old_checker)
+    assert effective_max_retries(9) == 9 and not request_cancelled()
+
+
+def test_legacy_request_scope_deadline_and_completed_timer_cleanup():
+    released = threading.Event()
+    with request_controls(timeout=.03), pytest.raises(IkaRequestDeadlineExceeded), request_scope(released.set):
+        assert released.wait(1)
+    close = Mock()
+    with request_controls(timeout=10), request_scope(close):
+        pass
+    close.assert_not_called()
+
+
+def test_zero_sync_retry_sleep_never_calls_sleeper():
+    sleeper = Mock()
+    with request_controls(cancel_checker=lambda: False):
+        sleep_with_controls(0, sleeper)
+    sleeper.assert_not_called()
