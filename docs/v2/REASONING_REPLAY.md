@@ -67,3 +67,19 @@ AgentChat.get_barebone; clone_for_run already preserves it through dataclasses.r
 
 Sources: [manual budget rules](https://platform.claude.com/docs/en/build-with-claude/extended-thinking),
 [thinking, tool choice, sampling and block preservation](https://platform.claude.com/docs/en/build-with-claude/thinking).
+
+## Gemini thought signatures
+
+Function-call signatures were already copied, but signed text parts and thought
+parts were flattened or lost. Replay now preserves the whole ordered parts list,
+keeping signatures attached to the exact original text/functionCall part, including
+parallel calls and both accepted signature spellings. Readable thought text is
+reasoning_content rather than user-visible content. Final text-part signatures
+are persisted too. This uses generateContent; other providers' streaming APIs
+are not added by this change.
+
+HTTP debug previews redact opaque encrypted_content, signatures, redacted thinking
+data and OpenRouter encrypted reasoning data on a copy. Gemini's per-call debug
+message no longer serializes the signed part. Replay/snapshot originals stay intact.
+
+Source: [Gemini generateContent thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures).

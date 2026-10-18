@@ -9,6 +9,7 @@ from typing import Any, Optional, cast
 from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
 
 from ..base import BareBoneModel
+from ..reasoning_replay import take_response_replay
 from ..request_interface import agent_tools_for_payload
 from .google import gemini_fill_payload
 
@@ -49,14 +50,18 @@ def parse_gemini_response(data: JsonDict, model_id: str) -> ProviderRound:
     parts = cast(list[object], raw_parts) if isinstance(raw_parts, list) else []
     
     content = ""
+    reasoning_parts: list[str] = []
     tool_calls: list[JsonDict] = []
     
     for part in parts:
         part_data = json_dict(part)
         if "text" in part_data:
-            content += string_value(part_data.get("text"))
+            if part_data.get("thought"):
+                reasoning_parts.append(string_value(part_data.get("text")))
+            else:
+                content += string_value(part_data.get("text"))
         elif "functionCall" in part_data:
-            LOG.info(f"Gemini function call part: {json.dumps(part_data)}")
+            LOG.debug("Gemini function call received")
             func_call = json_dict(part_data.get("functionCall"))
             tool_call_dict: JsonDict = {
                 "name": func_call.get("name"),
@@ -75,7 +80,7 @@ def parse_gemini_response(data: JsonDict, model_id: str) -> ProviderRound:
             tool_calls.append(tool_call_dict)
     
     tokens = 0
-    reasoning_content = None
+    reasoning_content = "\n".join(reasoning_parts) or None
     
     return content, reasoning_content, tool_calls, tokens
 
@@ -117,6 +122,9 @@ def append_gemini_tool_messages(
             part_dict[sig_key] = tool_call["gemini_thought_signature"]
         parts_list.append(part_dict)
 
+    provider_data = take_response_replay(message_history)
+    if provider_data.get("provider") == "gemini":
+        assistant_msg["parts"] = provider_data["items"]
     messages.append(assistant_msg)
     tool_response_msg: Optional[JsonDict] = None
 

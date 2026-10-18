@@ -2,6 +2,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from ..history_replay import is_user_entry, plan_history_replay
+from ..reasoning_replay import replay_items
 from ..tool_schema import build_provider_tool_payload
 
 
@@ -37,7 +38,8 @@ def _append_gemini_history(contents: List[Dict[str, Any]], entries: List[Dict[st
             except (json.JSONDecodeError, TypeError):
                 contents.append({"role": "model", "parts": [_gemini_text_part(raw)]})
         else:
-            contents.append({"role": "model", "parts": [_gemini_text_part(raw)]})
+            parts = replay_items(msg, "gemini")
+            contents.append({"role": "model", "parts": parts if parts is not None else [_gemini_text_part(raw)]})
 
 
 def _gemini_parts_text(message: Dict[str, Any]) -> str:

@@ -18,6 +18,7 @@ from .api_errors import IkaHTTPError as IkaHTTPError
 from .api_errors import IkaRateLimitError as IkaRateLimitError
 from .api_errors import IkaTimeoutError as IkaTimeoutError
 from .model_metadata import get_max_tokens_for_model, get_provider_for_model
+from .reasoning_replay import redact_opaque_reasoning
 from .request_control import check_request_controls, effective_max_retries
 from .request_control import register_request_abort_callback as register_request_abort_callback
 from .request_control import request_cancelled as request_cancelled
@@ -90,12 +91,14 @@ def _redact_url(api_url: str) -> str:
 
 
 def _response_text_preview(response: httpx.Response, limit: int = 500) -> str:
+    if "text/event-stream" in response.headers.get("content-type", ""):
+        return "[SSE body omitted]"
     return response.text[:limit] if hasattr(response, "text") else str(response.status_code)
 
 
 def _response_json_preview(response: httpx.Response, limit: int = 1000) -> Optional[str]:
     try:
-        return json.dumps(response.json(), indent=2)[:limit]
+        return json.dumps(redact_opaque_reasoning(response.json()), indent=2)[:limit]
     except (TypeError, ValueError):
         return None
 
@@ -115,7 +118,7 @@ def _log_http_request(
     LOG.debug(f"[{prefix} REQUEST] Attempt {attempt + 1}/{max_retries}")
     LOG.debug(f"[{prefix} REQUEST] URL: {_redact_url(api_url)}")
     LOG.debug(f"[{prefix} REQUEST] Headers: {json.dumps(_redact_headers(headers), indent=2)}")
-    LOG.debug(f"[{prefix} REQUEST] Payload: {json.dumps(payload, indent=2)}")
+    LOG.debug(f"[{prefix} REQUEST] Payload: {json.dumps(redact_opaque_reasoning(payload), indent=2)}")
 
 
 def _log_http_response(prefix: str, response: httpx.Response) -> None:

@@ -30,6 +30,12 @@ def capture_response_replay(provider: str, data: JsonDict, history: JsonDict) ->
         blocks = data.get("content") or []
         if any(isinstance(block, dict) and block.get("type") in {"thinking", "redacted_thinking"} for block in blocks):
             history[_PENDING] = {"provider": "anthropic", "items": deepcopy(blocks)}
+    elif provider == "gemini":
+        candidates = data.get("candidates") or []
+        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+        if any(isinstance(part, dict) and ("thoughtSignature" in part or "thought_signature" in part or part.get("thought"))
+               for part in parts):
+            history[_PENDING] = {"provider": "gemini", "items": deepcopy(parts)}
 
 
 def take_response_replay(history: JsonDict) -> JsonDict:
@@ -103,3 +109,17 @@ def ordered_replay_messages(messages: list[JsonDict], history: JsonDict) -> list
         ordered = replayed + ([{"role": "user", "content": first}] if plan.emit_first_input else [])
     skip_first = bool(first and messages and isinstance(messages[0], dict) and messages[0].get("content") == first)
     return ordered + messages[1 if skip_first else 0:]
+
+
+def redact_opaque_reasoning(value: Any) -> Any:
+    """Return a log-only copy; signed/encrypted provider data must never be rendered."""
+    if isinstance(value, dict):
+        opaque = {"encrypted_content", "signature", "thoughtSignature", "thought_signature",
+                  "gemini_thought_signature", "provider_data", "_pending_provider_data"}
+        if value.get("type") in {"redacted_thinking", "reasoning.encrypted"}:
+            opaque.add("data")
+        return {key: "[REDACTED]" if key in opaque else redact_opaque_reasoning(item)
+                for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_opaque_reasoning(item) for item in value]
+    return value

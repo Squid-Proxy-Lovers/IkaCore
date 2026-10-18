@@ -153,3 +153,11 @@ V2 intentionally breaks compatibility with v1. See the
   and adjusts forced tool choice to auto. Default behavior stays opt-out.
 - Preserve complete signed thinking and redacted_thinking blocks in assistant
   turns before tool results. Opaque signatures/data stay out of display output.
+
+### Reasoning replay: Gemini
+
+- Preserve complete signed parts, including text/thought parts alongside parallel
+  function calls; keep each thought signature at its original position. Persist
+  final-part signatures and separate thought text from visible content.
+- Redact opaque reasoning/signatures from shared HTTP debug previews, retaining
+  original data for provider requests and snapshots.
