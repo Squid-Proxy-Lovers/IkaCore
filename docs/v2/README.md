@@ -143,9 +143,15 @@ Workflow snapshots are enabled with `workflow.enable_snapshots(path, control)` a
 started with `workflow.run(...)`. `snapshot_runtime_info()` exposes the last snapshot.
 With workflow snapshots enabled, an instance returning `paused` or `awaiting_user_input`
 pauses the workflow and blocks its dependents in both sync and async runs. Interrupted
-outputs are not completed results. Resume may reuse completed instances; selective replay
-and historically cached interruptions invalidate downstream results. Interrupted instances
-must run again; workflow resume does not accept an agent's `resume_input` argument.
+outputs are not completed results. The workflow snapshot retains interrupted child
+snapshot IDs; `snapshot_runtime_info()["interrupted_instances"]` maps `node:instance`
+keys (for example, `review:0`) to those IDs. Answer a single interrupted instance with
+`workflow.resume_from_snapshot(workflow_snapshot_id, resume_input="YES")`. For multiple
+instances, pass `resume_input={"review:0": "YES", "review:1": "Revise"}`; omitted
+instances remain paused. Resuming without an answer preserves pending human questions.
+If a child was already resumed separately and completed, workflow resume reuses its
+output and continues dependents. Completed siblings are retained; selective replay and
+interrupted instances invalidate downstream cached results.
 Nested and unfinished tool effects are checked before replay. Snapshot JSON filters
 known credential patterns and redacted state is refused for replay by default. Filtering
 cannot identify all private content, so keep runtime databases private.

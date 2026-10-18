@@ -19,10 +19,18 @@ def wrap_snapshot_instance(workflow: Any, node_name: str, instance: int, agent: 
     session: WorkflowSnapshotSession | None = getattr(workflow, "_workflow_snapshot", None)
     if session is None or session.run_id is None:
         return agent
+    native_execution = agent.execution
     asynchronous = getattr(agent, "async_execution", None)
     original = (lambda: run_async(cast(Callable[[], Coroutine[Any, Any, Any]], asynchronous))) if agent.use_async and callable(asynchronous) else agent.execution
     def wrapped(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        return execute_instance(session, node_name, instance, original, args, kwargs)
+        key = f"{node_name}:{instance}"
+        def resume() -> Any:
+            agent.execution = native_execution
+            agent.enable_snapshots(session.store.db_path, deepcopy(session.control))
+            return agent.resume_from_snapshot(session.interrupted_instances[key],
+                resume_input=session.resume_inputs.get(key), allow_unsafe_replay=session.allow_unsafe_replay)
+        execute = resume if key in session.interrupted_instances else original
+        return execute_instance(session, node_name, instance, execute, args, kwargs)
     agent.execution = wrapped
     agent._workflow_snapshot_instance = True
     return agent
@@ -46,11 +54,14 @@ def execute_instance(session: WorkflowSnapshotSession, node: str, instance: int,
         if result.get("status") in INTERRUPTED_STATUSES:
             status, session.paused = "paused", True
             with session.lock:
+                if result.get("snapshot_id"):
+                    session.interrupted_instances[key] = result["snapshot_id"]
                 session.store.update_frame(frame, outputs=result)
                 save_workflow_boundary(session, "workflow_instance_interrupted")
             raise RuntimePauseRequested("workflow_instance", result.get("snapshot_id"), frame)
         status = "completed"
         with session.lock:
+            session.interrupted_instances.pop(key, None)
             session.results[key] = deepcopy(result)
             session.store.update_frame(frame, outputs=result)
             save_workflow_boundary(session, "workflow_instance_completed")
@@ -66,6 +77,7 @@ def execute_workflow(session: WorkflowSnapshotSession, execute: Callable[[], Any
         session.root_frame_id = session.store.create_frame(session.run_id, "workflow", session.workflow.name)
         session.store.set_run_root_frame(session.run_id, session.root_frame_id)
         session.results, session.replay_cache, session.last_snapshot_id = {}, {}, None
+        session.interrupted_instances, session.resume_inputs = {}, {}
     session.initial_context, session.use_async, session.paused = initial, use_async, False
     replaying, session.replaying = session.replaying, False
     status = "failed"

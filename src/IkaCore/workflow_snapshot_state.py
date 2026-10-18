@@ -36,6 +36,9 @@ class WorkflowSnapshotSession:
     use_async: bool = False
     results: dict[str, dict[str, Any]] = field(default_factory=lambda: dict[str, dict[str, Any]]())
     replay_cache: dict[str, dict[str, Any]] = field(default_factory=lambda: dict[str, dict[str, Any]]())
+    interrupted_instances: dict[str, str] = field(default_factory=lambda: dict[str, str]())
+    resume_inputs: dict[str, str] = field(default_factory=lambda: dict[str, str]())
+    allow_unsafe_replay: bool = False
     replaying: bool = False
     paused: bool = False
     lock: Any = field(default_factory=threading.RLock)
@@ -44,7 +47,8 @@ class WorkflowSnapshotSession:
 def save_workflow_boundary(session: WorkflowSnapshotSession, label: str) -> str:
     with session.lock:
         state = {"workflow_fingerprint": graph_fingerprint(session.workflow), "initial_context": session.initial_context,
-                 "use_async": session.use_async, "instance_results": session.results}
+                 "use_async": session.use_async, "instance_results": session.results,
+                 "interrupted_instances": session.interrupted_instances}
         snapshot = session.store.create_snapshot(str(session.run_id), str(session.root_frame_id), label, state,
                     resume_strategy="workflow", prev_snapshot_id=session.last_snapshot_id)
         session.last_snapshot_id = snapshot
@@ -64,6 +68,7 @@ def replay_cache(session: WorkflowSnapshotSession, saved: dict[str, Any], allow_
             raise ValueError("parallel replay must select existing node instance IDs")
     interrupted = {key.rpartition(":")[0] for key, result in saved.items()
                    if result.get("status") in INTERRUPTED_STATUSES}
+    interrupted.update(key.rpartition(":")[0] for key in session.interrupted_instances)
     for node_name in selected.keys() | interrupted:
         frontier = list(workflow._node_dependents[node_name])
         while frontier:
@@ -81,7 +86,8 @@ def replay_cache(session: WorkflowSnapshotSession, saved: dict[str, Any], allow_
     for frame in session.store.list_frames(str(session.run_id)):
         meta = frame["metadata_json"]
         node = meta.get("workflow_node_name")
-        if node is not None and f"{node}:{meta['workflow_instance_id']}" not in cache:
+        key = f"{node}:{meta.get('workflow_instance_id')}"
+        if node is not None and key not in cache and key not in session.interrupted_instances:
             if not allow_unsafe and not session.store.assess_frame_replay(frame["frame_id"])["safe"]:
                 raise ValueError("selected workflow instance contains non-replayable tools")
     return cache

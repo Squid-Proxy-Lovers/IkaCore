@@ -194,6 +194,20 @@ Consumed steps, step limits, extension counts, and the remaining overall stage b
 survive snapshot resume, including when a new agent opens the database. Resuming partway
 through a stage does not reset its allowance or charge prior steps twice to later stages.
 
+For a snapshot-enabled workflow, answer through the workflow's snapshot ID:
+
+```python
+info = workflow.snapshot_runtime_info()
+results = workflow.resume_from_snapshot(info["last_snapshot_id"], resume_input="YES")
+```
+
+A string answers the sole interrupted instance. When several instances need answers,
+use a mapping such as `resume_input={"review:0": "YES", "review:1": "Revise"}`.
+`info["interrupted_instances"]` lists those keys and their child snapshot IDs. Omitted
+instances keep waiting; resuming without an answer does not repeat their model call.
+You may also resume a child separately using its snapshot ID, then resume the workflow
+without an answer: it reuses the completed child's output and continues dependents.
+
 ### Memory
 
 Set `memory=True` to enable memory tools, then initialize the corresponding backends. The flag alone does not create storage. Memory access is controlled with `memory_access`.
@@ -398,11 +412,10 @@ executions clear replay state, including after a failed resume.
 
 Enable workflow persistence with `workflow.enable_snapshots(path, control)` and inspect
 `workflow.snapshot_runtime_info()` for `paused` and `last_snapshot_id`. Workflow
-`resume_from_snapshot(snapshot_id, allow_unsafe_replay=False)` may reuse completed
-instances, but interrupted instances run again. Selective replay and historically cached
+`resume_from_snapshot(snapshot_id, resume_input=None, allow_unsafe_replay=False)` reuses
+completed instances and resumes saved interrupted children. Selective replay and historically cached
 interruptions invalidate downstream results; nested or unfinished unsafe tool effects
-require replay approval. Workflow resume does not accept `resume_input`; that argument
-belongs to agent resume.
+require replay approval. See the HITL section for answering one or several instances.
 
 V2 removes `CheckpointStore`, `load_checkpoint()`, constructor `checkpoint` and
 `checkpoint_db_path` options, stage `checkpoint`, and `execution(checkpoint_uid=...)`.

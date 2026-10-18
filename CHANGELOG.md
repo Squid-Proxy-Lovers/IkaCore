@@ -40,6 +40,9 @@ V2 intentionally breaks compatibility with v1. See the
 
 - Run exhausted HITL resumes through stage extension or forced finalization before
   completing the stage, so a last-step question cannot bypass the human answer.
+- Persist interrupted workflow instances' snapshot IDs and route workflow `resume_input`
+  answers to those children. Reuse separately completed child outputs, retain completed
+  siblings, and continue dependents in sync and parallel workflows.
 - Require explicit `allow_unsafe_replay=True` approval before historical snapshot
   resume repeats unsafe tool effects, including nested calls.
 - Pause snapshot-enabled workflows when an agent waits for human input, blocking its
