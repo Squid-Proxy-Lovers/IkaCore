@@ -159,3 +159,24 @@ reasoning_tools case and otherwise requires an installed wheel.
 Codex SSE collection also merges the completed envelope with indexed done events,
 keeping items absent from individual events and restoring original output order.
 Completed done-event data wins over envelope data for the same item.
+
+## Final merged quality gate
+
+After merging ikacore-v2 at aca8c53 into v2-reasoning (merge 01249f6), both
+requested gates pass on 2026-10-18:
+
+- python -m pytest -q: 1032 passed, 1 skipped in 16.82 seconds.
+- python scripts/quality.py: PASS; Ruff clean, Pyright zero errors, source compile
+  checks, 1032 passed / 1 skipped under coverage in 27.74 seconds, all 16 area
+  floors intact across 123 modules, wheel package-data and installed import checks.
+- Combined statement/branch coverage: 94.82% (the 91% floor is unchanged).
+  Separate line coverage is 96.53%; branch coverage is 88.68%.
+- All 21 synthetic provider payload SHA-256 checks pass. Only the three Codex
+  request hashes described above changed for the encryption include.
+- Public snapshot resume coverage passes for all seven reasoning provider routes.
+
+The optional real-provider smoke test is the one normal skip; the bounded live
+Codex reasoning probe above was run explicitly. Test servers require loopback
+access, so the final gate ran with sandbox escalation. No tests or floors were
+disabled, and no production behavior was changed to accommodate the live harness:
+the completed grouped-config port was brought in by the requested merge.
