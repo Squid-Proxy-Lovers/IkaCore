@@ -155,13 +155,15 @@ def _build_anthropic_summary_payload(
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01",
     }
-    return {
+    payload: JsonDict = {
         "model": model_name,
         "max_tokens": 2000,
         "system": sys_prompt,
         "messages": [{"role": "user", "content": user_content}],
-        "temperature": 0.3,
-    }, headers
+    }
+    if supports_custom_temperature(model_name):
+        payload["temperature"] = 0.3
+    return payload, headers
 
 
 def _build_gemini_summary_payload(

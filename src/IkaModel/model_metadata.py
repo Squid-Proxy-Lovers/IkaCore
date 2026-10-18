@@ -108,6 +108,8 @@ SUMMARY_MODEL_BY_PROVIDER = _load_summary_models(_MODEL_DATA)
 CODEX_KNOWN_MODELS = _load_string_set(_MODEL_DATA, "codex_known_models")
 TOKENMAX_MAPPING = _load_tokenmax_mapping(_MODEL_DATA)
 MODEL_COSTS = _load_model_costs(_MODEL_DATA)
+ANTHROPIC_ADAPTIVE_THINKING_MODELS = tuple(_load_string_set(_MODEL_DATA, "anthropic_adaptive_thinking_models"))
+ANTHROPIC_ADAPTIVE_ONLY_MODELS = tuple(_load_string_set(_MODEL_DATA, "anthropic_adaptive_only_models"))
 
 TOKEN_FALLBACKS = {
     "anthropic": TOKENMAX_MAPPING["claude-sonnet-4"],
@@ -204,7 +206,7 @@ def uses_openai_max_completion_tokens(model_id: str) -> bool:
 
 @lru_cache(maxsize=4096)
 def supports_custom_temperature(model_id: str) -> bool:
-    return not _matches_any(normalize_model_id(model_id), OPENAI_DEFAULT_TEMPERATURE_ONLY_MARKERS)
+    return not _matches_any(normalize_model_id(model_id), OPENAI_DEFAULT_TEMPERATURE_ONLY_MARKERS + ANTHROPIC_ADAPTIVE_ONLY_MODELS)
 
 
 @lru_cache(maxsize=4096)
@@ -214,6 +216,16 @@ def cap_openai_chat_completion_tokens(model_id: str, max_tokens: int) -> int:
         if all(marker in model_id_lower for marker in markers):
             return min(max_tokens, cap)
     return min(max_tokens, 8192)
+
+
+@lru_cache(maxsize=4096)
+def supports_anthropic_adaptive_thinking(model_id: str) -> bool:
+    return _matches_any(normalize_model_id(model_id), ANTHROPIC_ADAPTIVE_THINKING_MODELS)
+
+
+@lru_cache(maxsize=4096)
+def requires_anthropic_adaptive_thinking(model_id: str) -> bool:
+    return _matches_any(normalize_model_id(model_id), ANTHROPIC_ADAPTIVE_ONLY_MODELS)
 
 
 @lru_cache(maxsize=4096)
