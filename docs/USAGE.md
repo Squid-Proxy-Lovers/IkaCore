@@ -22,7 +22,7 @@ pip install -e .
 For test work:
 
 ```bash
-pip install -e .[test]
+pip install -e ".[test]"
 pytest
 ```
 
@@ -96,7 +96,23 @@ Every agent automatically gets an `agent_end` control tool. Staged agents also g
 Stages let one agent execute in bounded phases with different tools and optional model overrides.
 
 ```python
+import os
+from pathlib import Path
+
 from IkaCore import IkaBaseAgent, IkaStage, IkaTools
+
+list_files = IkaTools(
+    name="list_files",
+    description="List files in a directory",
+    parameters={"directory_path": {"type": "string", "required": True}},
+    execute_function=lambda args: os.listdir(args["directory_path"]),
+)
+read_file = IkaTools(
+    name="read_file",
+    description="Read a UTF-8 text file",
+    parameters={"file_path": {"type": "string", "required": True}},
+    execute_function=lambda args: Path(args["file_path"]).read_text(encoding="utf-8"),
+)
 
 list_stage = IkaStage(
     name="discover",
@@ -143,9 +159,25 @@ Useful `IkaStage` fields:
 
 ### Human In The Loop
 
-HITL stages raise a resumable interrupt instead of reading from stdin.
+HITL stages raise a resumable interrupt instead of reading from stdin. Enable HITL when constructing the stage:
 
 ```python
+from IkaCore import IkaBaseAgent, IkaStage
+
+review = IkaStage(
+    name="review",
+    prompt="Ask the user which filtering option to use, then finish the review.",
+    tools=[],
+    hitl=True,
+)
+agent = IkaBaseAgent(
+    name="reviewer",
+    description="Requests a filtering decision",
+    prompt="Review the filtering options.",
+    Stages=[review],
+    model_id="gpt-4o-mini",
+    api_key="...",
+)
 agent.enable_snapshots("state/snapshots.db")
 result = agent.execution()
 
@@ -160,7 +192,7 @@ The interrupt payload includes the stage name, question, and snapshot identifier
 
 ### Memory
 
-Set `memory=True` to enable memory helpers. Memory access is controlled with `memory_access`.
+Set `memory=True` to enable memory tools, then initialize the corresponding backends. The flag alone does not create storage. Memory access is controlled with `memory_access`.
 
 Supported access keys:
 
@@ -171,7 +203,34 @@ Supported access keys:
 
 Long-term save now expects structured arguments, not a pipe-delimited string.
 
+This self-contained example uses a synchronous in-process `StorageBackend` implementation
+with literal substring matching. It needs no Mem0 dependency or credentials, and its data
+lasts only for the lifetime of the backend instance.
+
 ```python
+from datetime import datetime
+from typing import Any
+
+from IkaCore import IkaBaseAgent
+from IkaMem import LTMemItem, LTMemory, STMemory
+
+
+class LocalStorage:
+    def __init__(self):
+        self.rows = []
+
+    def save(self, value: Any, metadata: dict[str, Any]) -> None:
+        self.rows.append({"data": value, "metadata": dict(metadata)})
+
+    def search(self, query: str, limit: int, score_threshold: float) -> list[Any]:
+        # Exact substring matches have score 1.0 in this demonstration.
+        return [row for row in self.rows if query.lower() in str(row["data"]).lower()
+                and score_threshold <= 1.0][:limit]
+
+    def reset(self) -> None:
+        self.rows.clear()
+
+
 memory_access = {
     "short_term_save": True,
     "short_term_search": True,
@@ -188,9 +247,24 @@ agent = IkaBaseAgent(
     memory=True,
     memory_access=memory_access,
 )
+agent.short_term_memory = STMemory(storage=LocalStorage())
+agent.short_term_memory.agent = agent.name
+agent.long_term_memory = LTMemory(storage=LocalStorage())
+agent.long_term_memory.agent = agent.name
+
+agent.short_term_memory.save("The project uses Python", {"source": "README"})
+assert agent.short_term_memory.search("Python")[0]["data"] == "The project uses Python"
+agent.long_term_memory.save(LTMemItem(
+    agent=agent.name,
+    task="Inspect the project",
+    expected_output="A Python framework",
+    datetime=datetime.now().isoformat(),
+    quality=1.0,
+))
+assert agent.long_term_memory.search("Inspect")[0]["metadata"]["expected_output"] == "A Python framework"
 ```
 
-`IkaMem` can operate without Mem0, but Mem0-backed storage is optional when the dependency is installed and configured.
+`STMemory` and `LTMemory` accept any backend implementing `save(value, metadata)`, `search(query, limit, score_threshold)` and `reset()`. For optional Mem0 storage, install/configure `mem0ai`, call `agent.init_short_term_memory({"provider": "mem0", "config": {...}})`, and assign `LTMemory(embedder_config=...)` for long-term storage. See the [memory setup guide](../src/IkaMem/docs/README.md).
 
 ### Provider Selection
 
@@ -294,7 +368,7 @@ Current workflow semantics:
 
 ### Snapshots
 
-Opt in to durable run, stage, and tool state through one SQLite `SnapshotStore`:
+Using an agent configured above, opt in to durable run, stage, and tool state through one SQLite `SnapshotStore`:
 
 ```python
 store = agent.enable_snapshots("state/snapshots.db")

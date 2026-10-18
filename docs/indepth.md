@@ -4,7 +4,7 @@ This document explains how the current IkaCore runtime is structured and where t
 
 ### Package Layout
 
-- `src/IkaCore`: agent runtime, stages, workflow graph, logging, checkpoints
+- `src/IkaCore`: agent runtime, stages, workflow graph, logging, snapshots
 - `src/IkaModel`: provider payload builders, transport layer, tool execution loop, summarization helpers
 - `src/IkaMem`: short-term and long-term memory abstractions
 - `src/IkaTest`: regression tests for runtime behavior
@@ -16,7 +16,7 @@ This document explains how the current IkaCore runtime is structured and where t
 - `AgentMemoryMixin`: memory initialization and memory tool helpers
 - `AgentToolsMixin`: tool conversion, stage tool assembly, subagent delegation
 - `AgentExecutionMixin`: thin execution entry points
-- `AgentHelpersMixin`: shared runtime helpers, validation, checkpoint and HITL support
+- `AgentHelpersMixin`: shared runtime helpers, validation, snapshot and HITL support
 
 The constructor in [`agents.py`](../src/IkaCore/agents.py) is the contract that the rest of the repo now follows.
 
@@ -107,7 +107,7 @@ Important current behavior:
 - Codex is a separate provider that targets `CODEX_API_URL`
 - explicit non-OpenAI URLs are respected
 
-Codex auth is intentionally not automatic in the request path. The Codex provider treats `BareBoneModel.api_key` as the literal bearer token. Users can pass their own bearer token, or call `IkaModel.codex.codex_auth.get_bearer()` to read and refresh the Codex CLI credentials from `~/.codex/auth.json` or `$CODEX_HOME/auth.json`.
+Codex auth is intentionally not automatic in the request path. The Codex provider treats `BareBoneModel.api_key` as the literal bearer token. Users can pass their own bearer token, or explicitly import `get_bearer` with `from IkaModel.codex.auth import get_bearer` and call `get_bearer()` to read and refresh the Codex CLI credentials from `~/.codex/auth.json` or `$CODEX_HOME/auth.json`.
 
 ### HITL And Resume
 
@@ -116,22 +116,44 @@ Human-in-the-loop no longer depends on blocking terminal input.
 Current behavior:
 
 - `ask_user` raises a structured interrupt
-- the interrupt can be checkpointed
+- the interrupt can be saved as a snapshot
 - `resume_from_snapshot(snapshot_id, resume_input=...)` continues the run
 
 Regression coverage lives in [`test_hitl_interrupt_resume.py`](../src/IkaTest/test_hitl_interrupt_resume.py).
 
-### Checkpointing
+### Snapshot Persistence and Replay
 
-Checkpoint persistence is implemented in [`checkpoint.py`](../src/IkaCore/checkpoint.py).
+[`SnapshotStore`](../src/IkaCore/snapshot_store.py) is the sole persistence backend.
+Call `agent.enable_snapshots(path, control)` or `workflow.enable_snapshots(path, control)`
+to opt in. `RuntimeControl` selects pause points; execution returns a `snapshot_id`
+when paused or waiting for human input. An equivalently configured agent can open the
+same database and call `resume_from_snapshot(snapshot_id, resume_input=...)`.
 
-The current implementation is intentionally simple:
+The SQLite model has three related records:
 
-- SQLite-backed storage
-- JSON payloads
-- resumable run metadata for agent/stage/HITL state
+- A run identifies an agent or workflow execution and its status.
+- Frames describe nested agent, stage, tool, subagent and workflow-instance execution,
+  including lineage, inputs, outputs and resolved configuration.
+- Immutable snapshots capture frame state, transcript and usage at boundaries. Events
+  record lifecycle and tool activity for inspection and replay assessment.
 
-It is materially better than the older coarse resume path, but it is still lighter-weight than full durable orchestration systems such as LangGraph.
+A boundary's snapshot, event and requested pause status commit atomically. Connections
+are scoped to operations/transactions; no database lock spans a provider or tool call.
+Post-model resume consumes the saved response without counting usage twice, and completed
+snapshots return their saved output. `SnapshotStore.fork_run_from_snapshot()` creates a
+new run with cloned lineage; `restart_frame()` forks from the frame's entry snapshot.
+Replay checks tool-effect safety and requires `allow_unsafe_replay=True` for unsafe effects.
+It cannot restore a Python stack or undo external side effects.
+
+Workflow `resume_from_snapshot()` reuses completed instance results. Selective instance
+replay invalidates downstream results; nested or unfinished tool effects are checked
+before replay. `snapshot_runtime_info()` exposes run/frame IDs and the last snapshot ID.
+Snapshot JSON filters known credential patterns; redacted state is refused for replay
+by default. Keep databases private because filtering cannot identify all private content.
+
+V2 removes `CheckpointStore`, `load_checkpoint()`, `checkpoint_uid` and constructor/stage
+checkpoint options. Old checkpoint databases are left intact and are not converted;
+finish those runs with v1 before migrating. See the [migration guide](v2/README.md#breaking-changes-and-migration).
 
 ### Memory
 
@@ -147,7 +169,7 @@ Agent-side memory tools are assembled by `AgentMemoryMixin`. Long-term save and 
 
 The repo now has explicit gates for the maintenance risks that used to drift:
 
-- no production function or class may grow to 70 lines or more
+- production functions are limited to 70 lines and modules to 600 lines; there is no whole-class size limit (enforced by `test_quality_gates.py` in `scripts/quality.py`)
 - broad `except Exception` boundaries are limited to the current intentional runtime isolation points
 - `pyright` checks import/name, call, argument, assignment, return, optional, iterable, and attribute access regressions
 - coverage must stay above the configured project threshold
