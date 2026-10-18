@@ -262,6 +262,8 @@ caches, forks, or other clones.
 
 ## Current integrated validation
 
+Validated runtime/test source revision: **`f8c6c1a2105efc6bb2972b075b4fc4bc51829e1c`**.
+
 [merge-validation.md](merge-validation.md) records the final sequential pytest, quality,
 execution-parity, installed-wheel app and Codex matrix results for the ergonomics merge.
 The three original dogfood reproductions pass without xfail. Hardening's raised global

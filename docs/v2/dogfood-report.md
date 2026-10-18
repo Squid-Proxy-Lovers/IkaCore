@@ -205,6 +205,8 @@ isolated imports. Combined coverage **94.80%**, line **96.46%**, branch **88.82%
 
 ## Integrated verification
 
+Validated runtime/test source revision: **`f8c6c1a2105efc6bb2972b075b4fc4bc51829e1c`**.
+
 The ergonomics merge reruns these assertions alongside reasoning replay, crash durability,
 soak, generative tests and the raised hardening floors. Current numbers and revision labels
 are in [merge-validation.md](merge-validation.md); installed-wheel app outcomes are in

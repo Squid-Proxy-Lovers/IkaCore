@@ -1,6 +1,6 @@
 {
   "date_utc": "2026-10-18T06:43:01.531513+00:00",
-  "source_revision": "merge of 7c410f3 and a2b7984 plus integration fixes",
+  "source_revision": "f8c6c1a2105efc6bb2972b075b4fc4bc51829e1c",
   "wheel_sha256": "afd623a0087f6fd2b86a4b9841a6f3523c3d7b4101f72354a7b7b62070c767fb",
   "model": "gpt-5.6-sol",
   "live_chat_turns": 4,
@@ -104,7 +104,7 @@
   ],
   "total_request_attempts": 39,
   "total_seconds": 101.76,
-  "revision": "integrated merge of 7c410f3 and a2b7984",
+  "revision": "f8c6c1a2105efc6bb2972b075b4fc4bc51829e1c",
   "runtime_sha256": "72a19681dbe20599ee4d96d945fc697cfa36c6215196a231acc687d975256759",
   "offline_results": [
     {
@@ -648,6 +648,7 @@
         "usage_complete": true,
         "seconds": 5.51
       }
-    ]
+    ],
+    "validated_merge_revision": "f8c6c1a2105efc6bb2972b075b4fc4bc51829e1c"
   }
 }

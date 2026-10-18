@@ -1,5 +1,7 @@
 # Integrated v2 ergonomics / reasoning / hardening validation
 
+Validated runtime/test source revision: **`f8c6c1a2105efc6bb2972b075b4fc4bc51829e1c`**.
+
 Measured **2026-10-18** in `/private/tmp/ikacore-dedupe`, branch `ikacore-v2`,
 while resolving the merge of **`7c410f3d90cf7f8721967930caa85fb9754477d8`**
 with **`a2b7984ac563f4326c2f20ea4035198df5513f54`**.

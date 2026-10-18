@@ -1,5 +1,7 @@
 # Codex application usage results
 
+Validated runtime/test source revision: **`f8c6c1a2105efc6bb2972b075b4fc4bc51829e1c`**.
+
 Measured **2026-10-18T06:43:01.531513+00:00** on the integrated ergonomics/reasoning/hardening source
 (merge parents `7c410f3` and `a2b7984`, with integration fixes).
 Model: **gpt-5.6-sol**, explicitly using `--live --use-local-login --model gpt-5.6-sol`.

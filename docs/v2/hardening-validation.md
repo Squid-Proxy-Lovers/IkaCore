@@ -112,6 +112,8 @@ Retained ignored evidence: `artifacts/hardening/{baseline.log,baseline-compact.j
 
 ## Integrated ergonomics merge
 
+Validated runtime/test source revision: **`f8c6c1a2105efc6bb2972b075b4fc4bc51829e1c`**.
+
 The integrated runtime (parents `7c410f3` / `a2b7984`, runtime fingerprint
 `72a19681dbe20599ee4d96d945fc697cfa36c6215196a231acc687d975256759`) passes **1,386 tests / 2 opt-in skips**,
 **100% lines / 97.1816% branches / 99.3842% combined** with all raised floors retained.
