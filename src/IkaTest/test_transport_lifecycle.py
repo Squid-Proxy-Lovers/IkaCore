@@ -1,5 +1,6 @@
 import asyncio
 import json
+import socket
 import threading
 from concurrent.futures import Future, TimeoutError
 from unittest.mock import Mock
@@ -187,3 +188,60 @@ def test_async_post_abort_preserves_caller_client(mode):
                     await task
             assert closed.is_set() and not client.is_closed and not callbacks
     asyncio.run(run())
+
+
+def test_sync_request_clamps_each_timeout_without_changing_caller_configuration():
+    requests = []
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={})
+    with httpx.Client(timeout=900, transport=httpx.MockTransport(respond)) as client:
+        with request_controls(timeout=.2):
+            controlled_post(URL, {}, {}, 2, client)
+        timeouts = requests[0].extensions['timeout']
+        assert set(timeouts) == {'connect', 'read', 'write', 'pool'}
+        assert all(0 < value <= .2 for value in timeouts.values())
+        assert client.timeout == httpx.Timeout(900)
+
+
+@pytest.mark.parametrize('error_type', [httpx.ReadError, httpx.ReadTimeout])
+def test_sync_transport_errors_preserve_their_type_without_an_execution_abort(error_type):
+    def respond(request):
+        raise error_type('transport failed')
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        with request_controls(cancel_checker=lambda: False), pytest.raises(error_type):
+            controlled_post(URL, {}, {}, 2, client)
+
+
+@pytest.mark.parametrize('multiplexed', [False, True])
+def test_sync_abort_handles_closed_sockets_and_never_shuts_down_http2(multiplexed):
+    cancelled, released = threading.Event(), threading.Event()
+    callbacks = []
+    sock = Mock(spec=socket.socket)
+    sock.shutdown.side_effect = OSError('already closed')
+    network = Mock()
+    network.get_extra_info.return_value = sock
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            cancelled.set()
+            callbacks[0]()
+            assert released.is_set()
+            yield b'{}'
+        def close(self):
+            released.set()
+    def respond(request):
+        trace = request.extensions['trace']
+        trace('connection.connect_tcp.complete', {'return_value': network})
+        trace('connection.start_tls.complete', {'return_value': network})
+        trace(('http2' if multiplexed else 'http11') + '.send_request_headers.started', {'request': request})
+        return httpx.Response(200, stream=Stream(), extensions={
+            'http_version': b'HTTP/2' if multiplexed else b'HTTP/1.1', 'network_stream': network,
+        })
+    def register(callback):
+        callbacks.append(callback)
+        return lambda: callbacks.remove(callback)
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        with request_controls(cancel_checker=cancelled.is_set, abort_registrar=register), pytest.raises(IkaRequestCancelled):
+            controlled_post(URL, {}, {}, 2, client)
+        assert not client.is_closed and not callbacks
+    assert sock.shutdown.call_count == (0 if multiplexed else 1)

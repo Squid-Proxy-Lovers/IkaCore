@@ -56,9 +56,14 @@
         "src/IkaTest/test_transport_lifecycle.py::test_scoped_posts_and_streams_share_owned_client_and_close_it",
         "src/IkaTest/test_transport_lifecycle.py::test_deadline_owned_client_is_closed_after_success",
         "src/IkaTest/test_transport_lifecycle.py::test_sync_abort_closes_only_response_and_preserves_caller_client",
-        "src/IkaTest/test_transport_lifecycle.py::test_async_post_abort_preserves_caller_client"
+        "src/IkaTest/test_transport_lifecycle.py::test_async_post_abort_preserves_caller_client",
+        "src/IkaTest/test_transport_loopback.py::test_real_socket_abort_wakes_headers_and_body_and_preserves_client",
+        "src/IkaTest/test_transport_loopback.py::test_trickled_body_cannot_restart_the_execution_deadline",
+        "src/IkaTest/test_transport_loopback.py::test_reused_connection_header_wait_is_bounded_by_remaining_deadline",
+        "src/IkaTest/test_transport_lifecycle.py::test_sync_request_clamps_each_timeout_without_changing_caller_configuration",
+        "src/IkaTest/test_transport_lifecycle.py::test_sync_abort_handles_closed_sockets_and_never_shuts_down_http2"
       ],
-      "known_gap": "HTTPX mock transports and local SSL construction; real TLS/proxy handshakes are not exercised.",
+      "known_gap": "Real loopback HTTP/1 header/body aborts are tested; real TLS/proxy handshakes and HTTP/2 interruption are not. Sync abort can wait for an I/O timeout before headers on reused connections or when transports expose no request socket.",
       "min_lines": 95,
       "min_branches": 90
     },

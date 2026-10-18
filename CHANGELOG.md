@@ -45,6 +45,10 @@ V2 intentionally breaks compatibility with v1. See the
   siblings, and continue dependents in sync and parallel workflows.
 - Keep remaining step budgets for older v2 snapshots without `loop_state`, including
   the consumed allowance recorded by the current stage's entry boundary.
+- Register synchronous HTTP abort before headers, clamp every per-request I/O timeout
+  to the remaining deadline, and shut down exposed HTTP/1 sockets to wake blocked reads.
+  Verify real loopback header/body cancellation and trickled-body deadlines while
+  preserving caller-owned clients. Document remaining sync interruption limits.
 - Require explicit `allow_unsafe_replay=True` approval before historical snapshot
   resume repeats unsafe tool effects, including nested calls.
 - Pause snapshot-enabled workflows when an agent waits for human input, blocking its
