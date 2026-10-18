@@ -270,3 +270,31 @@ def test_resume_does_not_require_approval_for_effects_before_snapshot(tmp_path, 
         assert effects == [True]
     finally:
         agent.shutdown()
+
+
+def test_nested_agent_snapshots_belong_to_child_and_support_frame_restart(tmp_path, monkeypatch):
+    child = IkaBaseAgent('Child', 'test', 'child task', model_id='gpt-4o', api_key='test', show_usage_level0=False)
+    tool = IkaTools('child', 'test', {'type': 'object'}, execute_function=lambda args: child.execution(), replay_policy='allow')
+    parent = _agent(tmp_path, tools=[tool])
+    store = parent.enable_snapshots(str(tmp_path / 'runtime.db'))
+    def chat(model, messages, history, **kwargs):
+        if model.agent_name == 'Parent':
+            execute_tool('child', {}, kwargs['tool_executors'])
+        return _finished(model.agent_name + ' done')
+    monkeypatch.setattr('IkaCore.agent_chat_support.chat', chat)
+    try:
+        result = parent.execution()
+        frames = store.list_frames(result['runtime']['run_id'])
+        child_frame = next(frame for frame in frames if frame['frame_type'] == 'agent' and frame['frame_name'] == 'Child')
+        caller = store.get_frame(child_frame['parent_frame_id'])
+        assert caller['frame_type'] == 'tool' and caller['frame_name'] == 'child'
+        entry = store.get_frame_entry_snapshot(child_frame['frame_id'])
+        assert entry is not None
+        assert entry['state_json']['root_frame_id'] == child_frame['frame_id']
+        assert not entry['state_json'].get('tool_checkpoint')
+        caller_snapshots = [item for item in store.list_snapshots(result['runtime']['run_id']) if item['frame_id'] == caller['frame_id']]
+        assert {item['snapshot_kind'] for item in caller_snapshots} == {'frame_entry', 'pre_tool', 'post_tool'}
+        assert child.restart_from_frame(child_frame['frame_id'])['final_message'] == 'Child done'
+    finally:
+        parent.shutdown()
+        child.shutdown()

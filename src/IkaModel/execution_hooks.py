@@ -47,9 +47,11 @@ def emit_boundary(label: str, payload: Optional[JsonDict] = None) -> Optional[st
 @contextmanager
 def execution_hooks(hooks: ExecutionHooks) -> Generator[None, None, None]:
     token = _hooks.set(hooks)
+    frame_token = _frame.set(None)
     try:
         yield
     finally:
+        _frame.reset(frame_token)
         _hooks.reset(token)
 
 

@@ -100,7 +100,8 @@
         "src/IkaTest/test_tool_output_limits.py::test_output_limit_properties_across_unicode_and_boundaries",
         "src/IkaTest/test_tool_runtime_metadata.py::test_sync_tool_timeout_returns_at_configured_limit_and_worker_is_released",
         "src/IkaTest/test_tool_runtime_metadata.py::test_async_tool_timeout_cancels_coroutine_and_reports_its_configured_limit",
-        "src/IkaTest/test_tool_schema.py::test_fresh_lists_cannot_grow_fast_cache_without_bound"
+        "src/IkaTest/test_tool_schema.py::test_fresh_lists_cannot_grow_fast_cache_without_bound",
+        "src/IkaTest/test_execution_hooks.py::test_nested_hook_scope_clears_and_restores_tool_identity"
       ],
       "known_gap": "Tool side effects are synthetic; application tool implementations need their own tests.",
       "min_lines": 95,
@@ -149,7 +150,8 @@
         "src/IkaTest/test_agent_snapshots.py::test_generator_tool_records_mid_tool_pause_and_requires_replay_decision",
         "src/IkaTest/test_agent_snapshots.py::test_pause_configuration_is_isolated_and_preserves_replay_policy",
         "src/IkaTest/test_agent_snapshots.py::test_historical_resume_requires_approval_for_repeated_tool_effects",
-        "src/IkaTest/test_agent_snapshots.py::test_resume_does_not_require_approval_for_effects_before_snapshot"
+        "src/IkaTest/test_agent_snapshots.py::test_resume_does_not_require_approval_for_effects_before_snapshot",
+        "src/IkaTest/test_agent_snapshots.py::test_nested_agent_snapshots_belong_to_child_and_support_frame_restart"
       ],
       "known_gap": "In-process mocked models; mid-tool replay restarts execution rather than restoring Python stacks.",
       "min_lines": 95,
