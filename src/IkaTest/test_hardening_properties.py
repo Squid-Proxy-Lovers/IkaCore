@@ -40,8 +40,9 @@ class Chunks(httpx.SyncByteStream, httpx.AsyncByteStream):
 def test_sse_arbitrary_byte_boundaries_preserve_unicode_and_terminal_output(text, cuts, newline):
     events = [": heartbeat", "data: {malformed", "data: [DONE]", "data: null",
               "data: " + json.dumps({"type": "response.output_text.delta", "delta": text}, ensure_ascii=False),
-              "data: " + json.dumps({"type": "response.completed", "response": {"status": "completed", "id": "ok"}})]
-    raw = (newline.join(events) + newline * 2).encode()
+              newline.join("data: " + line for line in json.dumps(
+                  {"type": "response.completed", "response": {"status": "completed", "id": "ok"}}, indent=2).splitlines())]
+    raw = ((newline * 2).join(events) + newline * 2).encode()
     sync = collect_stream(httpx.Response(200, stream=Chunks(raw, cuts)))
     async def run():
         return await async_collect_stream(httpx.Response(200, stream=Chunks(raw, cuts)))
