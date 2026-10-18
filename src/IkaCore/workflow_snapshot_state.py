@@ -13,6 +13,8 @@ from typing import Any, Optional, cast
 from .runtime_control import RuntimeControl, RuntimePauseRequested
 from .snapshot_store import SnapshotStore
 
+INTERRUPTED_STATUSES = {"paused", "awaiting_user_input"}
+
 
 def graph_fingerprint(workflow: Any) -> str:
     nodes = [(n.name, n.instances, n.instance_inputs, n.agent.model_id, n.agent.prompt,
@@ -60,6 +62,9 @@ def replay_cache(session: WorkflowSnapshotSession, saved: dict[str, Any], allow_
         node = workflow._node_index.get(node_name)
         if node is None or any(type(i) is not int or not 0 <= i < node.instances for i in instances):
             raise ValueError("parallel replay must select existing node instance IDs")
+    interrupted = {key.rpartition(":")[0] for key, result in saved.items()
+                   if result.get("status") in INTERRUPTED_STATUSES}
+    for node_name in selected.keys() | interrupted:
         frontier = list(workflow._node_dependents[node_name])
         while frontier:
             name = frontier.pop()
@@ -71,7 +76,7 @@ def replay_cache(session: WorkflowSnapshotSession, saved: dict[str, Any], allow_
         node, _, instance = key.rpartition(":")
         rerun = (not session.control.reuse_historical_parallel_results or node in invalidated
                  or int(instance) in selected.get(node, []))
-        if not rerun:
+        if not rerun and result.get("status") not in INTERRUPTED_STATUSES:
             cache[key] = result
     for frame in session.store.list_frames(str(session.run_id)):
         meta = frame["metadata_json"]

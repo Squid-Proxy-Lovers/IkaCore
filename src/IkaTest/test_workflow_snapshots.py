@@ -111,3 +111,54 @@ def test_parallel_snapshot_results_remain_complete(tmp_path):
     snapshot = store.load_snapshot(info["last_snapshot_id"])
     assert set(snapshot["state_json"]["instance_results"]) == {"root:0", "left:0", "left:1", "right:0", "join:0"}
     wf.async_executor.shutdown()
+
+
+@pytest.mark.parametrize('asynchronous', [False, True])
+def test_human_input_interrupt_blocks_workflow_dependents_and_completed_reuse(tmp_path, asynchronous):
+    wf, store, calls = workflow(tmp_path)
+    original_clone = wf.nodes[0].agent.clone_for_run
+    def clone(**kwargs):
+        agent = original_clone(**kwargs)
+        def interrupt():
+            calls.append('root')
+            return {'status': 'awaiting_user_input', 'final_message': 'Approve?',
+                    'interrupt_data': {'question': 'Approve?'}}
+        agent.execution = interrupt
+        return agent
+    wf.nodes[0].agent.clone_for_run = clone
+    try:
+        with patch('IkaCore.workflow_async.get_cli_output', return_value=MagicMock()):
+            assert wf.run(use_async=asynchronous) == {}
+            info = wf.snapshot_runtime_info()
+            assert info['paused'] and store.get_run(info['run_id'])['status'] == 'paused'
+            assert calls == ['root']
+            assert wf._workflow_snapshot.results == {}
+            saved = store.load_snapshot(info['last_snapshot_id'])
+            assert saved['state_json']['instance_results'] == {}
+            root = store.list_workflow_node_instances(info['run_id'], 'root')[0]
+            assert root['status'] == 'paused'
+            assert root['outputs_json']['status'] == 'awaiting_user_input'
+            wf.nodes[0].agent.clone_for_run = original_clone
+            assert set(wf.resume_from_snapshot(info['last_snapshot_id'])) == {'root', 'left', 'right', 'join'}
+            assert calls.count('root') == 2
+    finally:
+        wf.async_executor.shutdown()
+
+
+@pytest.mark.parametrize('status', ['paused', 'awaiting_user_input'])
+def test_workflow_replay_excludes_historically_cached_interruptions(tmp_path, status):
+    wf, store, calls = workflow(tmp_path)
+    try:
+        wf.run()
+        info = wf.snapshot_runtime_info()
+        snapshot = store.load_snapshot(info['last_snapshot_id'])
+        state = snapshot['state_json']
+        state['instance_results']['root:0'] = {'status': status, 'final_message': 'Approve?'}
+        historical = store.create_snapshot(info['run_id'], info['frame_id'], 'workflow_paused', state)
+        calls.clear()
+        wf.resume_from_snapshot(historical)
+        assert calls.count('root') == calls.count('right') == calls.count('join') == 1
+        assert calls.count('left') == 2
+        assert wf._workflow_snapshot.results['root:0'].get('status') is None
+    finally:
+        wf.async_executor.shutdown()

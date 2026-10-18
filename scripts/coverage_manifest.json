@@ -163,7 +163,9 @@
       "required_tests": [
         "src/IkaTest/test_workflow_snapshots.py::test_selective_replay_invalidates_descendants_and_preserves_other_instances",
         "src/IkaTest/test_workflow_snapshots.py::test_replay_checks_nested_tool_effects_before_selected_instance_is_rerun",
-        "src/IkaTest/test_workflow_snapshots.py::test_parallel_snapshot_results_remain_complete"
+        "src/IkaTest/test_workflow_snapshots.py::test_parallel_snapshot_results_remain_complete",
+        "src/IkaTest/test_workflow_snapshots.py::test_human_input_interrupt_blocks_workflow_dependents_and_completed_reuse",
+        "src/IkaTest/test_workflow_snapshots.py::test_workflow_replay_excludes_historically_cached_interruptions"
       ],
       "known_gap": "No distributed scheduler, crash recovery or arbitrary tool-implementation migration guarantee.",
       "min_lines": 95,

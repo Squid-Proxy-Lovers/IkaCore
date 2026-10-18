@@ -35,8 +35,8 @@ class WorkflowSnapshotMixin:
         if state.get("workflow_fingerprint") != graph_fingerprint(self):
             raise ValueError("snapshot belongs to a different workflow configuration")
         session.run_id, session.root_frame_id = info["run_id"], info["frame_id"]
-        session.results = state["instance_results"]
-        session.replay_cache = replay_cache(session, session.results, allow_unsafe_replay)
+        session.replay_cache = replay_cache(session, state["instance_results"], allow_unsafe_replay)
+        session.results = dict(session.replay_cache)
         session.last_snapshot_id, session.replaying = snapshot_id, True
         return self.run(state["initial_context"], use_async=state["use_async"])
 

@@ -12,7 +12,7 @@ from IkaModel.async_runner import run_async
 from IkaModel.execution_hooks import ExecutionHooks, execution_hooks
 
 from .runtime_control import RuntimePauseRequested
-from .workflow_snapshot_state import WorkflowSnapshotSession, save_workflow_boundary
+from .workflow_snapshot_state import INTERRUPTED_STATUSES, WorkflowSnapshotSession, save_workflow_boundary
 
 
 def wrap_snapshot_instance(workflow: Any, node_name: str, instance: int, agent: Any) -> Any:
@@ -43,8 +43,11 @@ def execute_instance(session: WorkflowSnapshotSession, node: str, instance: int,
         else:
             with execution_hooks(hooks):
                 result = execute(*args, **kwargs)
-        if result.get("status") == "paused":
+        if result.get("status") in INTERRUPTED_STATUSES:
             status, session.paused = "paused", True
+            with session.lock:
+                session.store.update_frame(frame, outputs=result)
+                save_workflow_boundary(session, "workflow_instance_interrupted")
             raise RuntimePauseRequested("workflow_instance", result.get("snapshot_id"), frame)
         status = "completed"
         with session.lock:
