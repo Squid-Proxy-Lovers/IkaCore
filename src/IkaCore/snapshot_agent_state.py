@@ -106,12 +106,11 @@ def raise_delegated_interrupt(child: Any, task: str, result: dict[str, Any]) -> 
     if result.get("status") in {"awaiting_user_input", "paused"}:
         raise HumanInputRequired(delegation_interrupt(child, task, result, current_tool_frame()))
 
-
-
 def _interrupt_matches(value: JsonDict, snapshot_id: str) -> bool:
     delegated = value.get("delegated")
     return (value.get("__ika_interrupt__") is True and isinstance(delegated, dict)
             and cast(JsonDict, delegated).get("snapshot_id") == snapshot_id)
+
 
 def _replace_interrupt(value: Any, snapshot_id: str, output: str) -> Any:
     if isinstance(value, str):
@@ -141,8 +140,6 @@ def _update_parent_result(agent: Any, state: dict[str, Any], snapshot_id: str, o
     agent._snapshot_runtime.live_messages = _replace_interrupt(agent._snapshot_runtime.live_messages, snapshot_id, output)
     state["message_history"] = deepcopy(agent.message_history)
 
-
-
 def _validate_delegated_snapshot(session: Any, pending: JsonDict) -> None:
     snapshot = session.store.load_snapshot(pending["snapshot_id"])
     if snapshot is None or snapshot["run_id"] != session.run_id:
@@ -152,6 +149,7 @@ def _validate_delegated_snapshot(session: Any, pending: JsonDict) -> None:
     if (root is None or root["frame_name"] != pending["agent_name"]
             or session.root_frame_id not in {frame["frame_id"] for frame in lineage}):
         raise ValueError("Delegated snapshot must belong to the parent and the configured child")
+
 
 def resume_delegation(agent: Any, state: dict[str, Any], answer: str | None) -> dict[str, Any] | None:
     data = state.get("interrupt_data", {})
