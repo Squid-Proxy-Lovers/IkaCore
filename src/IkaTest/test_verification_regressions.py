@@ -1,5 +1,6 @@
 """Public-boundary regressions from the v2 verification repros."""
 
+import json
 from contextlib import ExitStack
 
 import pytest
@@ -17,6 +18,21 @@ from IkaCore import (
     WorkflowNode,
 )
 from IkaCore.testing import MockProvider, provider_response
+
+
+def provider_tool_outputs(payload):
+    if "input" in payload:
+        return [item["output"] for item in payload["input"] if item.get("type") == "function_call_output"]
+    outputs = []
+    for message in payload.get("contents", payload.get("messages", [])):
+        if message.get("role") == "tool":
+            outputs.append(message["content"])
+        for block in message.get("parts", message.get("content", [])):
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                outputs.append(block["content"])
+            elif isinstance(block, dict) and "functionResponse" in block:
+                outputs.append(block["functionResponse"]["response"]["result"])
+    return outputs
 
 
 @pytest.fixture
@@ -135,21 +151,12 @@ def test_small_cap_preserves_delegated_continuation(agents, tmp_path, asynchrono
         if repeat:
             paused = parent.resume_from_snapshot(snapshot_id, resume_input="YES", allow_unsafe_replay=restore == "fork")
             snapshot_id = paused["snapshot_id"]
+            entries = [json.loads(entry["message"]) for entry in parent.transcript["messages"].values()
+                       if entry.get("type") == "tool"]
+            assert all(len(output) <= 128 for output in provider_tool_outputs({"messages": entries}))
         result = parent.resume_from_snapshot(snapshot_id, resume_input="YES", allow_unsafe_replay=restore == "fork")
     assert result["final_message"] == "parent done"
-    payload = mock.requests[-1]
-    if "input" in payload:
-        outputs = [item["output"] for item in payload["input"] if item.get("type") == "function_call_output"]
-    elif "contents" in payload:
-        outputs = [part["functionResponse"]["response"]["result"] for message in payload["contents"]
-                   for part in message["parts"] if "functionResponse" in part]
-    else:
-        outputs = []
-        for message in payload["messages"]:
-            if message.get("role") == "tool":
-                outputs.append(message["content"])
-            elif isinstance(message.get("content"), list):
-                outputs.extend(block["content"] for block in message["content"] if block.get("type") == "tool_result")
+    outputs = provider_tool_outputs(mock.requests[-1])
     assert any("CHILD_APPROVED_OUTPUT" in output for output in outputs)
     assert all(len(output) <= 128 for output in outputs)
     assert "__ika_interrupt__" not in str(mock.requests[-1])
@@ -194,3 +201,38 @@ def test_batch_keeps_continuation_identity_outside_capped_text(asynchronous, par
     assert batch[4]["delegated"]["snapshot_id"] == "identity-must-survive"
     assert batch[4]["tool_result_continuation"] == {"tool_call_id": "approval", "call_index": 1}
     assert all(len(output) <= 1 for output in batch[1])
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("environment", [False, True])
+@pytest.mark.parametrize("model_id", ["gpt-4o-mini", "claude-sonnet-4-5", "gemini-2.5-flash", "deepseek-chat"])
+def test_resumed_delegated_output_obeys_cap(agents, tmp_path, monkeypatch, asynchronous, environment, model_id):
+    from IkaModel import request_controls
+    from IkaModel.tool_output import truncate_tool_result
+
+    cap = 2048
+    child_output = "APPROVED_" + "X" * 10000
+    child = agents("child", asynchronous, stages=[IkaStage("approve", "Approval", [], hitl=True)])
+    parent = agents("parent", asynchronous, model_id=model_id, topology=AgentTopology(subagents=(child,)))
+    store = parent.enable_snapshots(str(tmp_path / "cap.db"))
+    if environment:
+        monkeypatch.setenv("IKA_TOOL_RESULT_MAX_CHARS", str(cap))
+    else:
+        monkeypatch.delenv("IKA_TOOL_RESULT_MAX_CHARS", raising=False)
+    actions = iter([("child", {"input": "need approval"}), ("ask_user", {"question": "Approve?"}),
+                    ("agent_end", {"input": child_output}), ("agent_end", {"input": "done"})])
+    with request_controls(tool_result_max_chars=None if environment else cap), MockProvider(
+        responder=lambda u, p: provider_response(u, p, next(actions))
+    ) as mock:
+        paused = parent.execution()
+        result = parent.resume_from_snapshot(paused["snapshot_id"], resume_input="YES")
+        expected = truncate_tool_result(child_output, "child")
+    assert result["final_message"] == "done"
+    outputs = provider_tool_outputs(mock.requests[-1])
+    assert expected in outputs
+    assert all(len(output) <= cap for output in outputs)
+    assert child_output not in str(mock.requests[-1])
+    assert child_output not in str(parent.transcript)
+    frame = store.get_frame(paused["interrupt_data"]["delegated"]["tool_frame_id"])
+    assert frame["outputs_json"]["result"] == expected
+    assert len(expected) == cap

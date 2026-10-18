@@ -81,7 +81,8 @@ IkaCore 2.0 intentionally breaks compatibility with v1. Start with the
   truncated summaries preserve history and interrupted provider answers skip partial tools.
   Empty truncated turns remain interrupted instead of completing through forced summaries.
 - Apply model-aware Anthropic thinking/sampling/tool choice, Gemini dynamic thinking,
-  cached/thought usage accounting, multiline Codex SSE and capped provider tool results.
+  cached/thought usage accounting, multiline Codex SSE and capped provider tool results,
+  including delegated child output inserted when a parent resumes.
 - Manual secret scans inspect the working directory without accidentally scanning all history.
 - Align stage_end(reason=...), provider reasoning, approval fork and silent reviewer docs
   with the implemented APIs.

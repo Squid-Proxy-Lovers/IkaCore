@@ -12,6 +12,7 @@ from IkaCore.agent_runtime_payloads import JsonDict, history_section
 from IkaCore.execution_types import ExecutionLoopState
 from IkaModel.base import AgentEndException, HumanInputRequired
 from IkaModel.execution_hooks import current_tool_frame, emit_boundary
+from IkaModel.tool_output import truncate_tool_result
 
 
 def clear_resume_state(agent: Any) -> None:
@@ -194,10 +195,11 @@ def resume_delegation(agent: Any, state: dict[str, Any], answer: str | None) -> 
         if "tool_result_continuation" in data:
             updated["tool_result_continuation"] = data["tool_result_continuation"]
         data = updated
-        _update_parent_result(agent, state, pending["snapshot_id"], json.dumps({"__ika_interrupt__": True, **data}))
+        text = truncate_tool_result(json.dumps({"__ika_interrupt__": True, **data}), pending["agent_name"])
+        _update_parent_result(agent, state, pending["snapshot_id"], text)
         return {"status": result["status"], "last_content": result.get("final_message", ""),
                 "interrupt_data": data}
-    output = result.get("summary") or result.get("final_message", "")
+    output = truncate_tool_result(result.get("summary") or result.get("final_message", ""), pending["agent_name"])
     _update_parent_result(agent, state, pending["snapshot_id"], output)
     if pending.get("tool_frame_id"):
         session.store.update_frame(pending["tool_frame_id"], status="completed", outputs={"result": output})
