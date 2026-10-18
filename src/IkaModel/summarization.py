@@ -11,6 +11,8 @@ import httpx
 from IkaCore.agent_runtime_payloads import JsonDict, history_message_text, history_section, json_dict, string_value
 
 from .base import BareBoneModel
+from .compaction import compact_live_messages as compact_live_messages
+from .compaction import retained_compaction_entries
 from .model_metadata import (
     OPENAI_CHAT_COMPLETIONS_URL,
     get_api_url_for_model,
@@ -360,28 +362,30 @@ def _resolve_summary_target(
 
 
 def _write_summary_to_history(message_history: JsonDict, summary: str, summary_tokens: int) -> None:
+    if not summary.strip():
+        return  # An empty provider response must never destroy the transcript.
+    retained = retained_compaction_entries(message_history)
     summary_section = history_section(message_history, "summary")
     summary_section["message"] = f"[SUMMARY]\n{summary}"
     summary_section["tokens"] = summary_tokens
-    message_history["messages"] = {}
-    _LOG.info(
-        "Message history summarized. Kept: system prompt, first input, and summary. "
-        "Cleared all other messages."
-    )
+    message_history["messages"] = retained
+    _LOG.info("Message history summarized; retained system, task, latest user and tool exchange.")
 
 
 def get_conversation_text(message_history: JsonDict) -> str:
     parts: list[str] = []
-    first_input = history_message_text(message_history, "first_input")
-    if first_input:
-        parts.append(first_input)
-    summary = history_message_text(message_history, "summary")
-    if summary:
-        parts.append(summary)
+    for section in ("system", "first_input", "summary"):
+        text = history_message_text(message_history, section)
+        if text:
+            parts.append(text)
     for message_entry in history_section(message_history, "messages").values():
-        message = json_dict(message_entry).get("message")
+        entry = json_dict(message_entry)
+        message = entry.get("message")
         if message:
             parts.append(string_value(message))
+        reasoning = entry.get("reasoning_content")
+        if reasoning:
+            parts.append("[reasoning] " + string_value(reasoning))
     return "\n".join(parts)
 
 

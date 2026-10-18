@@ -91,7 +91,7 @@ def chat(
     message_history, tool_executors = _prepare_chat_inputs(
         barebone_model, messages, message_history, tool_executors, logger
     )
-    _summarize_sync_if_near_budget(barebone_model, message_history, client)
+    _summarize_sync_if_near_budget(barebone_model, message_history, client, messages)
     _ensure_first_input(message_history, messages)
 
     provider = _provider_for_model(barebone_model)
@@ -227,7 +227,7 @@ async def async_chat(
         barebone_model, messages, message_history, tool_executors, logger
     )
 
-    await _summarize_async_if_near_budget(barebone_model, message_history, client)
+    await _summarize_async_if_near_budget(barebone_model, message_history, client, messages)
     _ensure_first_input(message_history, messages)
     provider = _provider_for_model(barebone_model)
 

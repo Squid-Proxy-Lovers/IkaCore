@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--providers', help='comma-separated provider IDs, or all-configured')
+    parser.add_argument("--retention-eval", action="store_true", help="run bounded Codex compaction fact-retention evaluation")
     options, forwarded = parser.parse_known_args()
     if options.providers:
         from live_provider_config import PROVIDERS
@@ -43,8 +44,9 @@ def main():
         python = runtime / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
         subprocess.run([sys.executable, '-m', 'pip', '--python', str(python), 'install', '--retries', '0', '--timeout', '30', str(wheel)],
                        env=env, check=True, stdout=subprocess.DEVNULL, timeout=180)
-        args = forwarded or ['--all-configured']
-        return subprocess.run([str(python), str(ROOT / 'scripts/live_provider_check.py'), *args],
+        args = forwarded if options.retention_eval else forwarded or ["--all-configured"]
+        runner = "live_compaction_eval.py" if options.retention_eval else "live_provider_check.py"
+        return subprocess.run([str(python), str(ROOT / "scripts" / runner), *args],
                               cwd=ROOT, env=env, check=False).returncode
 
 
