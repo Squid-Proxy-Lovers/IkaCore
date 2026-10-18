@@ -106,6 +106,7 @@ _MODEL_DATA = _load_model_metadata()
 API_URL_BY_PROVIDER = _load_api_urls(_MODEL_DATA)
 SUMMARY_MODEL_BY_PROVIDER = _load_summary_models(_MODEL_DATA)
 CODEX_KNOWN_MODELS = _load_string_set(_MODEL_DATA, "codex_known_models")
+GEMINI_DISABLE_THINKING_MODELS = tuple(_load_string_set(_MODEL_DATA, "gemini_disable_thinking_models"))
 TOKENMAX_MAPPING = _load_tokenmax_mapping(_MODEL_DATA)
 MODEL_COSTS = _load_model_costs(_MODEL_DATA)
 ANTHROPIC_ADAPTIVE_THINKING_MODELS = tuple(_load_string_set(_MODEL_DATA, "anthropic_adaptive_thinking_models"))
@@ -226,6 +227,11 @@ def supports_anthropic_adaptive_thinking(model_id: str) -> bool:
 @lru_cache(maxsize=4096)
 def requires_anthropic_adaptive_thinking(model_id: str) -> bool:
     return _matches_any(normalize_model_id(model_id), ANTHROPIC_ADAPTIVE_ONLY_MODELS)
+
+
+@lru_cache(maxsize=4096)
+def supports_gemini_disabled_thinking(model_id: str) -> bool:
+    return _matches_any(normalize_model_id(model_id), GEMINI_DISABLE_THINKING_MODELS)
 
 
 @lru_cache(maxsize=4096)

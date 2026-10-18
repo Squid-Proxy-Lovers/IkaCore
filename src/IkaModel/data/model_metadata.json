@@ -551,5 +551,8 @@
   "anthropic_adaptive_only_models": [
     "claude-opus-4-7",
     "claude-opus-4-8"
+  ],
+  "gemini_disable_thinking_models": [
+    "gemini-2.5-flash"
   ]
 }
