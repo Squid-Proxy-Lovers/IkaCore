@@ -38,6 +38,9 @@ V2 intentionally breaks compatibility with v1. See the
 
 ### Fixed
 
+- Clone interrupted workflow child continuations into forked runs, remapping their frames
+  and snapshots, and reject cross-run child snapshots before routing human answers.
+
 - Run exhausted HITL resumes through stage extension or forced finalization before
   completing the stage, so a last-step question cannot bypass the human answer.
 - Persist interrupted workflow instances' snapshot IDs and route workflow `resume_input`

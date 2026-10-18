@@ -12,7 +12,12 @@ from IkaModel.async_runner import run_async
 from IkaModel.execution_hooks import ExecutionHooks, execution_hooks
 
 from .runtime_control import RuntimePauseRequested
-from .workflow_snapshot_state import INTERRUPTED_STATUSES, WorkflowSnapshotSession, save_workflow_boundary
+from .workflow_snapshot_state import (
+    INTERRUPTED_STATUSES,
+    WorkflowSnapshotSession,
+    interrupted_snapshot,
+    save_workflow_boundary,
+)
 
 
 def wrap_snapshot_instance(workflow: Any, node_name: str, instance: int, agent: Any) -> Any:
@@ -25,6 +30,7 @@ def wrap_snapshot_instance(workflow: Any, node_name: str, instance: int, agent: 
     def wrapped(*args: Any, **kwargs: Any) -> dict[str, Any]:
         key = f"{node_name}:{instance}"
         def resume() -> Any:
+            interrupted_snapshot(session, session.interrupted_instances[key])
             agent.execution = native_execution
             agent.enable_snapshots(session.store.db_path, deepcopy(session.control))
             return agent.resume_from_snapshot(session.interrupted_instances[key],

@@ -7,7 +7,13 @@ from typing import Any, Optional
 from .runtime_control import RuntimeControl
 from .snapshot_store import SnapshotStore
 from .workflow_snapshot_execution import execute_workflow
-from .workflow_snapshot_state import INTERRUPTED_STATUSES, WorkflowSnapshotSession, graph_fingerprint, replay_cache
+from .workflow_snapshot_state import (
+    INTERRUPTED_STATUSES,
+    WorkflowSnapshotSession,
+    graph_fingerprint,
+    interrupted_snapshot,
+    replay_cache,
+)
 
 
 def _resume_inputs(value: str | dict[str, str] | None, interrupted: dict[str, str]) -> dict[str, str]:
@@ -24,9 +30,7 @@ def _resume_inputs(value: str | dict[str, str] | None, interrupted: dict[str, st
 
 def _reuse_resumed_children(session: WorkflowSnapshotSession) -> None:
     for key, snapshot_id in list(session.interrupted_instances.items()):
-        snapshot = session.store.load_snapshot(snapshot_id)
-        if snapshot is None:
-            raise ValueError("interrupted instance snapshot is missing")
+        snapshot = interrupted_snapshot(session, snapshot_id)
         root = snapshot["state_json"]["root_frame_id"]
         frame = session.store.get_frame(root)
         if frame is not None and frame["status"] == "completed" and frame["outputs_json"].get("status") not in INTERRUPTED_STATUSES:

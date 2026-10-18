@@ -35,9 +35,12 @@ def resume_from_snapshot(self: Any, snapshot_id: str, *, allow_redacted_state: b
     }
 
 
-def _clone_lineage(self: Any, lineage: list[dict[str, Any]], new_run_id: str) -> dict[str, str]:
-    frame_id_map: dict[str, str] = {}
+def _clone_lineage(self: Any, lineage: list[dict[str, Any]], new_run_id: str,
+                   frame_id_map: Optional[dict[str, str]] = None) -> dict[str, str]:
+    frame_id_map = {} if frame_id_map is None else frame_id_map
     for index, frame in enumerate(lineage):
+        if frame["frame_id"] in frame_id_map:
+            continue
         new_status = "completed" if index < len(lineage) - 1 else "pending"
         new_frame_id = self.create_frame(
             run_id=new_run_id,
@@ -80,6 +83,28 @@ def _clone_entry_snapshots(store: Any, lineage: list[dict[str, Any]], mapping: d
             store.create_snapshot(run_id, mapping[frame["frame_id"]], "frame_entry",
                 _remap_state(entry["state_json"], mapping, run_id), resume_strategy=entry["resume_strategy"],
                 branch_origin_snapshot_id=entry["snapshot_id"])
+
+
+def _clone_workflow_interruptions(store: Any, snapshot: dict[str, Any], state: dict[str, Any],
+                                  mapping: dict[str, str], run_id: str) -> None:
+    """Freeze child continuations at the saved boundary, even if the source advanced."""
+    interrupted = state.get("interrupted_instances", {})
+    for key, snapshot_id in interrupted.items():
+        child = store.load_snapshot(snapshot_id)
+        if child is None or child["run_id"] != snapshot["run_id"]:
+            raise ValueError("interrupted instance must belong to the workflow run")
+        lineage = store.get_frame_lineage(child["frame_id"])
+        root = child["state_json"].get("root_frame_id")
+        if root not in {frame["frame_id"] for frame in lineage} or snapshot["frame_id"] not in {frame["frame_id"] for frame in lineage}:
+            raise ValueError("interrupted instance must belong to the workflow run")
+        missing = [frame for frame in lineage if frame["frame_id"] not in mapping]
+        _clone_lineage(store, lineage, run_id, mapping)
+        _clone_entry_snapshots(store, missing, mapping, run_id)
+        # Current source outputs/status may postdate this historical snapshot.
+        store.update_frame(mapping[root], status="paused", outputs={})
+        child_state = _remap_state(child["state_json"], mapping, run_id)
+        interrupted[key] = store.create_snapshot(run_id, mapping[child["frame_id"]], child["snapshot_kind"],
+            child_state, resume_strategy=child["resume_strategy"], branch_origin_snapshot_id=snapshot_id)
 
 
 def _finish_fork(self: Any, snapshot_id: str, snapshot: dict[str, Any], target_frame: dict[str, Any],
@@ -162,6 +187,7 @@ def fork_run_from_snapshot(
     _clone_entry_snapshots(self, lineage, frame_id_map, new_run_id)
     cloned_state = _remap_state(snapshot["state_json"], frame_id_map, new_run_id)
     cloned_state["frame_id"] = frame_id_map[target_frame["frame_id"]]
+    _clone_workflow_interruptions(self, snapshot, cloned_state, frame_id_map, new_run_id)
 
     return _finish_fork(self, snapshot_id, snapshot, target_frame, new_run_id, new_root_frame_id,
                         frame_id_map, cloned_state, replay_assessment, allow_unsafe_replay)

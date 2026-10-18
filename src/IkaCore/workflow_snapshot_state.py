@@ -91,3 +91,15 @@ def replay_cache(session: WorkflowSnapshotSession, saved: dict[str, Any], allow_
             if not allow_unsafe and not session.store.assess_frame_replay(frame["frame_id"])["safe"]:
                 raise ValueError("selected workflow instance contains non-replayable tools")
     return cache
+
+
+def interrupted_snapshot(session: WorkflowSnapshotSession, snapshot_id: str) -> dict[str, Any]:
+    snapshot = session.store.load_snapshot(snapshot_id)
+    if snapshot is None:
+        raise ValueError("interrupted instance snapshot is missing")
+    root = session.store.get_frame(snapshot["state_json"].get("root_frame_id", ""))
+    frame = session.store.get_frame(snapshot["frame_id"])
+    if (snapshot["run_id"] != session.run_id or root is None or root["run_id"] != session.run_id
+            or frame is None or frame["run_id"] != session.run_id):
+        raise ValueError("interrupted instance must belong to the workflow run")
+    return snapshot
