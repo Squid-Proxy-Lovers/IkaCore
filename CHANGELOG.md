@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0
+## 2.0.0 (Unreleased)
 
 V2 intentionally breaks compatibility with v1. See the
 [migration guide](docs/v2/README.md#breaking-changes-and-migration).
@@ -28,13 +28,6 @@ V2 intentionally breaks compatibility with v1. See the
   installed `ikacore` version and ship `py.typed` markers.
 - Examples use environment credentials and avoid printing bearer fragments. Documentation
   now covers functional memory setup, current snapshot APIs and offline validation.
-- Validation includes deterministic provider payload, retry, execution, workflow,
-  snapshot, memory and cancellation tests; type/lint/coverage gates; and wheel checks.
-  Only Codex `gpt-5.6-sol` was verified live: 8/8 checks passed on 2026-10-17 using
-  the installed 2.0.0 wheel at runtime revision `1f2bab0`, which includes the fixes
-  below (an earlier 8/8 run at `183ce24` predates them).
-  Other providers/models and long-running application behavior require
-  separate live validation. Historical quality/benchmark figures identify their revision.
 
 ### Agent configuration
 
@@ -81,14 +74,26 @@ V2 intentionally breaks compatibility with v1. See the
 
 ### Refactor verification
 
-- Complete the remaining v2 simplification candidates with preserved default execution policy.
-  Keep components lazy and frozen options reusable so construction retains benchmark parity.
-- Add permanent 42-scenario execution parity checks against `dc9efbd`, retain all existing
-  behavioral assertions, and update the coverage manifest without lowering floors.
-  See [the validation report](docs/v2/refactor-validation.md) for measured evidence.
+- Permanent 42-scenario execution parity checks compare the grouped API with `dc9efbd`.
+  Components remain lazy and frozen options reusable. Coverage floors are unchanged.
+- The installed-wheel live harness uses grouped provider, limit, policy and output
+  configuration. Its offline probes cover agent construction for all eight routes,
+  simple/staged completion, fresh-process resume, compaction and workflow HITL.
+  Controlled JSON/SSE integration tests verify context variables, output subscribers,
+  snapshot hooks, worker-raised pauses and post-model replay without duplicate usage.
+- Validation includes deterministic provider, retry, execution, workflow, snapshot,
+  memory and cancellation tests; lint/type/coverage gates; wheel checks; repeated
+  real-socket deadlines; and Python 3.11–3.13 / HTTPX compatibility checks.
+  See [the merged validation report](docs/v2/merged-validation.md) for exact revisions,
+  measurements and live Codex results (14 passed, 1 `reasoning_not_exposed` skip with
+  `gpt-5.6-sol` at `179b52e`). Other providers/models and long-running application
+  behavior require separate live validation.
 
 ### Fixed
 
+- Preserve context variables in the background response-cleanup thread after a
+  controlled request expires. Custom stream cleanup retains its output subscribers,
+  workflow instance ID, runtime options and request controls after the caller returns.
 - Preserve zero remaining steps in legacy staged HITL snapshots without `loop_state`
   so sync and async resumes cannot regain a model turn.
 
@@ -120,8 +125,6 @@ V2 intentionally breaks compatibility with v1. See the
 - Pause snapshot-enabled workflows when an agent waits for human input, blocking its
   dependents in sync and async runs. Do not reuse interrupted outputs as completed
   results; invalidate their downstream cached results during replay.
-- Keep caller-owned HTTPX clients usable when synchronous deadlines or cancellation
-  abort request-owned transports.
 - Keep nested-agent snapshots in the child's frame and restore the parent's execution
   context when the child returns.
 - Restore the saved HITL transcript once and append the human answer before continuing.

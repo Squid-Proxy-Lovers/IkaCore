@@ -7,12 +7,15 @@ Unless a separate agreement states otherwise, contributions intentionally submit
 ## Local Setup
 
 ```bash
-pip install -e ".[test,dev]"
+python -m venv .venv
+export PATH="$PWD/.venv/bin:$PATH" VIRTUAL_ENV="$PWD/.venv"
+python -m pip install -e ".[test,dev]"
 ```
 
 ## Test Commands
 
-Run the main suite:
+Keep that environment active for every command, including Ruff and Pyright, so they
+resolve the same Python and HTTPX installation. Run the main suite:
 
 ```bash
 pytest
@@ -40,6 +43,26 @@ pytest src/IkaTest/test_provider_payload_builders.py
 pytest src/IkaTest/test_provider_edge_helpers.py
 ```
 
+### Compatibility and deadline checks
+
+Run the full suite on Python 3.11, 3.12 and 3.13 with both HTTPX 0.27.0 and the
+current supported HTTPX release. Keep each combination in its own ignored venv:
+
+```bash
+python3.11 -m venv artifacts/compat/py311-httpx027
+artifacts/compat/py311-httpx027/bin/python -m pip install -e ".[test]" "httpx==0.27.0"
+artifacts/compat/py311-httpx027/bin/python -m pytest -q
+```
+
+Repeat for each interpreter/version pair, invoking that venv's Python explicitly.
+Run heavy checks sequentially. The real HTTP/HTTPS deadline and pool-ownership
+regressions use guarded local sockets; repeat this group ten times for release checks:
+
+```bash
+pytest -q src/IkaTest/test_transport_deadline_accuracy.py \
+  src/IkaTest/test_transport_loopback.py src/IkaTest/test_transport_pool_ownership.py
+```
+
 ### Live provider validation
 
 Normal CI is offline. To validate configured providers once, install build/test tools
@@ -47,8 +70,9 @@ and run the wheel-backed matrix:
 
 ```bash
 python -m venv .venv
-.venv/bin/pip install -e ".[test,dev]"
-PATH="$PWD/.venv/bin:$PATH" python scripts/live_matrix.py --all-configured
+export PATH="$PWD/.venv/bin:$PATH" VIRTUAL_ENV="$PWD/.venv"
+python -m pip install -e ".[test,dev]"
+python scripts/live_matrix.py --all-configured
 ```
 
 The helper builds the current source into a wheel, installs it with **runtime dependencies
@@ -77,7 +101,7 @@ a credential with no model prints `model required` and makes the command fail.
 For example, use an existing local ChatGPT login explicitly for Codex only:
 
 ```bash
-PATH="$PWD/.venv/bin:$PATH" python scripts/live_matrix.py \
+PATH="$PWD/.venv/bin:$PATH" VIRTUAL_ENV="$PWD/.venv" python scripts/live_matrix.py \
   --provider codex --use-local-login --model gpt-5.6-sol
 ```
 
@@ -146,9 +170,11 @@ and `models` (JSON mapping) inputs. Configure the credential variables above as 
 input. It has read-only repository permissions, pinned actions, a bounded job timeout,
 and uploads only sanitized reports. It never runs on PRs or a schedule.
 
-The expanded matrix recorded **14 passed, 0 failed, 1 skipped** with `gpt-5.6-sol`
-and local login at harness revision `21184cc`; `reasoning_tools` was skipped because
-the service exposed no tool-turn reasoning. The original eight cases all passed.
+The latest installed-wheel matrix recorded **14 passed, 0 failed, 1 skipped** with
+`gpt-5.6-sol` and local login on **2026-10-18 UTC**, runtime/test revision `179b52e`.
+`reasoning_tools` skipped because the service exposed no tool-turn reasoning. Each
+case was bounded to 60 seconds. See [the merged validation report](docs/v2/merged-validation.md)
+for results and revision labels; the earlier `21184cc` harness run used the pre-refactor API.
 
 Offline repro `python scripts/live_replay_repro.py` shows that Codex and OpenAI
 Responses parse synthetic tool-turn reasoning but omit it from the next request, and
@@ -156,7 +182,7 @@ Anthropic neither enables extended thinking nor preserves its signed thinking bl
 Z.AI is a positive replay control. These are existing runtime gaps, left unchanged by
 the live harness work; a live reasoning skip does not validate those paths.
 
-The recorded **Codex 8/8** result on 2026-10-17 used `gpt-5.6-sol`, local Codex login,
+The historical **Codex 8/8** result on 2026-10-17 used `gpt-5.6-sol`, local Codex login,
 and the installed 2.0.0 wheel at runtime revision `1f2bab0`; `dc9efbd` retains that
 validated runtime baseline. An earlier 8/8 run at `183ce24` predates review fixes.
 These results establish that model/endpoint/account combination only. Other providers

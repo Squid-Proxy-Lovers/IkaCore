@@ -116,7 +116,24 @@ Important current behavior:
 - OpenAI Chat Completions requires `provider=ProviderConfig(use_responses_api=False)`
 - Codex is a separate provider that targets `CODEX_API_URL`
 - explicit non-OpenAI URLs are respected
-- synchronous deadline/cancellation aborts close the active HTTP response and preserve caller-owned HTTPX clients
+- controlled synchronous JSON and Codex SSE requests bound the caller's wait using an absolute deadline and preserve caller-owned HTTPX clients
+
+Request lifetime and execution state have distinct owners:
+
+- `request_control.py`: context-local deadlines, cancellation/abort registration, retry and output bounds; nested deadlines cannot extend a parent
+- `request_lifecycle.py`: context-preserving sync worker, native async cancellation and cooperative retry/tool waits
+- `request_transport.py`: private copies of built-in HTTPX/httpcore pools for controlled sync requests, retaining TLS/proxy/mount/auth/cookie/hook configuration and aborting only owned socket duplicates
+- `codex/stream_transport.py`: the same lifecycle for Codex SSE; requests without lifecycle controls keep the direct path
+- `worker_context.py`: copies active controls, options, snapshot hooks and output scopes into tool/workflow executors
+- `runtime_control.py` / `snapshot_agent_hooks.py`: persisted pause selection and execution boundaries, independently of request deadlines
+
+Transport hooks and subscribers inside a controlled request see the agent/workflow's
+output publisher and snapshot context. A `RuntimePauseRequested` raised there reaches
+the normal snapshot dispatcher. Post-model replay consumes the saved response once.
+Abort cleanup copies the caller's context as well, preserving subscriptions and
+instance identity even when a custom response closes after that scope has exited.
+Blocking DNS or uncooperative user code can retain daemon workers after the caller
+returns; scheduling and cleanup limits are documented in the [v2 guide](v2/README.md#retained-controls).
 
 Codex auth is intentionally not automatic in the request path. The Codex provider treats `BareBoneModel.api_key` as the literal bearer token. Users can pass their own bearer token, or explicitly import `get_bearer` with `from IkaModel.codex.auth import get_bearer` and call `get_bearer()` to read and refresh the Codex CLI credentials from `~/.codex/auth.json` or `$CODEX_HOME/auth.json`.
 

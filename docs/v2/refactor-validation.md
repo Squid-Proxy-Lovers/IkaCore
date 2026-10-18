@@ -1,5 +1,8 @@
 # Remaining simplifications: implementation and validation
 
+This is the historical `v2-refactor` branch report. The [merged validation report](merged-validation.md)
+supersedes its test counts, wheel sizes and deferred deadline/live/multi-Python checks.
+
 All five simplification candidates are implemented on `v2-refactor`, starting at
 `dc9efbd92149e98bed947318c50e90fd77e73f3d`. The measured runtime head is `8c0a9e1`.
 No transport/deadline files assigned to the concurrent agent were edited. Nothing
