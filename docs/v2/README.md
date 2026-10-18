@@ -358,3 +358,25 @@ architectural complexity. Further removal should follow observed use and product
 
 The generated matrix includes required scenario outcomes, exact uncovered locations,
 and known gaps. CI artifacts describe each checked revision.
+
+### Test hardening validation (local, unreleased)
+
+The `v2-hardening` work from `aca8c53` passes **1,211 tests** (two opt-in skips),
+Ruff, Pyright and the complete quality/wheel gate. Measured coverage rises from
+**96.39% to 100% lines** and **88.20% to 96.86% branches**. Global floors are now
+**99% lines / 95% branches**, with a **99% combined** pytest-cov floor and raised
+area floors. All 9,305 measured statements are exercised; the 194 existing excluded
+lines are unchanged. Every remaining branch arc is listed in the separate report.
+
+Validation includes **46 real process-kill/concurrent-writer cases** across DELETE
+and WAL, a resumed **2,200-completed-turn** offline soak with 440 compactions, and
+four bounded installed-wheel Codex compaction fixtures. Strict live follow-up
+retention scored **19/20**; one constraint answer missed the scorer. The results
+do not establish perfect retention or power-loss durability.
+
+Fixes restore completed-snapshot accounting after a crash, propagate cancellation
+through forced completion, wrap malformed provider response errors, and preserve
+required history/tool/reasoning structure while bounding the live compaction
+buffer. The [hardening report](hardening-validation.md) records reproductions,
+coverage by area, exact limitations, evidence and local commits. These measurements
+are separate from the historical merged/refactor results above; nothing was pushed.

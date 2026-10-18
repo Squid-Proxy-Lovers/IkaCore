@@ -55,6 +55,7 @@ def test_controlled_compaction_contains_facts_and_keeps_pending_structure(monkey
 @pytest.mark.parametrize("asynchronous", [False, True])
 def test_empty_summary_does_not_erase_history(monkeypatch, asynchronous):
     _, history = retention_fixture()
+    history["messages"]["pending-note"]["reasoning_content"] = "UNIQUE_SEPARATELY_STORED_REASONING"
     before = copy.deepcopy(history)
     response = httpx.Response(200, json={"choices": [{"message": {"content": "  "}}]}, request=httpx.Request("POST", "https://example.test"))
     request = AsyncMock(return_value=response) if asynchronous else Mock(return_value=response)
@@ -65,6 +66,7 @@ def test_empty_summary_does_not_erase_history(monkeypatch, asynchronous):
     else:
         run_summarization(model, history)
     assert history == before
+    assert "UNIQUE_SEPARATELY_STORED_REASONING" in json.dumps(request.call_args.args[2])
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
