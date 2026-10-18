@@ -98,7 +98,7 @@ def test_multiple_required_tools_and_explicit_tool_override(provider):
     model = BareBoneModel("claude-sonnet-4" if provider == "anthropic" else "gpt-4o", "test", "https://example.test", suppress_init_output=True)
     model.agent_tools = tool_list
     payload = build_provider_request(provider, model, [{"role": "user", "content": "task"}], init_message_history())[2]
-    assert payload["tool_choice"] in ("required", {"type": "required", "disable_parallel_tool_use": True}, {"type": "required"})
+    assert payload["tool_choice"] in ("required", {"type": "any", "disable_parallel_tool_use": True}, {"type": "any"})
     model.forced_tool_name = "tool1"
     payload = build_provider_request(provider, model, [], init_message_history())[2]
     assert "tool1" in json.dumps(payload["tool_choice"])

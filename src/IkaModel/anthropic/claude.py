@@ -114,12 +114,12 @@ def _anthropic_tool_choice(model: Any, tool_payload: Any) -> Dict[str, Any]:
     elif len(tool_payload.required_names) == 1:
         tool_choice = {"type": "tool", "name": tool_payload.required_names[0]}
     elif len(tool_payload.required_names) > 1:
-        tool_choice = {"type": "required"}
+        tool_choice = {"type": "any"}
     else:
         tool_choice = {"type": "auto"}
 
     if hasattr(model, 'parallel_tool_calls') and not model.parallel_tool_calls:
-        if supports_anthropic_parallel_tool_use(model.model_id) and tool_choice.get("type") in ["auto", "required"]:
+        if supports_anthropic_parallel_tool_use(model.model_id) and tool_choice.get("type") in ["auto", "any"]:
             tool_choice["disable_parallel_tool_use"] = True
     return tool_choice
 
