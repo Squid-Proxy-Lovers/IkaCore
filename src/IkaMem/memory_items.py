@@ -23,7 +23,7 @@ class STMemItem:
         """
         self.data = data
         self.agent = agent
-        self.metadata = metadata if metadata is not None else {}
+        self.metadata: dict[str, Any] = metadata if metadata is not None else {}
 
 
 class LTMemItem:
@@ -53,4 +53,4 @@ class LTMemItem:
         self.quality = quality
         self.datetime = datetime
         self.expected_output = expected_output
-        self.metadata = metadata if metadata is not None else {}
+        self.metadata: dict[str, Any] = metadata if metadata is not None else {}

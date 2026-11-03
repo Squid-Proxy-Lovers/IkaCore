@@ -1,6 +1,6 @@
 # pyright: strict
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, List, Optional
 
 from IkaCore.tools import IkaTools
 from IkaModel.base import AgentTool, ToolArgs
@@ -76,9 +76,6 @@ class IkaStage(StageHitlToolMixin):
         subagents: Optional[list[Any]] = None,
         allowed_back_to: Optional[List[int]] = None,
         hitl: bool = False,
-        memory_access: Optional[Dict[str, bool]] = None,
-        long_term_filter: Optional[Callable[..., Any]] = None,
-        checkpoint: bool = False,
         model_id: Optional[str] = None,
         api_key: Optional[str] = None,
         api_url: Optional[str] = None,
@@ -90,11 +87,8 @@ class IkaStage(StageHitlToolMixin):
         self.tools: List[IkaTools | AgentTool] = list(tools)
         self.stage_max_step = stage_max_step
         self.subagents: list[Any] = subagents or []
-        self.allowed_back_to = allowed_back_to or []
+        self.allowed_back_to: List[int] = allowed_back_to or []
         self.hitl = hitl
-        self.memory_access = memory_access
-        self.long_term_filter = long_term_filter
-        self.checkpoint = checkpoint
         self.model_id = model_id
         self.api_key = api_key
         self.api_url = api_url

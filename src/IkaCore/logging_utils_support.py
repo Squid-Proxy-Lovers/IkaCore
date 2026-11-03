@@ -165,7 +165,7 @@ class LoggerWriteApiMixin(LoggerWriterThreadMixin):
 
 
 class LoggerConversationEventsMixin:
-    def log_input(self: _LoggerState, messages: List[dict]) -> None:
+    def log_input(self: _LoggerState, messages: List[dict[str, Any]]) -> None:
         if not self.log_input_enabled or not messages:
             return
         user_msg = messages[-1]
@@ -174,7 +174,7 @@ class LoggerConversationEventsMixin:
         if self.level == 2:
             self.log_json({"event": "input", "message": user_msg})
 
-    def log_tool_results(self: _LoggerState, tool_calls: List[dict], tool_results: List[str]) -> None:
+    def log_tool_results(self: _LoggerState, tool_calls: List[dict[str, Any]], tool_results: List[str]) -> None:
         if not tool_calls:
             return
         for idx, call in enumerate(tool_calls):
@@ -189,7 +189,7 @@ class LoggerConversationEventsMixin:
         content: str,
         usage: Optional[Dict[str, Any]] = None,
         cost: Optional[Dict[str, float]] = None,
-        message_history: Optional[dict] = None,
+        message_history: Optional[dict[str, Any]] = None,
     ) -> None:
         line = f"[OUTPUT] content={content}"
         if usage:
@@ -224,7 +224,7 @@ class LoggerStageEventsMixin:
         if self.level == 2:
             self.log_json({"event": "stage_end", "stage": stage_name, "used_steps": used_steps})
 
-    def log_step(self: _LoggerState, stage_name: str, step_idx: int, output: str, tool_calls: list, usage: dict, cost: dict, elapsed: float) -> None:
+    def log_step(self: _LoggerState, stage_name: str, step_idx: int, output: str, tool_calls: list[dict[str, Any]], usage: dict[str, Any], cost: dict[str, float], elapsed: float) -> None:
         tool_names = [t.get("name") or t.get("function", {}).get("name", "") for t in (tool_calls or [])]
         preview = (output or "")[:200].replace("\n", " ")
         usage_part = f" tokens={usage} cost={cost}" if (self.level != 0 or self.show_usage_level0) else ""

@@ -1,6 +1,6 @@
 import os
 
-from IkaCore import IkaBaseAgent, IkaWorkflow, WorkflowEdge, WorkflowNode
+from IkaCore import IkaBaseAgent, IkaWorkflow, PromptConfig, WorkflowEdge, WorkflowNode
 
 
 def main():
@@ -12,7 +12,7 @@ def main():
     agent_a = IkaBaseAgent(
         name="agent_a",
         description="First agent in the pipeline",
-        system_prompt="You are a concise assistant. Reply in one short paragraph.",
+        prompts=PromptConfig(system_prompt="You are a concise assistant. Reply in one short paragraph."),
         prompt="Expand on the topic you receive. Produce a brief explanation.",
         tools=[],
         model_id=model_id,
@@ -22,7 +22,7 @@ def main():
     agent_b = IkaBaseAgent(
         name="agent_b",
         description="Second agent in the pipeline",
-        system_prompt="You are a concise assistant. Reply in one short paragraph.",
+        prompts=PromptConfig(system_prompt="You are a concise assistant. Reply in one short paragraph."),
         prompt="Summarize the text you receive into 2 or 3 bullet points.",
         tools=[],
         model_id=model_id,

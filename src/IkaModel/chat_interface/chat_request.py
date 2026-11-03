@@ -12,23 +12,27 @@ from typing import Any, Optional, cast
 import httpx
 
 from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_value
-from IkaCore.cli_output import OutputType, get_cli_output
+from IkaCore.events import OutputType
+from IkaCore.events import current_output as get_cli_output
 from IkaCore.tools import ToolExecutor
+from IkaModel.execution_hooks import emit_boundary
+from IkaModel.history_replay import USER_ENTRY_TYPES
+from IkaModel.runtime_policy import current_runtime_options
 
+from .. import request_interface as _requests
+from .. import summarization as _summaries
 from ..base import BareBoneModel
-from ..chat_helpers_common import build_provider_request, parse_provider_response
-from ..request_interface import (
-    IkaAPIError,
-    _is_context_length_error,
-    api_request_retry,
-    async_api_request_retry,
-    get_max_tokens,
-    get_provider,
+from ..chat_helpers_common import build_provider_request, parse_provider_response, provider_response_interruption
+from ..request_interface import IkaAPIError, _is_context_length_error, get_max_tokens, get_provider
+from ..runtime_errors import (
+    IkaContextWindowError,
+    IkaProviderPayloadError,
+    IkaProviderResponseError,
+    IkaRequestControlError,
 )
-from ..runtime_errors import IkaContextWindowError, IkaProviderPayloadError, IkaProviderResponseError
-from ..summarization import async_summarise_message_history, summarise_message_history
-from .chat_response import _SUMMARY_FALLBACK_EXCEPTIONS, _dump_api_round
-from .response_interface import extract_usage
+from .chat_response import _SUMMARY_FALLBACK_EXCEPTIONS
+from .debug_dump import dump_api_round
+from .response_usage import extract_usage
 
 LOG = logging.getLogger(__name__)
 
@@ -68,10 +72,20 @@ def _history_entry_tokens(entry: JsonDict) -> int:
 
 def get_total_tokens(message_history: JsonDict) -> int:
     total = 0
+    entries = [json_dict(msg) for msg in history_section(message_history, "messages").values()]
     for key in ("system", "first_input", "summary"):
-        total += _history_entry_tokens(history_section(message_history, key))
-    for msg in history_section(message_history, "messages").values():
-        total += _history_entry_tokens(json_dict(msg))
+        section = history_section(message_history, key)
+        # first_input is a compatibility view of the recorded opening user turn.
+        # Provider replay sends that turn once; the compaction estimate must too.
+        if key == "first_input" and any(
+            isinstance(entry.get("type"), str) and entry["type"] in USER_ENTRY_TYPES
+            and entry.get("message") == section.get("message")
+            for entry in entries
+        ):
+            continue
+        total += _history_entry_tokens(section)
+    for entry in entries:
+        total += _history_entry_tokens(entry)
     return total
 
 
@@ -121,23 +135,33 @@ def _summarize_sync_if_near_budget(
     barebone_model: BareBoneModel,
     message_history: JsonDict,
     client: Optional[httpx.Client],
+    messages: Optional[list[JsonDict]] = None,
 ) -> None:
     token_count = get_total_tokens(message_history)
     max_tokens = getattr(barebone_model, 'context_budget', None) or get_max_tokens(barebone_model.model_id)
-    if token_count > max_tokens * 0.8:
-        summarise_message_history(barebone_model, message_history, client=client)
+    if token_count > max_tokens * (current_runtime_options().compact_at_fraction or 0.8):
+        emit_boundary("pre_compaction", {"messages": messages} if messages is not None else {})
+        summary = _summaries.summarise_message_history(barebone_model, message_history, client=client)
+        if messages is not None and summary.strip():
+            _summaries.compact_live_messages(messages)
+        _compaction_completed(barebone_model, bool(summary.strip()), messages)
 
 
 async def _summarize_async_if_near_budget(
     barebone_model: BareBoneModel,
     message_history: JsonDict,
     client: Optional[httpx.AsyncClient],
+    messages: Optional[list[JsonDict]] = None,
 ) -> None:
     token_count = get_total_tokens(message_history)
     max_tokens = getattr(barebone_model, 'context_budget', None) or get_max_tokens(barebone_model.model_id)
-    if token_count > max_tokens * 0.8:
+    if token_count > max_tokens * (current_runtime_options().compact_at_fraction or 0.8):
         LOG.info(f"Token count ({token_count}) approaching limit ({max_tokens}). Summarizing history...")
-        await async_summarise_message_history(barebone_model, message_history, client)
+        emit_boundary("pre_compaction", {"messages": messages} if messages is not None else {})
+        summary = await _summaries.async_summarise_message_history(barebone_model, message_history, client)
+        if messages is not None and summary.strip():
+            _summaries.compact_live_messages(messages)
+        _compaction_completed(barebone_model, bool(summary.strip()), messages)
 
 
 def _parse_provider_round(
@@ -145,11 +169,16 @@ def _parse_provider_round(
     data: JsonDict,
     model_id: str,
     usage_token_fallback: Optional[int] = None,
+    message_history: Optional[JsonDict] = None,
 ) -> ProviderRound:
     try:
-        content, reasoning_content, tool_calls, tokens = parse_provider_response(provider, data, model_id)
+        content, reasoning_content, tool_calls, tokens = parse_provider_response(provider, data, model_id, message_history)
         usage_info = extract_usage(provider, data)
-    except (KeyError, IndexError, TypeError, ValueError) as e:
+        interruption = provider_response_interruption(provider, data)
+        if interruption is not None:
+            usage_info["_provider_interruption"] = interruption
+            tool_calls = []  # A truncated tool call is not safe to execute.
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
         raise IkaProviderResponseError(
             f"Failed to parse {provider} response for model {model_id}: {e}"
         ) from e
@@ -176,9 +205,9 @@ def _dump_response_round(
     error: str,
 ) -> None:
     try:
-        _dump_api_round(barebone_model, payload, json_dict(response.json()))
+        dump_api_round(barebone_model, payload, json_dict(response.json()))
     except ValueError:
-        _dump_api_round(barebone_model, payload, None, error=error)
+        dump_api_round(barebone_model, payload, None, error=error)
 
 
 def _request_provider_round(
@@ -193,10 +222,10 @@ def _request_provider_round(
     def _build() -> ProviderPayload:
         return build_provider_request(provider, barebone_model, messages, message_history)
 
-    response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout, client)
+    response = _api_request_with_context_fallback(_build, barebone_model, message_history, timeout, client, messages)
     response.raise_for_status()
     data = _response_json_or_raise(response, provider)
-    return _parse_provider_round(provider, data, barebone_model.model_id, usage_token_fallback)
+    return _parse_provider_round(provider, data, barebone_model.model_id, usage_token_fallback, message_history)
 
 
 async def _request_provider_round_async(
@@ -211,10 +240,10 @@ async def _request_provider_round_async(
     def _build() -> ProviderPayload:
         return build_provider_request(provider, barebone_model, messages, message_history)
 
-    response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client)
+    response = await _api_request_with_context_fallback_async(_build, barebone_model, message_history, timeout, client, messages)
     response.raise_for_status()
     data = _response_json_or_raise(response, provider)
-    return _parse_provider_round(provider, data, barebone_model.model_id, usage_token_fallback)
+    return _parse_provider_round(provider, data, barebone_model.model_id, usage_token_fallback, message_history)
 
 
 def _api_request_with_context_fallback(
@@ -223,6 +252,7 @@ def _api_request_with_context_fallback(
     message_history: JsonDict,
     timeout: float = 900.0,
     client: Optional[httpx.Client] = None,
+    messages: Optional[list[JsonDict]] = None,
 ) -> httpx.Response:
     try:
         api_url, headers, payload = build_payload_fn()
@@ -230,18 +260,26 @@ def _api_request_with_context_fallback(
         raise IkaProviderPayloadError(f"Failed to build provider request payload: {e}") from e
 
     try:
-        resp = api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+        resp = _requests.api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
         _dump_response_round(barebone_model, payload, resp, error="response not json")
         return resp
+    except IkaRequestControlError:
+        raise
     except (IkaAPIError, httpx.HTTPError) as e:
         if not _is_context_length_error(e):
-            _dump_api_round(barebone_model, payload, None, error=repr(e))
+            dump_api_round(barebone_model, payload, None, error=repr(e))
             raise
         LOG.warning("Context length exceeded. Forcing summarization and retrying.")
         get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
         try:
-            summarise_message_history(barebone_model, message_history, client=client)
+            emit_boundary("pre_compaction", {"messages": messages} if messages is not None else {})
+            summary = _summaries.summarise_message_history(barebone_model, message_history, client=client)
+            if messages is not None and summary.strip():
+                _summaries.compact_live_messages(messages)
+            _compaction_completed(barebone_model, bool(summary.strip()), messages)
         except _SUMMARY_FALLBACK_EXCEPTIONS as summary_error:
+            if isinstance(summary_error, IkaRequestControlError):
+                raise
             raise IkaContextWindowError(
                 f"Failed to summarize context before retrying provider request: {summary_error}"
             ) from summary_error
@@ -251,7 +289,7 @@ def _api_request_with_context_fallback(
             raise IkaContextWindowError(
                 f"Failed to rebuild provider request after context summarization: {payload_error}"
             ) from payload_error
-        resp = api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+        resp = _requests.api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
         _dump_response_round(barebone_model, payload, resp, error="response not json (post-summarization)")
         return resp
     except (TypeError, ValueError) as e:
@@ -263,7 +301,8 @@ async def _api_request_with_context_fallback_async(
     barebone_model: BareBoneModel,
     message_history: JsonDict,
     timeout: float = 900.0,
-    client: Optional[httpx.AsyncClient] = None
+    client: Optional[httpx.AsyncClient] = None,
+    messages: Optional[list[JsonDict]] = None,
 ) -> httpx.Response:
     try:
         api_url, headers, payload = build_payload_fn()
@@ -271,18 +310,26 @@ async def _api_request_with_context_fallback_async(
         raise IkaProviderPayloadError(f"Failed to build provider request payload: {e}") from e
 
     try:
-        resp = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+        resp = await _requests.async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
         _dump_response_round(barebone_model, payload, resp, error="response not json")
         return resp
+    except IkaRequestControlError:
+        raise
     except (IkaAPIError, httpx.HTTPError) as e:
         if not _is_context_length_error(e):
-            _dump_api_round(barebone_model, payload, None, error=repr(e))
+            dump_api_round(barebone_model, payload, None, error=repr(e))
             raise
         LOG.warning("Context length exceeded. Forcing summarization and retrying.")
         get_cli_output().emit(OutputType.AGENT_RESPONSE, "Context limit exceeded. Summarized history and retrying.", ["API"], step=0)
         try:
-            await async_summarise_message_history(barebone_model, message_history, client=client)
+            emit_boundary("pre_compaction", {"messages": messages} if messages is not None else {})
+            summary = await _summaries.async_summarise_message_history(barebone_model, message_history, client=client)
+            if messages is not None and summary.strip():
+                _summaries.compact_live_messages(messages)
+            _compaction_completed(barebone_model, bool(summary.strip()), messages)
         except _SUMMARY_FALLBACK_EXCEPTIONS as summary_error:
+            if isinstance(summary_error, IkaRequestControlError):
+                raise
             raise IkaContextWindowError(
                 f"Failed to summarize context before retrying provider request: {summary_error}"
             ) from summary_error
@@ -292,8 +339,17 @@ async def _api_request_with_context_fallback_async(
             raise IkaContextWindowError(
                 f"Failed to rebuild provider request after context summarization: {payload_error}"
             ) from payload_error
-        resp = await async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
+        resp = await _requests.async_api_request_retry(api_url, headers, payload, timeout=timeout, client=client)
         _dump_response_round(barebone_model, payload, resp, error="response not json (post-summarization)")
         return resp
     except (TypeError, ValueError) as e:
         raise IkaContextWindowError(f"Failed to build or retry provider request: {e}") from e
+
+
+def _compaction_completed(
+    model: BareBoneModel, succeeded: bool, messages: Optional[list[JsonDict]] = None
+) -> None:
+    callback = getattr(model, "_on_compaction", None)
+    if succeeded and callback is not None:
+        callback()
+    emit_boundary("post_compaction", {"messages": messages} if messages is not None else {})

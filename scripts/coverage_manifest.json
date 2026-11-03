@@ -1,0 +1,444 @@
+{
+  "min_lines": 99,
+  "min_branches": 95,
+  "areas": [
+    {
+      "area": "Public API / package imports",
+      "sources": [
+        "src/IkaCore/__init__.py",
+        "src/IkaModel/__init__.py",
+        "src/IkaModel/base.py",
+        "src/IkaModel/resource_loader.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_model_base_and_exports.py::test_lazy_package_exports_cache_values_and_reject_unknowns",
+        "src/IkaTest/test_import_hygiene.py::test_examples_import_without_credentials"
+      ],
+      "known_gap": "Fresh wheel inventory/import checks run separately in quality.py; no v1 compatibility guarantee.",
+      "min_lines": 99,
+      "min_branches": 95
+    },
+    {
+      "area": "Request controls / cancellation",
+      "sources": [
+        "src/IkaModel/api_errors.py",
+        "src/IkaModel/async_runner.py",
+        "src/IkaModel/request_control.py",
+        "src/IkaModel/request_lifecycle.py",
+        "src/IkaModel/runtime_errors.py",
+        "src/IkaModel/worker_context.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_request_controls.py::test_zero_deadline_never_contacts_provider",
+        "src/IkaTest/test_request_controls.py::test_sync_deadline_closes_request_and_unregisters_abort",
+        "src/IkaTest/test_request_controls.py::test_async_deadline_cancels_transport_and_never_retries",
+        "src/IkaTest/test_request_controls.py::test_async_abort_unregisters_and_does_not_leave_parent_cancelled",
+        "src/IkaTest/test_request_controls.py::test_async_contexts_are_isolated_and_sync_tools_inherit",
+        "src/IkaTest/test_transport_lifecycle.py::test_external_async_cancellation_is_preserved",
+        "src/IkaTest/test_request_controls.py::test_legacy_control_setters_reach_sync_worker_and_restore",
+        "src/IkaTest/test_controlled_runtime_scopes.py::test_controlled_request_keeps_output_hooks_and_runtime_control",
+        "src/IkaTest/test_controlled_runtime_scopes.py::test_deadline_response_cleanup_preserves_scope_after_caller_returns"
+      ],
+      "known_gap": "Controlled JSON/SSE workers preserve request controls, runtime options, output scopes and snapshot RuntimeControl pauses. The caller wait is bounded; forcibly stopping arbitrary synchronous functions is unsupported.",
+      "min_lines": 99,
+      "min_branches": 95
+    },
+    {
+      "area": "HTTP ownership / TLS / connection reuse",
+      "sources": [
+        "src/IkaModel/codex/stream_transport.py",
+        "src/IkaModel/connection_scope.py",
+        "src/IkaModel/http_configuration.py",
+        "src/IkaModel/request_transport.py",
+        "src/IkaModel/runtime_policy.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_runtime_options.py::test_scoped_clients_reuse_and_close_without_crossing_authentication",
+        "src/IkaTest/test_runtime_options.py::test_scoped_clients_preserve_environment_proxy_routing",
+        "src/IkaTest/test_runtime_options.py::test_ssl_context_cache_can_be_explicitly_invalidated",
+        "src/IkaTest/test_transport_lifecycle.py::test_scoped_posts_and_streams_share_owned_client_and_close_it",
+        "src/IkaTest/test_transport_lifecycle.py::test_deadline_owned_client_is_closed_after_success",
+        "src/IkaTest/test_transport_lifecycle.py::test_sync_abort_closes_only_response_and_preserves_caller_client",
+        "src/IkaTest/test_transport_lifecycle.py::test_async_post_abort_preserves_caller_client",
+        "src/IkaTest/test_transport_loopback.py::test_real_socket_deadline_and_cancel_timeout_preserve_client",
+        "src/IkaTest/test_transport_loopback.py::test_trickled_body_cannot_restart_the_execution_deadline",
+        "src/IkaTest/test_transport_loopback.py::test_reused_connection_header_wait_is_bounded_by_remaining_deadline",
+        "src/IkaTest/test_transport_lifecycle.py::test_sync_request_clamps_each_timeout_without_changing_caller_configuration",
+        "src/IkaTest/test_transport_lifecycle.py::test_sync_abort_never_accesses_transport_sockets",
+        "src/IkaTest/test_transport_pool_ownership.py::test_preloaded_response_does_not_abort_another_request",
+        "src/IkaTest/test_transport_pool_ownership.py::test_sync_socket_and_pool",
+        "src/IkaTest/test_transport_pool_ownership.py::test_async_socket_and_pool",
+        "src/IkaTest/test_transport_deadline_accuracy.py::test_sync_wall_clock_budget_and_worker_cleanup",
+        "src/IkaTest/test_transport_deadline_accuracy.py::test_dns_can_finish_later_without_delaying_the_sync_caller",
+        "src/IkaTest/test_transport_deadline_accuracy.py::test_uncontrolled_request_has_no_worker_or_pool_copy",
+        "src/IkaTest/test_transport_pool_ownership.py::test_private_abort_preserves_already_in_flight_caller_request",
+        "src/IkaTest/test_transport_lifecycle.py::test_controlled_client_retains_mounts_auth_cookies_redirects_and_hooks",
+        "src/IkaTest/test_transport_lifecycle.py::test_sync_worker_preserves_exception_identity",
+        "src/IkaTest/test_transport_lifecycle.py::test_custom_response_cancelled_before_httpx_adopts_it_is_closed"
+      ],
+      "known_gap": "Hard caller wall-clock budgets, HTTP/HTTPS trickled headers/body, TLS handshake/SSE stalls, explicit/check-only cancellation, worker/descriptor reclamation and response-hook pool races are tested. Proxy handshakes and real HTTP/2 are not exercised over sockets. DNS, pre-connect system calls and uncooperative custom transport/hook code may outlive the caller and release resources later.",
+      "min_lines": 99,
+      "min_branches": 98
+    },
+    {
+      "area": "Retries / request errors",
+      "sources": [
+        "src/IkaModel/request_interface.py",
+        "src/IkaModel/retry_policy.py",
+        "src/IkaModel/request_adapter.py",
+        "src/IkaCore/testing.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_retry_policy.py::test_permanent_errors_fail_on_first_attempt_without_sleeping",
+        "src/IkaTest/test_retry_policy.py::test_rate_limit_honours_millisecond_hint",
+        "src/IkaTest/test_retry_policy.py::test_programmer_errors_are_not_retried",
+        "src/IkaTest/test_retry_policy.py::test_default_context_overflow_still_reaches_summary_recovery",
+        "src/IkaTest/test_hardening_requests.py::test_retry_transport_failures_recover_and_exhaust_with_typed_error",
+        "src/IkaTest/test_dogfood_ergonomics.py::test_mock_provider_native_envelopes_nested_scopes_and_async"
+      ],
+      "known_gap": "Offline responses; provider rate-limit behavior must also be checked live.",
+      "min_lines": 99,
+      "min_branches": 98
+    },
+    {
+      "area": "Tools / schemas / output bounds",
+      "sources": [
+        "src/IkaCore/agent_parse.py",
+        "src/IkaCore/agent_tools.py",
+        "src/IkaCore/tool_runtime_metadata.py",
+        "src/IkaCore/tools.py",
+        "src/IkaCore/truncated_json.py",
+        "src/IkaModel/chat_interface/tool_execution_async.py",
+        "src/IkaModel/chat_interface/tool_execution_sync.py",
+        "src/IkaModel/chat_interface/tool_result_formatters.py",
+        "src/IkaModel/execution_hooks.py",
+        "src/IkaModel/tool_output.py",
+        "src/IkaModel/tool_schema.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_tool_output_limits.py::test_output_limit_properties_across_unicode_and_boundaries",
+        "src/IkaTest/test_tool_runtime_metadata.py::test_sync_tool_timeout_returns_at_configured_limit_and_worker_is_released",
+        "src/IkaTest/test_tool_runtime_metadata.py::test_async_tool_timeout_cancels_coroutine_and_reports_its_configured_limit",
+        "src/IkaTest/test_tool_schema.py::test_fresh_lists_cannot_grow_fast_cache_without_bound",
+        "src/IkaTest/test_execution_hooks.py::test_nested_hook_scope_clears_and_restores_tool_identity",
+        "src/IkaTest/test_hardening_properties.py::test_tool_json_decode_roundtrip_and_validation_do_not_mutate",
+        "src/IkaTest/test_hardening_tools_auth.py::test_parallel_plan_surfaces_interruptions_and_counts_failures"
+      ],
+      "known_gap": "Tool side effects are synthetic; application tool implementations need their own tests.",
+      "min_lines": 99,
+      "min_branches": 97
+    },
+    {
+      "area": "Snapshot storage / privacy / replay rules",
+      "sources": [
+        "src/IkaCore/snapshot_data.py",
+        "src/IkaCore/snapshot_events.py",
+        "src/IkaCore/snapshot_frames.py",
+        "src/IkaCore/snapshot_privacy.py",
+        "src/IkaCore/snapshot_replay.py",
+        "src/IkaCore/snapshot_runs.py",
+        "src/IkaCore/snapshot_schema.py",
+        "src/IkaCore/snapshot_store.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_snapshot_store.py::test_snapshot_links_are_immutable_and_cannot_cross_runs",
+        "src/IkaTest/test_snapshot_store.py::test_concurrent_events_have_unique_monotonic_sequence_numbers",
+        "src/IkaTest/test_snapshot_store.py::test_unknown_tool_replay_is_denied_until_explicitly_allowed",
+        "src/IkaTest/test_snapshot_store.py::test_snapshot_metadata_redacts_credentials_without_changing_ordinary_urls",
+        "src/IkaTest/test_quality_properties.py::test_snapshot_json_roundtrip_and_append_only_chain",
+        "src/IkaTest/test_snapshot_transactions.py::test_nested_transactions_rollback_only_failed_scope",
+        "src/IkaTest/test_snapshot_transactions.py::test_snapshot_boundary_is_atomic_and_pause_is_committed",
+        "src/IkaTest/test_snapshot_transactions.py::test_transactions_use_one_connection_and_isolate_workers",
+        "src/IkaTest/test_snapshot_transactions.py::test_snapshot_connection_closes_when_setup_fails",
+        "src/IkaTest/test_crash_durability.py::test_killed_agent_recovers_only_committed_boundaries",
+        "src/IkaTest/test_crash_durability.py::test_two_process_writers_serialize_sequence_and_preserve_integrity"
+      ],
+      "known_gap": "Abrupt process termination, DELETE/WAL journaling, concurrent process writers and atomic boundary visibility are qualified offline. Power-loss/filesystem guarantees and arbitrary external tool effects remain outside SQLite recovery.",
+      "min_lines": 99,
+      "min_branches": 99
+    },
+    {
+      "area": "Agent snapshots / human resume",
+      "sources": [
+        "src/IkaCore/agent_snapshot_execution.py",
+        "src/IkaCore/agent_snapshots.py",
+        "src/IkaCore/runtime_control.py",
+        "src/IkaCore/snapshot_agent_hooks.py",
+        "src/IkaCore/snapshot_agent_state.py",
+        "src/IkaCore/snapshot_session.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_agent_snapshots.py::test_post_model_resume_reuses_pending_response_without_double_usage",
+        "src/IkaTest/test_agent_snapshots.py::test_agent_fork_and_restart_leave_original_run_untouched",
+        "src/IkaTest/test_agent_snapshots.py::test_staged_human_input_snapshot_resumes_with_user_answer",
+        "src/IkaTest/test_agent_snapshots.py::test_generator_tool_records_mid_tool_pause_and_requires_replay_decision",
+        "src/IkaTest/test_agent_snapshots.py::test_pause_configuration_is_isolated_and_preserves_replay_policy",
+        "src/IkaTest/test_agent_snapshots.py::test_historical_resume_requires_approval_for_repeated_tool_effects",
+        "src/IkaTest/test_agent_snapshots.py::test_resume_does_not_require_approval_for_effects_before_snapshot",
+        "src/IkaTest/test_agent_snapshots.py::test_nested_agent_snapshots_belong_to_child_and_support_frame_restart",
+        "src/IkaTest/test_snapshot_resume_state.py::test_hitl_resume_consumes_saved_transcript_before_entering_next_stage",
+        "src/IkaTest/test_snapshot_resume_state.py::test_fresh_execution_starts_at_first_stage_after_replay",
+        "src/IkaTest/test_snapshot_resume_state.py::test_snapshot_without_loop_state_uses_only_remaining_budget",
+        "src/IkaTest/test_snapshot_resume_state.py::test_snapshot_without_loop_state_subtracts_only_current_stage_steps",
+        "src/IkaTest/test_snapshot_resume_state.py::test_exhausted_legacy_budget_does_not_regain_a_turn",
+        "src/IkaTest/test_agent_configuration.py::test_dc9efbd_snapshot_resumes_saved_turn_without_provider_or_double_usage"
+      ],
+      "known_gap": "In-process mocked models; mid-tool replay restarts execution rather than restoring Python stacks.",
+      "min_lines": 99,
+      "min_branches": 95
+    },
+    {
+      "area": "Workflow snapshots / selective replay",
+      "sources": [
+        "src/IkaCore/workflow_snapshot_execution.py",
+        "src/IkaCore/workflow_snapshot_state.py",
+        "src/IkaCore/workflow_snapshots.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_workflow_snapshots.py::test_selective_replay_invalidates_descendants_and_preserves_other_instances",
+        "src/IkaTest/test_workflow_snapshots.py::test_replay_checks_nested_tool_effects_before_selected_instance_is_rerun",
+        "src/IkaTest/test_workflow_snapshots.py::test_parallel_snapshot_results_remain_complete",
+        "src/IkaTest/test_workflow_snapshots.py::test_human_input_interrupt_blocks_workflow_dependents_and_completed_reuse",
+        "src/IkaTest/test_workflow_snapshots.py::test_workflow_replay_excludes_historically_cached_interruptions",
+        "src/IkaTest/test_workflow_hitl_resume.py::test_workflow_resume_answers_saved_instance_and_continues_dependents",
+        "src/IkaTest/test_workflow_hitl_resume.py::test_parallel_resume_keeps_each_interruption_and_completed_siblings",
+        "src/IkaTest/test_workflow_hitl_resume.py::test_workflow_resume_preserves_effects_before_child_interruption",
+        "src/IkaTest/test_workflow_hitl_resume.py::test_workflow_fork_does_not_mutate_source_child",
+        "src/IkaTest/test_workflow_hitl_resume.py::test_workflow_rejects_child_snapshot_from_another_run",
+        "src/IkaTest/test_workflow_hitl_resume.py::test_selective_replay_invalidates_interrupted_descendant",
+        "src/IkaTest/test_workflow_hitl_resume.py::test_restarting_interrupted_descendant_checks_replay_safety",
+        "src/IkaTest/test_workflow_hitl_resume.py::test_selecting_interrupted_instance_restarts_only_that_continuation",
+        "src/IkaTest/test_crash_durability.py::test_killed_parallel_workflow_resumes_consistently",
+        "src/IkaTest/test_crash_durability.py::test_parallel_workflow_crash_never_duplicates_nonreplayable_effects"
+      ],
+      "known_gap": "Fresh-process recovery and non-replayable tool effects are checked across killed parallel instances. Distributed scheduling and arbitrary tool migration remain unqualified.",
+      "min_lines": 99,
+      "min_branches": 96
+    },
+    {
+      "area": "Workflows / fan-in / instance isolation",
+      "sources": [
+        "src/IkaCore/workflow.py",
+        "src/IkaCore/workflow_async.py",
+        "src/IkaCore/workflow_async_executor.py",
+        "src/IkaCore/workflow_context_cache.py",
+        "src/IkaCore/workflow_core.py",
+        "src/IkaCore/workflow_dataflow.py",
+        "src/IkaCore/workflow_prompt_context.py",
+        "src/IkaCore/workflow_sync_dataflow.py",
+        "src/IkaCore/workflow_types.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_workflow_dataflow.py::test_dependent_starts_when_its_own_dependencies_finish_not_when_the_wave_does",
+        "src/IkaTest/test_workflow_semantics.py::TestWorkflowAsyncSemantics::test_failed_instance_blocks_its_dependents_even_when_a_sibling_succeeds",
+        "src/IkaTest/test_workflow_semantics.py::TestWorkflowValidationDisplayAndContext::test_sync_run_propagates_initial_and_upstream_context_and_detects_cycles",
+        "src/IkaTest/test_ergonomics_merge_contracts.py::test_borrowed_client_config_reaches_deadline_private_pool_through_clone",
+        "src/IkaTest/test_ergonomics_merge_contracts.py::test_worker_cancellation_preserves_type_and_cancels_other_inflight_work"
+      ],
+      "known_gap": "Small deterministic graphs; large graphs and sustained resource growth require benchmark/stress evidence.",
+      "min_lines": 99,
+      "min_branches": 97
+    },
+    {
+      "area": "Memory integration",
+      "sources": [
+        "src/IkaMem/__init__.py",
+        "src/IkaMem/long_term_memory.py",
+        "src/IkaMem/memory.py",
+        "src/IkaMem/memory_items.py",
+        "src/IkaMem/short_term_memory.py",
+        "src/IkaMem/storage/__init__.py",
+        "src/IkaMem/storage/interface.py",
+        "src/IkaMem/storage/mem0_storage.py",
+        "src/IkaMem/agent_tools.py",
+        "src/IkaMem/agent_memory.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_memory_classes.py::test_short_term_memory_search_reset_and_error_paths",
+        "src/IkaTest/test_mem0_storage.py::test_mem0_store_rejects_missing_or_incomplete_mem0_backend",
+        "src/IkaTest/test_mem0_storage.py::test_mem0_store_local_memory_strips_cloud_only_search_params",
+        "src/IkaTest/test_hardening_memory.py::test_memory_tool_coercion_permissions_and_mixed_results"
+      ],
+      "known_gap": "Optional memory backends are faked; live vector DB, embedding and hosted-memory services are not tested.",
+      "min_lines": 99,
+      "min_branches": 99
+    },
+    {
+      "area": "Logging / CLI",
+      "sources": [
+        "src/IkaCore/cli_output.py",
+        "src/IkaCore/logging_utils.py",
+        "src/IkaCore/logging_utils_support.py",
+        "src/IkaCore/events.py",
+        "src/IkaCore/output_adapters.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_logging_utils.py::test_logger_shutdown_drains_queued_lines",
+        "src/IkaTest/test_logging_utils.py::test_level_two_logger_writes_structured_json_events",
+        "src/IkaTest/test_cli_output.py::test_output_buffer_sink_failures_do_not_block_stdout_suppressed_path",
+        "src/IkaTest/test_runtime_events.py::test_events_are_structured_isolated_and_follow_worker_context",
+        "src/IkaTest/test_runtime_events.py::test_no_subscriber_does_not_allocate_events_and_scopes_restore",
+        "src/IkaTest/test_controlled_runtime_scopes.py::test_controlled_request_keeps_output_hooks_and_runtime_control",
+        "src/IkaTest/test_controlled_runtime_scopes.py::test_deadline_response_cleanup_preserves_scope_after_caller_returns"
+      ],
+      "known_gap": "Local files and captured output; extended high-volume logging and sink failures need soak testing.",
+      "min_lines": 99,
+      "min_branches": 93
+    },
+    {
+      "area": "Agent runtime / stages",
+      "sources": [
+        "src/IkaCore/agent_chat_support.py",
+        "src/IkaCore/agent_execution_loop.py",
+        "src/IkaCore/agent_execution_helpers.py",
+        "src/IkaCore/agent_helper_support.py",
+        "src/IkaCore/agent_initialization.py",
+        "src/IkaCore/agent_lifecycle.py",
+        "src/IkaCore/agent_runtime_dispatch.py",
+        "src/IkaCore/agent_runtime_foundation.py",
+        "src/IkaCore/agent_runtime_payloads.py",
+        "src/IkaCore/agents.py",
+        "src/IkaCore/execution_types.py",
+        "src/IkaCore/prompts.py",
+        "src/IkaCore/stages.py",
+        "src/IkaCore/config.py",
+        "src/IkaCore/agent_state.py",
+        "src/IkaCore/agent_policy.py",
+        "src/IkaCore/agent_conversation.py",
+        "src/IkaCore/results.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_agent_helpers.py::TestFinalPrompt::test_execute_stage_refreshes_first_input_for_each_stage",
+        "src/IkaTest/test_agent_execution_loop.py::test_loop_counts_turns_and_uses_executed_control_calls",
+        "src/IkaTest/test_agent_execution_loop.py::test_agent_end_exception_uses_content_and_counts_usage_once",
+        "src/IkaTest/test_agent_execution_loop.py::test_loop_preserves_extension_limits_and_forced_finalization",
+        "src/IkaTest/test_agent_execution_loop.py::test_stages_advance_and_jump_without_replaying_extra_turns",
+        "src/IkaTest/test_agent_execution_loop.py::test_cancel_at_second_step_prevents_another_model_call",
+        "src/IkaTest/test_agent_execution_loop.py::test_empty_turns_keep_existing_mode_policy",
+        "src/IkaTest/test_snapshot_resume_state.py::test_mid_stage_resume_preserves_consumed_steps_limit_and_extensions",
+        "src/IkaTest/test_snapshot_resume_state.py::test_mid_stage_resume_does_not_double_charge_steps_to_following_stage",
+        "src/IkaTest/test_snapshot_resume_state.py::test_loop_budget_survives_resume_in_a_new_agent",
+        "src/IkaTest/test_snapshot_resume_state.py::test_hitl_resume_preserves_the_stage_budget_already_consumed",
+        "src/IkaTest/test_snapshot_resume_state.py::test_exhausted_hitl_resume_extends_or_finalizes_before_stage_completion",
+        "src/IkaTest/test_execution_parity.py::test_execution_parity_with_dc9efbd[False]",
+        "src/IkaTest/test_execution_parity.py::test_execution_parity_with_dc9efbd[True]",
+        "src/IkaTest/test_dogfood_ergonomics.py::test_staged_correction_preserves_evidence_without_replaying_tools",
+        "src/IkaTest/test_dogfood_ergonomics.py::test_completed_snapshot_restores_conversation_before_send",
+        "src/IkaTest/test_ergonomics_merge_contracts.py::test_validation_waits_for_staged_human_answer",
+        "src/IkaTest/test_dogfood_ergonomics.py::test_staged_correction_preserves_evidence_without_replaying_tools"
+      ],
+      "known_gap": "Model behavior, task success and downstream application semantics are outside offline unit coverage.",
+      "min_lines": 99,
+      "min_branches": 92
+    },
+    {
+      "area": "Summarization / compaction",
+      "sources": [
+        "src/IkaModel/summarization.py",
+        "src/IkaModel/compaction.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_compaction_policy.py::test_default_compaction_boundary_stays_at_eighty_percent",
+        "src/IkaTest/test_compaction_policy.py::test_opt_in_compaction_threshold_and_snapshot_boundaries_sync_and_async",
+        "src/IkaTest/test_compaction_retention.py::test_controlled_compaction_contains_facts_and_keeps_pending_structure",
+        "src/IkaTest/test_compaction_retention.py::test_compaction_also_bounds_the_live_request_buffer",
+        "src/IkaTest/test_compaction_retention.py::test_context_overflow_retry_uses_compacted_live_buffer",
+        "src/IkaTest/test_reasoning_merge_contracts.py::test_compaction_keeps_every_reasoning_item_in_a_native_call_group",
+        "src/IkaTest/test_ergonomics_merge_contracts.py::test_latest_send_instruction_survives_compaction_before_old_pending_exchange"
+      ],
+      "known_gap": "Controlled fact fixtures, pairing, reasoning and live-buffer bounds are checked offline. Four bounded Codex fixtures scored 19/20 strict follow-up facts; one constraint answer missed the strict scorer. This does not establish general task retention.",
+      "min_lines": 99,
+      "min_branches": 96
+    },
+    {
+      "area": "Codex auth / streaming / payloads",
+      "sources": [
+        "src/IkaModel/codex/__init__.py",
+        "src/IkaModel/codex/auth.py",
+        "src/IkaModel/codex/chat_helpers_codex.py",
+        "src/IkaModel/codex/codex_responses.py",
+        "src/IkaModel/codex/codex_stream.py",
+        "src/IkaModel/codex/async_request.py",
+        "src/IkaModel/codex_constants.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_codex_sse.py::TestCollectStream::test_created_without_completed_is_retryable_truncation",
+        "src/IkaTest/test_codex_sse.py::TestCollectStream::test_top_level_error_after_partial_output_is_retryable",
+        "src/IkaTest/test_codex_async_transport.py::test_codex_reuses_supplied_client_and_preserves_payload",
+        "src/IkaTest/test_codex_async_transport.py::test_native_codex_cancellation_closes_stream_but_keeps_shared_client",
+        "src/IkaTest/test_codex_async_transport.py::test_native_codex_retries_transient_failures",
+        "src/IkaTest/test_hardening_properties.py::test_sse_arbitrary_byte_boundaries_preserve_unicode_and_terminal_output"
+      ],
+      "known_gap": "Offline CI uses synthetic files/tokens. Separate live checks passed for gpt-5.6-sol; other Codex models and actual OAuth token renewal remain unverified.",
+      "min_lines": 99,
+      "min_branches": 98
+    },
+    {
+      "area": "Provider payloads / metadata / history",
+      "sources": [
+        "src/IkaModel/anthropic/__init__.py",
+        "src/IkaModel/anthropic/chat_helpers_anthropic.py",
+        "src/IkaModel/anthropic/claude.py",
+        "src/IkaModel/chat_helpers_common.py",
+        "src/IkaModel/deepseek/__init__.py",
+        "src/IkaModel/deepseek/chat_helpers_deepseek.py",
+        "src/IkaModel/deepseek/deepseek.py",
+        "src/IkaModel/gemini/__init__.py",
+        "src/IkaModel/gemini/chat_helpers_gemini.py",
+        "src/IkaModel/gemini/google.py",
+        "src/IkaModel/history_replay.py",
+        "src/IkaModel/model_metadata.py",
+        "src/IkaModel/openai/__init__.py",
+        "src/IkaModel/openai/chat_helpers_openai.py",
+        "src/IkaModel/openai/openai.py",
+        "src/IkaModel/openai/openai_responses.py",
+        "src/IkaModel/openrouter/__init__.py",
+        "src/IkaModel/openrouter/chat_helpers_openrouter.py",
+        "src/IkaModel/openrouter/openrouter.py",
+        "src/IkaModel/reasoning_replay.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_history_replay.py::test_provider_payloads_send_each_round_once",
+        "src/IkaTest/test_history_replay.py::test_hitl_resume_keeps_stage_prompt_in_place_and_ends_on_answer",
+        "src/IkaTest/test_quality_properties.py::test_history_replay_conserves_multiplicity_order_and_inputs",
+        "src/IkaTest/test_provider_payload_equivalence.py::test_all_provider_payloads_match_baseline_without_mutating_inputs",
+        "src/IkaTest/test_responses_reasoning_replay.py::test_two_turn_reasoning_payload",
+        "src/IkaTest/test_anthropic_reasoning_replay.py::test_signed_and_redacted_blocks_replayed_verbatim",
+        "src/IkaTest/test_gemini_reasoning_replay.py::test_gemini_keeps_each_signed_part_at_its_original_position",
+        "src/IkaTest/test_openrouter_reasoning_replay.py::test_openrouter_reasoning_details_survive_tool_loop",
+        "src/IkaTest/test_reasoning_snapshot_replay.py::test_public_snapshot_resume_mid_tool_loop_preserves_reasoning",
+        "src/IkaTest/test_reasoning_merge_contracts.py::test_malformed_native_reasoning_items_fail_at_parse_boundary",
+        "src/IkaTest/test_reasoning_merge_contracts.py::test_compaction_replays_reasoning_with_its_own_tool_exchange"
+      ],
+      "known_gap": "Provider schemas/metadata can drift; eight provider routes have an opt-in installed-wheel 15-case live matrix. Offline CI tests the harness with MockTransport; unsupported thinking/SSE capabilities are explicit skips.",
+      "min_lines": 99,
+      "min_branches": 97
+    },
+    {
+      "area": "Chat loop / accounting / human interruption",
+      "sources": [
+        "src/IkaModel/chat_interface/__init__.py",
+        "src/IkaModel/chat_interface/chat_interface.py",
+        "src/IkaModel/chat_interface/chat_request.py",
+        "src/IkaModel/chat_interface/chat_response.py",
+        "src/IkaModel/chat_interface/chat_runtime.py",
+        "src/IkaModel/chat_interface/chat_tool_common.py",
+        "src/IkaModel/chat_interface/chat_tool_loop_async.py",
+        "src/IkaModel/chat_interface/chat_tool_loop_sync.py",
+        "src/IkaModel/chat_interface/response_usage.py",
+        "src/IkaModel/chat_interface/types.py",
+        "src/IkaModel/chat_interface/debug_dump.py"
+      ],
+      "required_tests": [
+        "src/IkaTest/test_chat_runtime.py::test_public_chat_dependency_override_does_not_leak_into_next_call",
+        "src/IkaTest/test_hitl_interrupt_resume.py::TestHitlChatInterrupt::test_chat_interrupts_without_blocking",
+        "src/IkaTest/test_hitl_interrupt_resume.py::TestHitlChatInterrupt::test_async_chat_interrupts_without_blocking",
+        "src/IkaTest/test_hardening_properties.py::test_nested_malformed_provider_shapes_never_escape_typed_parse_errors",
+        "src/IkaTest/test_hardening_chat_edges.py::test_force_completion_never_converts_cancellation_to_success"
+      ],
+      "known_gap": "Scripted responses validate mechanics, not model reasoning or end-to-end application outcomes.",
+      "min_lines": 99,
+      "min_branches": 96
+    }
+  ]
+}

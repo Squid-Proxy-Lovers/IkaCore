@@ -3,10 +3,7 @@ import asyncio
 import json
 from unittest.mock import MagicMock, patch
 
-mock_ika_mem = MagicMock()
-with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
-    from IkaCore.agents import IkaBaseAgent
-from IkaCore.checkpoint import CheckpointStore
+from IkaCore.agents import IkaBaseAgent
 from IkaCore.stages import IkaStage
 from IkaModel.base import AgentTool, BareBoneModel, HumanInputRequired, ToolArgs
 from IkaModel.chat_interface.chat_interface import async_chat, chat
@@ -88,7 +85,7 @@ class TestHitlChatInterrupt:
         resp.status_code = 200
         resp.json.return_value = _hitl_response("Need more context?")
 
-        with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=resp):
+        with patch("IkaModel.request_interface.api_request_retry", return_value=resp):
             out = chat(model, messages, message_history=history, tool_executors={"ask_user": _ask_user_executor})
 
         assert out["interrupted"] is True
@@ -112,7 +109,7 @@ class TestHitlChatInterrupt:
         resp.status_code = 200
         resp.json.return_value = _hitl_response("Need more context?")
 
-        with patch("IkaModel.chat_interface.chat_interface.async_api_request_retry", return_value=resp):
+        with patch("IkaModel.request_interface.async_api_request_retry", return_value=resp):
             out = asyncio.run(
                 async_chat(model, messages, message_history=history, tool_executors={"ask_user": _ask_user_executor})
             )
@@ -124,17 +121,16 @@ class TestHitlChatInterrupt:
 
 class TestHitlResume:
     def test_execution_saves_checkpoint_and_resumes(self, tmp_path):
-        stage = IkaStage("Stage 0", "Ask for missing details", [], hitl=True, checkpoint=True)
+        stage = IkaStage("Stage 0", "Ask for missing details", [], hitl=True)
         agent = IkaBaseAgent(
             name="Agent",
             description="Agent desc",
             prompt="Do the task",
             model_id="gpt-4o",
             api_key="test-key",
-            Stages=[stage],
-            checkpoint=True,
-            checkpoint_db_path=str(tmp_path / "checkpoints.db"),
+            stages=[stage],
         )
+        store = agent.enable_snapshots(str(tmp_path / "runtime.db"))
         agent.logger = MagicMock(level=0, use_colors=False)
         agent.logger.compute_cost.return_value = {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
 
@@ -181,23 +177,22 @@ class TestHitlResume:
             calls.append(args[1])
             if len(calls) == 1:
                 return interrupt_response
-            assert args[1][0]["content"] == "User answer"
+            assert args[1][-1]["content"] == "User answer"
             return final_response
 
         agent.chat_wrapper = MagicMock(side_effect=chat_wrapper_side_effect)
 
         first = agent.execution()
         assert first["status"] == "awaiting_user_input"
-        assert first["checkpoint_uid"]
+        assert first["snapshot_id"]
         assert first["interrupt_data"]["question"] == "Need more context?"
 
-        store = CheckpointStore(str(tmp_path / "checkpoints.db"))
-        saved = store.load_checkpoint(first["checkpoint_uid"])
+        saved = store.load_snapshot(first["snapshot_id"])["state_json"]
         assert saved["scope"] == "hitl"
         assert saved["interrupt_data"]["question"] == "Need more context?"
         assert saved["stage_index"] == 0
 
-        second = agent.execution(checkpoint_uid=first["checkpoint_uid"], resume_input="User answer")
+        second = agent.resume_from_snapshot(first["snapshot_id"], resume_input="User answer")
         assert second["final_message"] == "All done"
         assert second.get("status") != "awaiting_user_input"
-        assert calls[1][0]["content"] == "User answer"
+        assert calls[1][-1]["content"] == "User answer"

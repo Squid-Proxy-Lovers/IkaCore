@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import os
 
-from IkaCore import IkaBaseAgent, IkaTools
+from IkaCore import ExecutionLimits, IkaBaseAgent, IkaTools, OutputConfig, PromptConfig, ProviderConfig
 from IkaModel.codex import CODEX_API_URL, codex_auth
 
 SYSTEM_PROMPT = """You are a concise agent. Use the tools provided when they
@@ -61,7 +61,7 @@ def _resolve_bearer() -> str:
 
 def main() -> None:
     bearer = _resolve_bearer()
-    print(f"[codex] bearer={bearer[:12]}...  plan={codex_auth.get_chatgpt_plan()}")
+    print(f"[codex] authentication succeeded; plan={codex_auth.get_chatgpt_plan()}")
 
     get_pwd = IkaTools(
         name="get_pwd",
@@ -89,15 +89,14 @@ def main() -> None:
     agent = IkaBaseAgent(
         name="codex_example",
         description="Tiny codex-provider smoke test",
-        system_prompt=SYSTEM_PROMPT,
+        prompts=PromptConfig(system_prompt=SYSTEM_PROMPT),
         prompt=PROMPT,
         tools=[get_pwd, list_files],
         model_id=model_id,
-        api_url=CODEX_API_URL,
+        provider=ProviderConfig(api_url=CODEX_API_URL, reasoning_effort=reasoning_effort),
         api_key=bearer,
-        reasoning_effort=reasoning_effort,
-        maxsteps=8,
-        logging_level=2,
+        limits=ExecutionLimits(maxsteps=8),
+        output=OutputConfig(logging_level=2),
     )
     agent.execution()
 

@@ -19,11 +19,11 @@ Three pieces:
 
 from __future__ import annotations
 
-import email.utils
 import json
 import logging
 import time
 import uuid
+from functools import partial
 from typing import Any, Optional, cast
 
 import httpx
@@ -33,12 +33,19 @@ from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict,
 from ..base import BareBoneModel
 from ..codex_constants import CODEX_API_URL
 from ..model_metadata import CODEX_KNOWN_MODELS
+from ..reasoning_replay import take_response_replay
+from ..request_control import check_request_controls, effective_max_retries, effective_timeout, request_lifecycle_active
 from ..request_interface import agent_tools_for_payload
+from ..request_lifecycle import sleep_with_controls
+from ..request_transport import controlled_sync_request
+from ..retry_policy import TRANSIENT_TRANSPORT_ERRORS, backoff_seconds, response_body, retry_delay, retry_hint_seconds
+from ..runtime_errors import IkaRequestControlError
 from .codex_responses import codex_responses_fill_payload
 from .codex_stream import CodexRetryableStreamError as _CodexRetryableStreamError
 from .codex_stream import classify_stream_error as _classify_stream_error
 from .codex_stream import collect_stream as _collect_stream
 from .codex_stream import iter_sse as _iter_sse
+from .stream_transport import open_stream
 
 LOG = logging.getLogger(__name__)
 
@@ -62,32 +69,6 @@ def _token_count(value: object) -> int:
     return 0
 
 
-def _parse_retry_after(header_value: Optional[str], default: float) -> float:
-    """Parse a Retry-After header, supporting both integer-seconds and HTTP-date
-    forms (RFC 7231 §7.1.3). Falls back to ``default`` on any failure.
-
-    Naive datetimes (RFC 5322 ``-0000`` zone, meaning "local time of the source
-    is unknown") are treated as UTC, otherwise ``.timestamp()`` would silently
-    use the local timezone and produce a wildly wrong wait."""
-    if not header_value:
-        return float(default)
-    # Form 1: integer seconds (common case)
-    try:
-        return max(0.0, float(header_value))
-    except (TypeError, ValueError):
-        pass
-    # Form 2: HTTP-date (rare but legal — e.g. "Wed, 21 Oct 2015 07:28:00 GMT")
-    try:
-        from datetime import timezone
-        parsed = email.utils.parsedate_to_datetime(header_value)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return max(0.0, parsed.timestamp() - time.time())
-    except (TypeError, ValueError, IndexError, OverflowError):
-        pass
-    return float(default)
-
-
 def _sleep_before_retry(
     log_message: str,
     delay: float,
@@ -102,7 +83,7 @@ def _sleep_before_retry(
         attempt + 1,
         max_retries,
     )
-    time.sleep(delay)
+    sleep_with_controls(delay, time.sleep)
 
 
 def is_codex_url(api_url: Optional[str]) -> bool:
@@ -190,9 +171,9 @@ class _CodexResponseShim:
     ) -> None:
         self._data = data
         self.status_code = status_code
-        self.headers = httpx.Headers(headers or {})
-        self.text = text_fallback or json.dumps(data)
-        self.content = self.text.encode("utf-8", "replace")
+        self.headers: httpx.Headers = httpx.Headers(headers or {})
+        self.text: str = text_fallback or json.dumps(data)
+        self.content: bytes = self.text.encode("utf-8", "replace")
 
     def json(self) -> JsonDict:
         return self._data
@@ -213,47 +194,28 @@ def _codex_rate_headers(response: httpx.Response) -> dict[str, str]:
     }
 
 
-def _handle_codex_429(response: httpx.Response, body: str, attempt: int, max_retries: int, wait_seconds: int) -> None:
-    if attempt >= max_retries - 1:
-        raise RuntimeError(f"codex backend returned 429 after {max_retries} attempts: {body[:500]}")
-    retry_after = _parse_retry_after(response.headers.get("retry-after"), wait_seconds)
-    LOG.warning(
-        "codex backend 429 (rate-limited); sleeping %.1fs (attempt %d/%d)",
-        retry_after, attempt + 1, max_retries,
-    )
-    time.sleep(retry_after)
-
-
-def _handle_codex_5xx(status: int, body: str, backoff: float, attempt: int, max_retries: int) -> None:
-    if attempt >= max_retries - 1:
-        raise RuntimeError(f"codex backend returned {status} after {max_retries} attempts: {body[:500]}")
-    _sleep_before_retry(
-        "codex backend %d (transient)",
-        backoff, attempt, max_retries, status,
-    )
-
-
-def _handle_codex_non_200(
-    response: httpx.Response,
-    body: str,
-    backoff: float,
-    attempt: int,
-    max_retries: int,
-    wait_seconds: int,
-) -> None:
+def codex_retry_delay(response: httpx.Response, body: str, attempt: int,
+                      max_retries: int, wait_seconds: float) -> float:
     status = response.status_code
     if status == 401:
-        raise RuntimeError(
-            f"codex backend returned 401 (bearer rejected): {body[:500]}. "
-            "Caller may need to refresh the token and retry."
-        )
-    if status == 429:
-        _handle_codex_429(response, body, attempt, max_retries, wait_seconds)
-        return
-    if 500 <= status < 600:
-        _handle_codex_5xx(status, body, backoff, attempt, max_retries)
-        return
-    raise RuntimeError(f"codex backend returned {status}: {body[:2000]}")
+        raise RuntimeError(f"codex backend returned 401 (bearer rejected): {body[:500]}. Caller may need to refresh the token and retry.")
+    if status not in {408, 409, 429} and not 500 <= status < 600:
+        raise RuntimeError(f"codex backend returned {status}: {body[:2000]}")
+    if attempt >= max_retries - 1:
+        raise RuntimeError(f"codex backend returned {status} after {max_retries} attempts: {body[:500]}")
+    return retry_delay(attempt, retry_hint_seconds(response.headers, response_body(response)), wait_seconds)
+
+
+def _consume_codex_response(api_url: str, headers: dict[str, str], payload: JsonDict, timeout: float,
+                            attempt: int, max_retries: int, wait_seconds: float,
+                            client: Optional[httpx.Client]) -> _CodexResponseShim | float:
+    with open_stream(api_url, headers, payload, effective_timeout(timeout), client) as response:
+        rate_headers = _codex_rate_headers(response)
+        if response.status_code == 200:
+            data = _collect_stream(response)
+            return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
+        body = response.read().decode("utf-8", "replace")
+        return codex_retry_delay(response, body, attempt, max_retries, wait_seconds)
 
 
 def _request_codex_once(
@@ -261,19 +223,21 @@ def _request_codex_once(
     headers: dict[str, str],
     payload: JsonDict,
     timeout: float,
-    backoff: float,
     attempt: int,
     max_retries: int,
-    wait_seconds: int,
+    wait_seconds: float,
+    client: Optional[httpx.Client] = None,
 ) -> Optional[_CodexResponseShim]:
-    with httpx.stream("POST", api_url, headers=headers, json=payload, timeout=timeout) as response:
-        rate_headers = _codex_rate_headers(response)
-        if response.status_code == 200:
-            data = _collect_stream(response)
-            return _CodexResponseShim(data=data, status_code=200, headers=rate_headers)
-
-        body = response.read().decode("utf-8", "replace")
-        _handle_codex_non_200(response, body, backoff, attempt, max_retries, wait_seconds)
+    check_request_controls()
+    if request_lifecycle_active():
+        consume = partial(_consume_codex_response, api_url, headers, payload, timeout, attempt, max_retries, wait_seconds)
+        result = controlled_sync_request(consume, timeout, client)
+    else:
+        result = _consume_codex_response(api_url, headers, payload, timeout, attempt, max_retries, wait_seconds, client)
+    if isinstance(result, _CodexResponseShim):
+        return result
+    delay = result
+    sleep_with_controls(delay, time.sleep)
     return None
 
 
@@ -297,39 +261,47 @@ def _request_codex_with_retries(
     payload: JsonDict,
     timeout: float,
     max_retries: int,
-    wait_seconds: int,
+    wait_seconds: float,
+    client: Optional[httpx.Client] = None,
 ) -> _CodexResponseShim:
+    max_retries = effective_max_retries(max_retries)
     last_exc: Optional[Exception] = None
     for attempt in range(max_retries):
-        backoff = wait_seconds * (2 ** attempt)
+        check_request_controls()
+        backoff = backoff_seconds(attempt, wait_seconds)
         try:
             response = _request_codex_once(
                 api_url,
                 headers,
                 payload,
                 timeout,
-                backoff,
                 attempt,
                 max_retries,
                 wait_seconds,
+                client,
             )
             if response is not None:
                 return response
             continue
 
+        except IkaRequestControlError:
+            raise
         except _CodexRetryableStreamError as error:
+            check_request_controls()
             last_exc = error
             _retry_codex_exception(
                 "codex stream transient failure: %s",
                 backoff, attempt, max_retries, error,
             )
         except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as error:
+            check_request_controls()
             last_exc = error
             _retry_codex_exception(
                 "codex request timeout: %s",
                 backoff, attempt, max_retries, error,
             )
-        except httpx.HTTPError as error:
+        except TRANSIENT_TRANSPORT_ERRORS as error:
+            check_request_controls()
             last_exc = error
             _retry_codex_exception(
                 "codex http error: %s",
@@ -348,7 +320,8 @@ def request_codex(
     payload: JsonDict,
     timeout: float = 900.0,
     max_retries: int = 3,
-    wait_seconds: int = 10,
+    wait_seconds: float = 1.0,
+    client: Optional[httpx.Client] = None,
 ) -> _CodexResponseShim:
     """POST to the Codex Responses endpoint and return a Response-shaped shim."""
     return _request_codex_with_retries(
@@ -358,6 +331,7 @@ def request_codex(
         timeout,
         max_retries,
         wait_seconds,
+        client,
     )
 
 
@@ -400,9 +374,8 @@ def parse_codex_response(
                 },
             })
         elif item_type == "reasoning":
-            # The codex backend serves reasoning summaries (and optionally
-            # encrypted_content). We only keep the summary text here; the
-            # encrypted_content carry-over is a future optimization.
+            # Display summaries only. Opaque items are captured separately by
+            # parse_provider_response when the caller supplies message_history.
             raw_summary: object = item_data.get("summary") or []
             summary = cast(list[object], raw_summary) if isinstance(raw_summary, list) else []
             if summary:
@@ -442,6 +415,9 @@ def append_codex_tool_messages(
     ``function_call_output`` form when it next reads ``messages``.
     """
     assistant_msg: JsonDict = {"role": "assistant", "content": content}
+    provider_data = take_response_replay(message_history)
+    if provider_data:
+        assistant_msg["provider_data"] = provider_data
     if reasoning_content:
         assistant_msg["reasoning_content"] = reasoning_content
     if executed_tool_call_list:

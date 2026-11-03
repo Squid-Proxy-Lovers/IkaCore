@@ -1,5 +1,4 @@
 """Regression tests for broad cleanup hardening."""
-
 import asyncio
 import json
 import os
@@ -15,19 +14,18 @@ import httpx
 import pytest
 
 from IkaCore.agents import IkaBaseAgent
-from IkaCore.checkpoint import CheckpointStore
 from IkaCore.logging_utils import IkaLogger
+from IkaCore.snapshot_store import SnapshotStore
+from IkaMem.agent_tools import MemoryTools
 from IkaMem.long_term_memory import LTMemory
 from IkaMem.short_term_memory import STMemory
 from IkaModel import model_metadata
 from IkaModel.base import AgentEndException, AgentTool, BareBoneModel, ToolArgs
-from IkaModel.chat_interface import chat_runtime
+from IkaModel.chat_interface import chat_request as _test_chat_request
 from IkaModel.chat_interface.chat_interface import async_chat, chat, init_message_history
-from IkaModel.chat_interface.response_interface import (
-    async_execute_tool_calls,
-    execute_tool_calls,
-    format_gemini_results,
-)
+from IkaModel.chat_interface.tool_execution_async import async_execute_tool_calls
+from IkaModel.chat_interface.tool_execution_sync import execute_tool_calls
+from IkaModel.chat_interface.tool_result_formatters import format_gemini_results
 from IkaModel.chat_interface.types import ChatLoopState, ChatResponsePayload, ToolRuntimeState, UsageInfo
 from IkaModel.codex import auth as codex_auth
 from IkaModel.gemini.chat_helpers_gemini import build_gemini_request
@@ -66,19 +64,10 @@ def test_public_package_imports_work_in_clean_subprocess():
 
 
 def test_short_term_search_tool_is_exposed_when_executor_is_available():
-    agent = IkaBaseAgent(
-        name="A",
-        description="D",
-        prompt="P",
-        model_id="gpt-4o",
-        api_key="k",
-        memory=True,
-        memory_access={"short_term_save": True, "short_term_search": True},
-    )
-    agent.short_term_memory = MagicMock()
+    agent = MemoryTools("A", short_term=MagicMock())
 
-    exposed = {tool.name for tool in agent._build_memory_tools(agent.memory_access, "short_term")}
-    executors = agent.build_tool_executors([], memory_access=agent.memory_access)
+    exposed = {tool.name for tool in agent._build_memory_tools({"short_term_save": True, "short_term_search": True}, "short_term")}
+    executors = {tool.name: tool.execute_function for tool in agent.tools()}
 
     assert {"short_term_save", "short_term_search"}.issubset(exposed)
     assert {"short_term_save", "short_term_search"}.issubset(executors)
@@ -195,7 +184,7 @@ def test_chat_context_fallback_classifies_initial_payload_build_failure():
         raise KeyError("missing required field")
 
     with pytest.raises(IkaProviderPayloadError, match="provider request payload"):
-        chat_runtime._api_request_with_context_fallback(build_payload, model, init_message_history())
+        _test_chat_request._api_request_with_context_fallback(build_payload, model, init_message_history())
 
 
 def test_chat_context_fallback_classifies_rebuild_failure_after_summarization():
@@ -215,12 +204,12 @@ def test_chat_context_fallback_classifies_rebuild_failure_after_summarization():
         raise ValueError("bad rebuilt payload")
 
     with patch(
-        "IkaModel.chat_interface.chat_request.api_request_retry",
+        "IkaModel.request_interface.api_request_retry",
         side_effect=IkaAPIError("maximum context length exceeded"),
     ):
-        with patch("IkaModel.chat_interface.chat_request.summarise_message_history", return_value="summary"):
+        with patch("IkaModel.summarization.summarise_message_history", return_value="summary"):
             with pytest.raises(IkaContextWindowError, match="rebuild provider request"):
-                chat_runtime._api_request_with_context_fallback(build_payload, model, init_message_history())
+                _test_chat_request._api_request_with_context_fallback(build_payload, model, init_message_history())
 
 
 def test_sync_tool_calls_reject_malformed_json_without_execution():
@@ -295,9 +284,9 @@ def test_async_repeated_tool_guard_returns_forced_completion_without_execution()
         return "should not execute"
 
     async def run_case():
-        with patch("IkaModel.chat_interface.chat_interface.async_api_request_retry", return_value=response):
+        with patch("IkaModel.request_interface.async_api_request_retry", return_value=response):
             with patch(
-                "IkaModel.chat_interface.chat_interface.async_summarise_message_history",
+                "IkaModel.summarization.async_summarise_message_history",
                 return_value="forced final",
             ):
                 return await async_chat(
@@ -339,8 +328,8 @@ def test_sync_max_tool_calls_force_completes_with_synthetic_agent_end():
         "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
     }
 
-    with patch("IkaModel.chat_interface.chat_interface.api_request_retry", return_value=response):
-        with patch("IkaModel.chat_interface.chat_interface.run_summarization", return_value="forced done"):
+    with patch("IkaModel.request_interface.api_request_retry", return_value=response):
+        with patch("IkaModel.summarization.run_summarization", return_value="forced done"):
             with pytest.raises(AgentEndException) as exc_info:
                 chat(
                     model,
@@ -416,29 +405,28 @@ def test_gemini_api_key_uses_header_and_redaction_hides_secrets():
     assert "safe=value" in redacted_url
 
 
-def test_checkpoint_database_is_owner_private(tmp_path):
+def test_snapshot_database_is_owner_private(tmp_path):
     if os.name == "nt":
         return
     db_path = tmp_path / "checkpoints.db"
-    CheckpointStore(str(db_path))
+    SnapshotStore(str(db_path))
 
     mode = stat.S_IMODE(os.stat(db_path).st_mode)
     assert mode == 0o600
 
 
-def test_corrupt_checkpoint_payload_raises(tmp_path):
+def test_corrupt_snapshot_payload_raises(tmp_path):
     db_path = tmp_path / "checkpoints.db"
-    store = CheckpointStore(str(db_path))
+    store = SnapshotStore(str(db_path))
 
+    run = store.create_run("agent", "test")
+    frame = store.create_frame(run, "agent", "test")
+    snapshot = store.create_snapshot(run, frame, "frame_entry", {})
     with closing(sqlite3.connect(db_path)) as conn:
         with conn:
-            conn.execute(
-                "INSERT INTO checkpoints (uid, scope, payload_json, created_at) VALUES (?, ?, ?, ?)",
-                ("bad-json", "test", "{not-json", "2026-06-05T00:00:00+00:00"),
-            )
-
-    with pytest.raises(ValueError, match="invalid JSON"):
-        store.load_checkpoint("bad-json")
+            conn.execute("UPDATE snapshots SET state_json = ? WHERE snapshot_id = ?", ("{not-json", snapshot))
+    with pytest.raises(ValueError):
+        store.load_snapshot(snapshot)
 
 
 def test_agent_end_empty_functions_list_is_rejected():
@@ -458,17 +446,11 @@ def test_agent_end_empty_functions_list_is_rejected():
 
 
 def test_long_term_filter_failure_is_reported():
-    agent = IkaBaseAgent(
-        name="A",
-        description="D",
-        prompt="P",
-        model_id="gpt-4o",
-        api_key="k",
-    )
-    agent.long_term_memory = MagicMock()
-    agent.long_term_memory.search.return_value = [{"task": "task", "expected_output": "output"}]
+    agent = MemoryTools("A")
+    agent.operations.long_term_memory = MagicMock()
+    agent.operations.long_term_memory.search.return_value = [{"task": "task", "expected_output": "output"}]
 
-    result = agent._search_long_term("query", filter_func=lambda _results: (_ for _ in ()).throw(RuntimeError("boom")))
+    result = agent.operations.search_long_term("query", filter_func=lambda _results: (_ for _ in ()).throw(RuntimeError("boom")))
 
     assert "long-term memory filter failed: boom" == result["error"]
 
@@ -513,7 +495,7 @@ def test_agent_clone_for_run_isolates_runtime_history_and_client():
     )
     agent.message_history["first_input"]["message"] = "original history"
     agent._parent_hierarchy = ["root"]
-    client = agent._get_chat_client()
+    client = agent.chat._get_chat_client()
 
     clone = agent.clone_for_run(name="A_clone", prompt="new prompt")
 
@@ -522,7 +504,7 @@ def test_agent_clone_for_run_isolates_runtime_history_and_client():
     assert clone.message_history["first_input"]["message"] == ""
     assert clone.logger is agent.logger
     assert clone.client is None
-    assert agent._get_chat_client() is client
+    assert agent.chat._get_chat_client() is client
 
     clone.message_history["first_input"]["message"] = "clone history"
     assert agent.message_history["first_input"]["message"] == "original history"

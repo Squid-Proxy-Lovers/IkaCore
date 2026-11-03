@@ -11,6 +11,9 @@ import httpx
 from IkaCore.agent_runtime_payloads import JsonDict, history_message_text, history_section, json_dict, string_value
 
 from .base import BareBoneModel
+from .chat_helpers_common import provider_response_interruption
+from .compaction import compact_live_messages as compact_live_messages
+from .compaction import retained_compaction_entries
 from .model_metadata import (
     OPENAI_CHAT_COMPLETIONS_URL,
     get_api_url_for_model,
@@ -19,6 +22,7 @@ from .model_metadata import (
     uses_openai_max_completion_tokens,
 )
 from .request_interface import api_request_retry, async_api_request_retry, get_provider
+from .runtime_errors import IkaProviderResponseError, IkaRequestControlError
 
 _LOG = logging.getLogger(__name__)
 
@@ -27,7 +31,7 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 def _load_prompt(relative_path: str, fallback: str) -> str:
     try:
-        from src.resources import read_text as read_ika_resource
+        from .resource_loader import read_embedded_resource as read_ika_resource
 
         return read_ika_resource(f"IkaCore/src/IkaModel/prompts/{relative_path}").strip()
     except (ImportError, ModuleNotFoundError, OSError):
@@ -152,13 +156,15 @@ def _build_anthropic_summary_payload(
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01",
     }
-    return {
+    payload: JsonDict = {
         "model": model_name,
         "max_tokens": 2000,
         "system": sys_prompt,
         "messages": [{"role": "user", "content": user_content}],
-        "temperature": 0.3,
-    }, headers
+    }
+    if supports_custom_temperature(model_name):
+        payload["temperature"] = 0.3
+    return payload, headers
 
 
 def _build_gemini_summary_payload(
@@ -282,6 +288,9 @@ SUMMARY_RESPONSE_PARSERS: dict[str, SummaryResponseParser] = {
 
 def parse_summary_response(provider: str, response: httpx.Response) -> str:
     data = json_dict(response.json())
+    interruption = provider_response_interruption(provider, data)
+    if interruption is not None:
+        raise IkaProviderResponseError(f"Cannot use truncated {provider} summary: {interruption['reason']}")
     provider = _normalize_provider_for_summary(provider)
     parser = SUMMARY_RESPONSE_PARSERS.get(provider)
     if parser is None:
@@ -304,7 +313,8 @@ def _usage_total_tokens(data: JsonDict) -> int:
 
 def _usage_anthropic_tokens(data: JsonDict) -> int:
     usage = json_dict(data.get("usage"))
-    return _token_count(usage.get("input_tokens")) + _token_count(usage.get("output_tokens"))
+    return sum(_token_count(usage.get(key)) for key in
+               ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
 
 
 def _usage_gemini_tokens(data: JsonDict) -> int:
@@ -359,29 +369,42 @@ def _resolve_summary_target(
 
 
 def _write_summary_to_history(message_history: JsonDict, summary: str, summary_tokens: int) -> None:
+    if not summary.strip():
+        return  # An empty provider response must never destroy the transcript.
+    retained = retained_compaction_entries(message_history)
     summary_section = history_section(message_history, "summary")
     summary_section["message"] = f"[SUMMARY]\n{summary}"
     summary_section["tokens"] = summary_tokens
-    message_history["messages"] = {}
-    _LOG.info(
-        "Message history summarized. Kept: system prompt, first input, and summary. "
-        "Cleared all other messages."
-    )
+    message_history["messages"] = retained
+    _LOG.info("Message history summarized; retained system, task, latest user and tool exchange.")
 
 
 def get_conversation_text(message_history: JsonDict) -> str:
     parts: list[str] = []
-    first_input = history_message_text(message_history, "first_input")
-    if first_input:
-        parts.append(first_input)
-    summary = history_message_text(message_history, "summary")
-    if summary:
-        parts.append(summary)
+    for section in ("system", "first_input", "summary"):
+        text = history_message_text(message_history, section)
+        if text:
+            parts.append(text)
     for message_entry in history_section(message_history, "messages").values():
-        message = json_dict(message_entry).get("message")
+        entry = json_dict(message_entry)
+        message = entry.get("message")
         if message:
             parts.append(string_value(message))
+        reasoning = entry.get("reasoning_content")
+        if reasoning:
+            parts.append("[reasoning] " + string_value(reasoning))
     return "\n".join(parts)
+
+
+def get_context_usage(message_history: JsonDict, model_id: str, context_budget: Optional[int] = None) -> JsonDict:
+    """Read token accounting without changing history or triggering a provider call."""
+    from .chat_interface.chat_request import get_total_tokens
+    from .model_metadata import get_max_tokens_for_model
+    token_count = get_total_tokens(message_history)
+    max_tokens = context_budget or get_max_tokens_for_model(model_id)
+    ratio = token_count / max_tokens if max_tokens > 0 else 0.0
+    return {"token_count": token_count, "max_tokens": max_tokens, "usage_ratio": ratio,
+            "warning_level": "critical" if ratio >= 0.8 else "warning" if ratio >= 0.6 else None}
 
 
 def run_summarization(
@@ -427,6 +450,8 @@ def run_summarization(
             _write_summary_to_history(message_history, summary, summary_tokens)
 
         return summary
+    except IkaRequestControlError:
+        raise
     except httpx.HTTPError as e:
         _LOG.error(f"Failed to summarize message history: {e}")
         return ""
@@ -492,6 +517,8 @@ async def async_summarise_message_history(
             _write_summary_to_history(message_history, summary, summary_tokens)
 
         return summary
+    except IkaRequestControlError:
+        raise
     except httpx.HTTPError as e:
         _LOG.error(f"Failed to summarize message history: {e}")
         return ""

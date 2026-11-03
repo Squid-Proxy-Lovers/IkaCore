@@ -2,6 +2,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from ..model_metadata import supports_custom_temperature
+from ..reasoning_replay import ordered_replay_messages, replay_items
 from ..tool_schema import build_provider_tool_payload
 
 
@@ -14,31 +15,6 @@ def _default_message_history() -> Dict[str, Any]:
     }
 
 
-def _message_content(message: Any) -> str:
-    if isinstance(message, dict):
-        return message.get("content", str(message))
-    return str(message)
-
-
-def _should_skip_first_message(messages: List[Dict[str, Any]], first_input_content: str) -> bool:
-    return bool(first_input_content and messages and _message_content(messages[0]) == first_input_content)
-
-
-def _append_responses_context(input_items: List[Dict[str, Any]], message_history: Dict[str, Any]) -> None:
-    if message_history["summary"]["message"]:
-        input_items.append({
-            "type": "message",
-            "role": "assistant",
-            "content": message_history["summary"]["message"],
-        })
-    if message_history["first_input"]["message"]:
-        input_items.append({
-            "type": "message",
-            "role": "user",
-            "content": message_history["first_input"]["message"],
-        })
-
-
 def _tool_message_item(message: Dict[str, Any]) -> Dict[str, Any]:
     content = message.get("content", "")
     return {
@@ -49,6 +25,9 @@ def _tool_message_item(message: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _assistant_message_items(message: Dict[str, Any]) -> List[Dict[str, Any]]:
+    native_items = replay_items(message, "responses")
+    if native_items is not None:
+        return native_items
     content = message.get("content", "")
     tool_calls = message.get("tool_calls", []) or []
     if not tool_calls:
@@ -102,14 +81,8 @@ def _responses_items_for_message(message: Any) -> List[Dict[str, Any]]:
 
 
 def _build_responses_input_items(messages: List[Dict[str, Any]], message_history: Dict[str, Any]) -> List[Dict[str, Any]]:
-    input_items: List[Dict[str, Any]] = []
-    _append_responses_context(input_items, message_history)
-    skip_first = _should_skip_first_message(messages, message_history["first_input"]["message"])
-    for index, message in enumerate(messages):
-        if skip_first and index == 0:
-            continue
-        input_items.extend(_responses_items_for_message(message))
-    return input_items
+    return [item for message in ordered_replay_messages(messages, message_history)
+            for item in _responses_items_for_message(message)]
 
 
 def _apply_responses_tool_config(payload: Dict[str, Any], model: Any, agent_tools: list[Any]) -> None:
@@ -143,6 +116,9 @@ def openai_responses_fill_payload(
         "input": _build_responses_input_items(messages, message_history),
         "store": False,  # We manage our own conversation state
     }
+
+    if getattr(model, "reasoning_effort", None) or not supports_custom_temperature(model.model_id):
+        payload["include"] = ["reasoning.encrypted_content"]
 
     if message_history["system"]["message"]:
         payload["instructions"] = message_history["system"]["message"]

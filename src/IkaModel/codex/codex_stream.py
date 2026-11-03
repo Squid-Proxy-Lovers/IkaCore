@@ -6,13 +6,15 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
 from typing import Optional, cast
 
 import httpx
 
 from IkaCore.agent_runtime_payloads import JsonDict, json_dict, string_value
+
+from ..request_control import check_request_controls
 
 LOG = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ def _empty_json_dict() -> JsonDict:
     return {}
 
 
-def _empty_json_list() -> list[JsonDict]:
+def _empty_json_list() -> list[tuple[Optional[int], JsonDict]]:
     return []
 
 
@@ -47,7 +49,7 @@ def _empty_string_list() -> list[str]:
 @dataclass
 class _StreamState:
     envelope: JsonDict = field(default_factory=_empty_json_dict)
-    collected_items: list[JsonDict] = field(
+    collected_items: list[tuple[Optional[int], JsonDict]] = field(
         default_factory=_empty_json_list
     )
     output_text_chunks: list[str] = field(
@@ -72,27 +74,46 @@ def classify_stream_error(err_obj: object) -> bool:
     )
 
 
-def iter_sse(
-    response: httpx.Response,
-) -> Iterator[tuple[Optional[str], object]]:
-    """Yield an explicit event name and parsed JSON for each SSE data line."""
-    current_event: Optional[str] = None
-    for line in response.iter_lines():
+class _SSEDecoder:
+    def __init__(self) -> None:
+        self.event: Optional[str] = None
+        self.data: list[str] = []
+
+    def feed(self, line: str) -> Optional[tuple[Optional[str], object]]:
+        check_request_controls()
         if not line:
-            current_event = None
-            continue
-        if line.startswith("event:"):
-            current_event = line[6:].strip()
-            continue
-        if not line.startswith("data:"):
-            continue
-        data = line[5:].strip()
-        if not data or data == "[DONE]":
-            continue
-        try:
-            yield current_event, json.loads(data)
-        except json.JSONDecodeError:
-            LOG.debug("Skipping unparseable SSE data line: %r", data[:200])
+            event, data = self.event, "\n".join(self.data)
+            self.event, self.data = None, []
+            if data and data != "[DONE]":
+                try:
+                    return event, json.loads(data)
+                except json.JSONDecodeError:
+                    LOG.debug("Skipping unparseable SSE data event")
+            return None
+        field, _, value = line.partition(":")
+        if value.startswith(" "):
+            value = value[1:]
+        if field == "event":
+            self.event = value
+        elif field == "data":
+            self.data.append(value)
+        return None
+
+
+def iter_sse(response: httpx.Response) -> Iterator[tuple[Optional[str], object]]:
+    decoder = _SSEDecoder()
+    for line in response.iter_lines():
+        event = decoder.feed(line)
+        if event is not None:
+            yield event
+
+
+async def _async_iter_sse(response: httpx.Response) -> AsyncIterator[tuple[Optional[str], object]]:
+    decoder = _SSEDecoder()
+    async for line in response.aiter_lines():
+        event = decoder.feed(line)
+        if event is not None:
+            yield event
 
 
 def _stream_failure_object(obj_data: JsonDict) -> object:
@@ -175,11 +196,27 @@ def _apply_stream_event(
     elif event_type == "response.output_item.done":
         item = json_dict(obj_data.get("item"))
         if item:
-            state.collected_items.append(item)
+            index = obj_data.get("output_index")
+            state.collected_items.append((index if type(index) is int else None, item))
     elif event_type == "response.output_text.delta":
         delta = obj_data.get("delta")
         if isinstance(delta, str):
             state.output_text_chunks.append(delta)
+
+
+
+def _merge_completed_items(state: _StreamState) -> list[JsonDict]:
+    # A completed envelope may contain items for which no done event was emitted.
+    # Keep those, and prefer completed done-event data at its original output index.
+    raw = state.envelope.get("output")
+    output = cast(list[JsonDict], raw) if isinstance(raw, list) else []
+    items = dict(enumerate(output))
+    for index, item in state.collected_items:
+        if index is None:
+            index = next((i for i, existing in items.items()
+                          if item.get("id") and existing.get("id") == item["id"]), len(items))
+        items[index] = item
+    return [items[index] for index in sorted(items)]
 
 
 def _finalize_stream(state: _StreamState) -> JsonDict:
@@ -192,7 +229,7 @@ def _finalize_stream(state: _StreamState) -> JsonDict:
             f"{envelope_detail}"
         )
     if state.collected_items:
-        state.envelope["output"] = state.collected_items
+        state.envelope["output"] = _merge_completed_items(state)
     elif state.output_text_chunks and not state.envelope.get("output"):
         state.envelope["output"] = [{
             "type": "message",
@@ -209,6 +246,16 @@ def collect_stream(response: httpx.Response) -> JsonDict:
     """Collect one complete Codex SSE response or raise a terminal error."""
     state = _StreamState()
     for event_name, obj in iter_sse(response):
+        obj_data = json_dict(obj)
+        if obj_data:
+            _apply_stream_event(state, event_name, obj_data)
+    return _finalize_stream(state)
+
+
+async def async_collect_stream(response: httpx.Response) -> JsonDict:
+    """Collect incrementally on the caller's event loop using the same SSE state machine."""
+    state = _StreamState()
+    async for event_name, obj in _async_iter_sse(response):
         obj_data = json_dict(obj)
         if obj_data:
             _apply_stream_event(state, event_name, obj_data)

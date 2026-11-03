@@ -7,16 +7,22 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from typing import Any, Optional, cast
 
 from IkaCore.agent_runtime_payloads import JsonDict
-from IkaCore.cli_output import get_cli_output
+from IkaCore.events import current_output as get_cli_output
 from IkaCore.tools import ToolExecutor, ToolParameters
 
 from ..base import AgentEndException, HumanInputRequired
+from ..execution_hooks import hooks_enabled, invoke_tool
+from ..request_control import check_request_controls
+from ..request_lifecycle import wait_for_tool
+from ..runtime_errors import IkaRequestControlError
+from ..tool_output import truncate_tool_result
+from ..worker_context import submit_with_controls
 from .tool_result_formatters import format_provider_tool_results
 
 LOG = logging.getLogger(__name__)
@@ -34,6 +40,7 @@ class ToolCallPlan:
     tool_call_id_to_result: dict[str, str] = field(default_factory=lambda: {})
     parallel_calls: list[ScheduledToolCall] = field(default_factory=lambda: [])
     sequential_calls: list[ScheduledToolCall] = field(default_factory=lambda: [])
+    interrupted_tool_call_id: str | None = None
 
 
 def _ensure_tool_executor_pool() -> ThreadPoolExecutor:
@@ -69,7 +76,7 @@ def validate_tool_args(
     try:
         json.dumps(tool_args)
     except TypeError as e:
-        raise ValueError(f"Tool '{tool_name}' arguments must be JSON-serializable: {e}")
+        raise ValueError(f"Tool '{tool_name}' arguments must be JSON-serializable: {e}") from e
 
     raw_args = cast(JsonDict, tool_args)
     coerced_args: ToolParameters = {}
@@ -99,6 +106,18 @@ def validate_tool_args(
     return coerced_args
 
 
+def _submit_executor(function: ToolExecutor, args: ToolParameters, name: str) -> Future[object]:
+    def submit(pool: ThreadPoolExecutor) -> Future[object]:
+        if hooks_enabled():
+            return submit_with_controls(pool, invoke_tool, function, args, name,
+                                        getattr(function, "__ika_runtime_metadata__", {}))
+        return submit_with_controls(pool, function, args)
+    try:
+        return submit(_ensure_tool_executor_pool())
+    except RuntimeError:
+        return submit(_reset_tool_executor_pool())
+
+
 def execute_tool(
     tool_name: str,
     tool_args: object,
@@ -107,6 +126,7 @@ def execute_tool(
     agent_hierarchy: Optional[list[str]] = None,
     step: int = 0,
 ) -> str:
+    check_request_controls()
     LOG.debug(f"[TOOL START] Executing tool '{tool_name}'")
     cli = get_cli_output()
     hierarchy = list(agent_hierarchy or []) + [tool_name]
@@ -115,7 +135,7 @@ def execute_tool(
         error_msg = f"Tool '{tool_name}' not found in tool executors"
         LOG.error(error_msg)
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
-        return json.dumps({"error": error_msg})
+        return truncate_tool_result(json.dumps({"error": error_msg}), tool_name)
 
     try:
         validated_args = validate_tool_args(tool_name, tool_args)
@@ -123,45 +143,42 @@ def execute_tool(
         error_msg = f"Validation error for tool '{tool_name}': {str(e)}"
         LOG.warning(error_msg)
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
-        return json.dumps({"error": error_msg})
+        return truncate_tool_result(json.dumps({"error": error_msg}), tool_name)
 
     executor_fn = tool_executors[tool_name]
     cli.tool_call(tool_name, validated_args, hierarchy, step)
 
     future = None
+    tool_timeout = getattr(executor_fn, "__tool_timeout__", timeout)
     try:
-        executor_pool = _ensure_tool_executor_pool()
-        try:
-            future = executor_pool.submit(executor_fn, validated_args)
-        except RuntimeError:
-            # Pool can be shut down by lifecycle races; recreate once and retry.
-            executor_pool = _reset_tool_executor_pool()
-            future = executor_pool.submit(executor_fn, validated_args)
-        result: object = future.result(timeout=timeout)
+        future = _submit_executor(executor_fn, validated_args, tool_name)
+        result: object = wait_for_tool(future, tool_timeout)
 
-        result_str = result if isinstance(result, str) else json.dumps(result)
+        result_str = truncate_tool_result(result if isinstance(result, str) else json.dumps(result), tool_name)
         cli.tool_result(tool_name, result_str, hierarchy, step)
 
         LOG.debug(f"[TOOL END] Finished tool '{tool_name}'")
-        if isinstance(result, str):
-            return result
-        return json.dumps(result)
+        return result_str
     except AgentEndException:
         raise
     except HumanInputRequired:
         raise
+    except IkaRequestControlError:
+        if future is not None:
+            future.cancel()
+        raise
     except FutureTimeoutError:
         if future is not None:
             future.cancel()
-        timeout_msg = f"Tool '{tool_name}' execution timed out after {timeout}s"
+        timeout_msg = f"Tool '{tool_name}' execution timed out after {tool_timeout}s"
         cli.tool_result(tool_name, timeout_msg, hierarchy, step, is_timeout=True)
         LOG.warning(timeout_msg)
-        return json.dumps({"error": timeout_msg})
+        return truncate_tool_result(json.dumps({"error": timeout_msg}), tool_name)
     except Exception as e:
         error_msg = f"Error executing tool '{tool_name}': {str(e)}"
         cli.tool_result(tool_name, error_msg, hierarchy, step, is_error=True)
         LOG.error(error_msg, exc_info=True)
-        return json.dumps({"error": error_msg})
+        return truncate_tool_result(json.dumps({"error": error_msg}), tool_name)
 
 
 def _schema_dict(value: object) -> JsonDict:
@@ -329,7 +346,7 @@ def _execute_parallel_tool_plan(
     try:
         futures: dict[Any, tuple[str, str]] = {}
         for tool_name, args, tool_call_id in plan.parallel_calls:
-            future = executor_pool.submit(execute_tool, tool_name, args, tool_executors, timeout, agent_hierarchy, step)
+            future = submit_with_controls(executor_pool, execute_tool, tool_name, args, tool_executors, timeout, agent_hierarchy, step)
             futures[future] = (tool_name, tool_call_id)
 
         for future in futures:
@@ -339,12 +356,17 @@ def _execute_parallel_tool_plan(
                 # concurrent futures. Preserve that contract instead of
                 # attempting timeout arithmetic after the tool has completed.
                 wrapper_timeout = None if timeout is None else timeout + 5.0
-                result = future.result(timeout=wrapper_timeout)
+                result = wait_for_tool(future, wrapper_timeout)
                 plan.tool_call_id_to_result[tool_call_id] = result
                 tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
             except AgentEndException:
                 raise
+            except IkaRequestControlError:
+                for pending in futures:
+                    pending.cancel()
+                raise
             except HumanInputRequired as exc:
+                plan.interrupted_tool_call_id = tool_call_id
                 interrupt_data = exc.payload
                 plan.tool_call_id_to_result[tool_call_id] = json.dumps({"__ika_interrupt__": True, **(exc.payload or {})})
                 tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
@@ -383,6 +405,7 @@ def _execute_sequential_tool_plan(
         try:
             result = execute_tool(tool_name, args, tool_executors, timeout, agent_hierarchy, step)
         except HumanInputRequired as exc:
+            plan.interrupted_tool_call_id = tool_call_id
             interrupt_data = exc.payload
             result = json.dumps({"__ika_interrupt__": True, **(exc.payload or {})})
             plan.tool_call_id_to_result[tool_call_id] = result
@@ -399,7 +422,10 @@ def _ordered_tool_results(plan: ToolCallPlan) -> list[str]:
         fn = _tool_function_payload(tool_call)
         raw_tool_call_id = tool_call.get("id") or fn.get("id") or f"call_{idx}"
         tool_call_id = raw_tool_call_id if isinstance(raw_tool_call_id, str) else str(raw_tool_call_id)
-        tool_results.append(plan.tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})))
+        tool_results.append(truncate_tool_result(
+            plan.tool_call_id_to_result.get(tool_call_id, json.dumps({"error": "No result"})),
+            str(fn.get("name") or tool_call.get("name", "tool")),
+        ))
     return tool_results
 
 
@@ -409,6 +435,13 @@ def _finalize_tool_call_plan(
     tool_call_counts: dict[str, int],
     interrupt_data: Optional[JsonDict],
 ) -> ToolCallBatchResult:
+    if interrupt_data and interrupt_data.get("delegated") and plan.interrupted_tool_call_id is not None:
+        call_index = next(i for i, call in enumerate(plan.tool_call_order)
+                          if str(call.get("id") or _tool_function_payload(call).get("id") or f"call_{i}")
+                          == plan.interrupted_tool_call_id)
+        interrupt_data = {**interrupt_data, "tool_result_continuation": {
+            "tool_call_id": plan.interrupted_tool_call_id, "call_index": call_index,
+        }}
     tool_results = _ordered_tool_results(plan)
     formatted_messages = format_provider_tool_results(provider, plan.tool_call_order, tool_results)
     return formatted_messages, tool_results, tool_call_counts, plan.tool_call_order, interrupt_data

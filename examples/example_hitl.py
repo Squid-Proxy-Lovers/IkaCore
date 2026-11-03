@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from IkaCore import IkaBaseAgent, IkaStage, IkaTools
+from IkaCore import ExecutionLimits, IkaBaseAgent, IkaStage, IkaTools, OutputConfig, PromptConfig
 
 SYSTEM_PROMPT = """You are a general purpose agent. You can use the tools provided to you to achieve your goal."""
 
@@ -166,7 +166,6 @@ def main():
         model_id=model_id2,
         api_key=api_key2,
         stage_max_step=30,
-        checkpoint=True,
     )
 
     summarize_stage = IkaStage(
@@ -181,23 +180,21 @@ def main():
     agent = IkaBaseAgent(
         name="example_system",
         description="A simple example system",
-        system_prompt=SYSTEM_PROMPT,
+        prompts=PromptConfig(system_prompt=SYSTEM_PROMPT),
         prompt=PROMPT,
         tools=[],
-        Stages=[list_stage, read_stage, summarize_stage],
+        stages=[list_stage, read_stage, summarize_stage],
         model_id=model_id,
         api_key=api_key,
-        checkpoint=True,
-        logging_level=2,
-        maxsteps=100,
+        output=OutputConfig(logging_level=2),
+        limits=ExecutionLimits(maxsteps=100),
     )
-    # start_time = time()
-    agent.execution(checkpoint_uid="df16883c-e384-4d15-bf11-faf547a69b81")
-    # finalmsg = agent.execution()
-    # end_time = time()
-    # # print("-"*100)
-    # # print(f"Time taken: {end_time - start_time} seconds")
-    # # print(finalmsg)
+    agent.enable_snapshots("runtime-data/example-hitl.db")
+    result = agent.execution()
+    if result.get("status") == "awaiting_user_input":
+        result = agent.resume_from_snapshot(result["snapshot_id"], resume_input=input(result["final_message"] + "\n"))
+    print(result["final_message"])
+
 
 
 if __name__ == "__main__":

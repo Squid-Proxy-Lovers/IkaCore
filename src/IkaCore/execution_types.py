@@ -15,6 +15,7 @@ class StageExecutionResult:
     agent_end_called: bool
     end_text: Optional[str]
     used_steps: int
+    remaining_steps: int | None = None
 
     def __iter__(self) -> Iterator[object]:
         yield self.next_stage_index
@@ -44,6 +45,7 @@ class StageRuntimeContext:
     messages: list[dict[str, Any]]
     tool_executors: dict[str, Any]
     step_limit: int
+    stage_index: int = 0
 
 
 @dataclass
@@ -64,3 +66,12 @@ class SimpleRuntimeContext:
     messages: list[dict[str, Any]]
     tool_executors: dict[str, Any]
     cli: Any
+
+
+@dataclass
+class ExecutionLoopState:
+    step_limit: int
+    used_steps: int = 0
+    extension_count: int = 0
+    last_content: str = ""
+    remaining_steps: int = 0

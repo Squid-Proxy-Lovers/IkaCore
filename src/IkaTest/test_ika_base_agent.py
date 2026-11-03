@@ -5,12 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-mock_ika_mem = MagicMock()
-with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
-    from IkaCore.agents import IkaBaseAgent
+from IkaCore import AgentTopology, ExecutionPolicy, OutputConfig, PromptConfig, ProviderConfig
+from IkaCore.agents import IkaBaseAgent
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
 from IkaModel.base import AgentTool, ToolArgs
+from IkaTest.agent_config_fixtures import agent_kwargs
 
 
 def _minimal_agent(**kwargs):
@@ -22,7 +22,7 @@ def _minimal_agent(**kwargs):
         "api_key": "test-key",
     }
     defaults.update(kwargs)
-    return IkaBaseAgent(**defaults)
+    return IkaBaseAgent(**agent_kwargs(defaults))
 
 
 class TestIkaBaseAgentInit:
@@ -35,7 +35,7 @@ class TestIkaBaseAgentInit:
         assert a.api_key == "test-key"
         assert a.api_url is not None
         assert a.tools == []
-        assert a.Stages == []
+        assert a.stages == []
         assert a.subagents == []
         assert a.next_agent is None
         assert a.maxsteps == 100
@@ -43,7 +43,7 @@ class TestIkaBaseAgentInit:
         assert a.max_tool_rounds == 5
 
     def test_init_with_system_prompt(self):
-        a = _minimal_agent(system_prompt="You are helpful.")
+        a = _minimal_agent(prompts=PromptConfig(system_prompt="You are helpful."))
         assert a.system_prompt == "You are helpful."
         assert a.message_history["system"]["message"] == "You are helpful."
 
@@ -56,7 +56,7 @@ class TestIkaBaseAgentInit:
         assert "deepseek.com" in a3.api_url
         a4 = _minimal_agent(model_id="gemini-1.5-pro")
         assert "generativelanguage.googleapis.com" in a4.api_url
-        a5 = _minimal_agent(model_id="gpt-4o", use_responses_api=False)
+        a5 = _minimal_agent(model_id="gpt-4o", provider=ProviderConfig(use_responses_api=False))
         assert a5.api_url.endswith("/v1/chat/completions")
 
     def test_init_rejects_empty_name(self):
@@ -82,13 +82,13 @@ class TestIkaBaseAgentInit:
     def test_init_stages_with_subagents_raises(self):
         stage = IkaStage("s1", "Prompt", [])
         with pytest.raises(ValueError, match="Subagents or next_agent are not allowed when stages are defined"):
-            _minimal_agent(Stages=[stage], subagents=[_minimal_agent(name="Sub")])
+            _minimal_agent(stages=[stage], topology=AgentTopology(subagents=[_minimal_agent(name="Sub")]))
 
     def test_init_no_stages_both_subagents_and_next_raises(self):
         sub = _minimal_agent(name="Sub")
         nxt = _minimal_agent(name="Next")
         with pytest.raises(ValueError, match="Only one of subagents or next_agent may be set"):
-            _minimal_agent(subagents=[sub], next_agent=nxt)
+            _minimal_agent(topology=AgentTopology(subagents=[sub], next_agent=nxt))
 
     def test_removed_public_args_are_not_accepted(self):
         with pytest.raises(TypeError):
@@ -96,18 +96,19 @@ class TestIkaBaseAgentInit:
         with pytest.raises(TypeError):
             _minimal_agent(Batch=True)
 
-    def test_logging_level_three_configures_debug_logging(self):
+    def test_logging_level_three_leaves_application_logging_configuration_untouched(self):
         logger = MagicMock()
 
         with patch("logging.basicConfig") as basic_config:
             with patch("logging.getLogger", return_value=logger) as get_logger:
-                _minimal_agent(logging_level=3)
+                _minimal_agent(output=OutputConfig(logging_level=3))
 
-        basic_config.assert_called_once()
-        get_logger.assert_called_once_with("IkaModel.chat_interface.chat_interface")
-        logger.setLevel.assert_called_once()
+        basic_config.assert_not_called()
+        get_logger.assert_called_once_with("IkaCore")
+        logger.debug.assert_called_once()
+        logger.setLevel.assert_not_called()
 
-    def test_shutdown_awaits_async_client_close_and_closes_logger(self):
+    def test_shutdown_borrows_attached_async_client_and_closes_logger(self):
         class AsyncClient:
             def __init__(self):
                 self.closed = False
@@ -115,14 +116,14 @@ class TestIkaBaseAgentInit:
             async def aclose(self):
                 self.closed = True
 
-        a = _minimal_agent(use_async=True)
+        a = _minimal_agent(policy=ExecutionPolicy(async_requests=True))
         client = AsyncClient()
         a.client = client
         a.logger = MagicMock()
 
         a.shutdown()
 
-        assert client.closed is True
+        assert client.closed is False
         assert a.client is None
         a.logger.shutdown.assert_called_once()
 
@@ -156,7 +157,7 @@ class TestGetUrl:
 
 class TestGetBarebone:
     def test_returns_barebone_with_agent_attrs(self):
-        a = _minimal_agent(system_prompt="Sys", max_tokens=4096, temperature=0.3)
+        a = _minimal_agent(prompts=PromptConfig(system_prompt="Sys"), provider=ProviderConfig(max_tokens=4096, temperature=0.3))
         tools: list = []
         b = a.get_barebone("Sys", tools)
         assert hasattr(b, "model_id") and b.model_id == a.model_id
@@ -174,7 +175,7 @@ class TestGetBarebone:
         assert b.content_prompt == "Override text"
 
     def test_model_overrides(self):
-        a = _minimal_agent(model_id="gpt-4o", max_tokens=5000)
+        a = _minimal_agent(model_id="gpt-4o", provider=ProviderConfig(max_tokens=5000))
         overrides = {"model_id": "gpt-4.1-mini", "max_tokens": 8000}
         b = a.get_barebone("Sys", [], model_overrides=overrides)
         assert b.model_id == "gpt-4.1-mini"
@@ -219,7 +220,7 @@ class TestBuildSimpleTools:
 
     def test_subagents_become_tools(self):
         sub = _minimal_agent(name="SubAgent")
-        a = _minimal_agent(subagents=[sub])
+        a = _minimal_agent(topology=AgentTopology(subagents=[sub]))
         agent_tools = a.build_simple_tools()
         names = [t.name for t in agent_tools]
         assert "SubAgent" in names
@@ -231,7 +232,7 @@ class TestBuildStage:
     def test_stage_tools_plus_agent_end_on_last_stage(self):
         ika_tool = IkaTools("stage_tool", "Stage tool", {"x": "string"}, execute_function=lambda p: "ok")
         stage = IkaStage("Stage0", "Do step", [ika_tool])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         agent_tools = a.build_stage(stage)
         names = [t.name for t in agent_tools]
         assert "agent_end" in names
@@ -240,7 +241,7 @@ class TestBuildStage:
 
     def test_stage_end_removed_on_last_stage(self):
         stage = IkaStage("Last", "Final", [])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         agent_tools = a.build_stage(stage)
         names = [t.name for t in agent_tools]
         assert "agent_end" in names
@@ -249,7 +250,7 @@ class TestBuildStage:
     def test_non_last_stage_keeps_stage_end(self):
         s0 = IkaStage("S0", "Step 0", [])
         s1 = IkaStage("S1", "Step 1", [])
-        a = _minimal_agent(Stages=[s0, s1])
+        a = _minimal_agent(stages=[s0, s1])
         tools_s0 = a.build_stage(s0)
         stage_end = next(t for t in tools_s0 if t.name == "stage_end")
         assert stage_end.required is False
@@ -258,7 +259,7 @@ class TestBuildStage:
     def test_change_stage_is_optional_when_available(self):
         s0 = IkaStage("S0", "Step 0", [], allowed_back_to=[0])
         s1 = IkaStage("S1", "Step 1", [])
-        a = _minimal_agent(Stages=[s0, s1])
+        a = _minimal_agent(stages=[s0, s1])
         tools_s0 = a.build_stage(s0)
         change_stage = next(t for t in tools_s0 if t.name == "change_stage")
         assert change_stage.required is False

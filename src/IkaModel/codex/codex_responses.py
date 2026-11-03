@@ -32,6 +32,8 @@ from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict,
 
 from ..base import AgentTool, BareBoneModel
 from ..model_metadata import CODEX_KNOWN_MODELS as CODEX_KNOWN_MODELS
+from ..reasoning_replay import ordered_replay_messages, replay_items
+from ..tool_output import codex_output_limit_enabled, truncate_codex_tool_output
 from ..tool_schema import build_provider_tool_payload
 
 
@@ -80,42 +82,19 @@ def _default_message_history() -> JsonDict:
     }
 
 
-def _first_message_matches(messages: list[JsonDict], first_input_content: str) -> bool:
-    if not first_input_content or not messages:
-        return False
-    first_msg = messages[0]
-    content = first_msg.get("content", "")
-    return isinstance(content, str) and content == first_input_content
-
-
-def _append_codex_context(input_items: list[JsonDict], message_history: JsonDict) -> None:
-    summary_msg = string_value(history_section(message_history, "summary").get("message"))
-    if summary_msg:
-        input_items.append({
-            "type": "message",
-            "role": "assistant",
-            "content": _wrap_assistant_content(summary_msg),
-        })
-
-    first_input_content = string_value(history_section(message_history, "first_input").get("message"))
-    if first_input_content:
-        input_items.append({
-            "type": "message",
-            "role": "user",
-            "content": _wrap_user_content(first_input_content),
-        })
-
-
 def _codex_tool_output_item(message: JsonDict) -> JsonDict:
     content = message.get("content", "")
     return {
         "type": "function_call_output",
         "call_id": string_value(message.get("tool_call_id")),
-        "output": content if isinstance(content, str) else json.dumps(content),
+        "output": truncate_codex_tool_output(content if isinstance(content, str) else json.dumps(content)),
     }
 
 
 def _codex_assistant_items(message: JsonDict) -> list[JsonDict]:
+    native_items = replay_items(message, "responses")
+    if native_items is not None:
+        return native_items
     content = message.get("content", "")
     raw_tool_calls = message.get("tool_calls")
     tool_calls = cast(list[object], raw_tool_calls) if isinstance(raw_tool_calls, list) else []
@@ -144,10 +123,13 @@ def _codex_user_items(message: JsonDict) -> list[JsonDict]:
     for block in cast(list[object], content):
         block_data = cast(JsonDict, block) if isinstance(block, dict) else {}
         if block_data.get("type") == "tool_result":
+            output = block_data.get("content", "")
+            if codex_output_limit_enabled():
+                output = truncate_codex_tool_output(output if isinstance(output, str) else json.dumps(output))
             items.append({
                 "type": "function_call_output",
                 "call_id": string_value(block_data.get("tool_use_id")),
-                "output": block_data.get("content", ""),
+                "output": output,
             })
         else:
             items.append({
@@ -175,15 +157,8 @@ def _codex_items_for_message(message: object) -> list[JsonDict]:
 
 
 def _build_codex_input_items(messages: list[JsonDict], message_history: JsonDict) -> list[JsonDict]:
-    input_items: list[JsonDict] = []
-    _append_codex_context(input_items, message_history)
-    first_input_content = string_value(history_section(message_history, "first_input").get("message"))
-    skip_first = _first_message_matches(messages, first_input_content)
-    for index, message in enumerate(messages):
-        if skip_first and index == 0:
-            continue
-        input_items.extend(_codex_items_for_message(message))
-    return input_items
+    return [item for message in ordered_replay_messages(messages, message_history)
+            for item in _codex_items_for_message(message)]
 
 
 def _required_non_control_tools(agent_tools: list[AgentTool]) -> list[AgentTool]:
@@ -228,6 +203,7 @@ def codex_responses_fill_payload(
         "input": _build_codex_input_items(messages, message_history),
         "stream": True,   # codex backend rejects stream:false; see chat_helpers_codex
         "store": False,
+        "include": ["reasoning.encrypted_content"],
     }
     if instructions:
         payload["instructions"] = instructions

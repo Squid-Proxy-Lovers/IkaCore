@@ -5,11 +5,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
-import os
-import time
 import uuid
 from typing import Any, Optional, cast
 
@@ -17,12 +14,13 @@ import httpx
 
 from IkaCore.agent_runtime_payloads import JsonDict, history_section, json_dict, string_list, string_value
 
+from .. import summarization as _summaries
 from ..base import AgentEndException, AgentTool, BareBoneModel
 from ..chat_helpers_common import append_provider_tool_messages
+from ..reasoning_replay import take_response_replay
 from ..request_interface import IkaAPIError
-from ..runtime_errors import IkaDebugDumpError
-from ..summarization import async_summarise_message_history, run_summarization
-from .response_interface import format_gemini_results
+from ..runtime_errors import IkaRequestControlError
+from .tool_result_formatters import format_gemini_results
 from .types import ChatLoopState, ChatResponsePayload, UsageInfo
 
 LOG = logging.getLogger(__name__)
@@ -49,46 +47,6 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(str(text)) // 4)
 
 
-def _dump_api_round(
-    barebone_model: BareBoneModel,
-    payload: JsonDict,
-    response_data: Optional[JsonDict],
-    error: Optional[str] = None,
-) -> None:
-    out_dir = os.environ.get("IKA_DUMP_REQUESTS")
-    if not out_dir:
-        return
-    try:
-        os.makedirs(out_dir, exist_ok=True)
-        agent = getattr(barebone_model, "agent_name", "agent") or "agent"
-        agent_safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(agent))[:60]
-        # Hash the conversation portion so duplicate prompts collide on disk.
-        # Different providers use different field names: chat completions uses
-        # "messages", the OpenAI Responses API uses "input", Anthropic uses
-        # "messages" with its own shape. Hash whichever is present.
-        convo: object = payload.get("messages") or payload.get("input") or []
-        msg_repr = json.dumps(convo, sort_keys=True, default=str)
-        sig = hashlib.sha256(msg_repr.encode("utf-8", "replace")).hexdigest()[:12]
-        ts = f"{time.time():.3f}"
-        fname = f"{ts}__{agent_safe}__{sig}.json"
-        with open(os.path.join(out_dir, fname), "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "agent_name": agent,
-                    "model_id": getattr(barebone_model, "model_id", None),
-                    "payload": payload,
-                    "response": response_data,
-                    "error": error,
-                    "messages_sha256_12": sig,
-                },
-                f,
-                indent=2,
-                default=str,
-            )
-    except (OSError, TypeError, ValueError) as e:  # debug aid only — never fail the request
-        LOG.debug("%s", IkaDebugDumpError(f"_dump_api_round failed: {e}"))
-
-
 def _record_model_message(
     message_history: JsonDict,
     content: str,
@@ -97,6 +55,9 @@ def _record_model_message(
 ) -> None:
     msg_id = str(uuid.uuid4())
     history_entry: JsonDict = {"message": content, "tokens": tokens}
+    provider_data = take_response_replay(message_history, final=True)
+    if provider_data:
+        history_entry["provider_data"] = provider_data
     if reasoning_content:
         history_entry["reasoning_content"] = reasoning_content
     history_section(message_history, "messages")[msg_id] = history_entry
@@ -179,13 +140,15 @@ def _force_complete_with_summary(
     hijacked: bool = True,
 ) -> None:
     try:
-        summary_text = run_summarization(
+        summary_text = _summaries.run_summarization(
             barebone_model,
             message_history,
             prompt_kind="force_answer",
             write_to_history=False,
             use_same_model=True,
         )
+    except IkaRequestControlError:
+        raise
     except _SUMMARY_FALLBACK_EXCEPTIONS as e:
         LOG.error(f"Failed to generate force completion summary: {e}")
         summary_text = ""
@@ -228,7 +191,7 @@ async def _async_force_complete_with_summary(
     hijacked: bool = True,
 ) -> None:
     try:
-        summary_text = await async_summarise_message_history(
+        summary_text = await _summaries.async_summarise_message_history(
             barebone_model,
             message_history,
             client=client,
@@ -236,6 +199,8 @@ async def _async_force_complete_with_summary(
             prompt_kind="force_answer",
             write_to_history=False,
         )
+    except IkaRequestControlError:
+        raise
     except _SUMMARY_FALLBACK_EXCEPTIONS as e:
         LOG.error(f"Failed to generate async force completion summary: {e}")
         summary_text = ""
@@ -486,6 +451,8 @@ def _interrupt_response_if_needed(
     interrupt_content = string_value(interrupt_data.get("question") or content or "Awaiting human input")
     if hitl_stage_name and logger:
         logger.log_hitl_prompt(hitl_stage_name)
+    message_index = len(messages) + 1  # The appender first adds the assistant turn.
+    previous_keys = set(message_history.get("messages", {}))
     _append_tool_messages(
         provider,
         messages,
@@ -497,6 +464,20 @@ def _interrupt_response_if_needed(
         tool_results,
         tokens,
     )
+    continuation = interrupt_data.get("tool_result_continuation")
+    if continuation is not None:
+        index = continuation["call_index"]
+        tool_keys = [key for key, entry in message_history["messages"].items()
+                     if key not in previous_keys and entry.get("type") == "tool"]
+        if provider == "gemini":
+            path = ["parts", index, "functionResponse", "response"]
+            index = 0  # Gemini groups the batch into one tool response message.
+        elif provider == "anthropic":
+            path = ["content", 0, "content"]
+        else:
+            path = ["content"]
+        continuation.update({"message_index": message_index + index, "history_key": tool_keys[index],
+                             "content_path": path, "structured": provider == "gemini"})
     return _build_interrupt_response(
         barebone_model,
         logger,
@@ -593,4 +574,5 @@ def _new_chat_state(
         tokens=tokens,
         content_before_tools=content,
         usage=UsageInfo.from_mapping(usage_info),
+        interruption=(usage_info or {}).get("_provider_interruption"),
     )

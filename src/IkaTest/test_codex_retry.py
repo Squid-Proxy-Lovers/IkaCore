@@ -26,9 +26,9 @@ import pytest
 from IkaModel.codex.chat_helpers_codex import (
     _classify_stream_error,
     _CodexRetryableStreamError,
-    _parse_retry_after,
     request_codex,
 )
+from IkaModel.retry_policy import parse_retry_after as _parse_retry_after
 
 # ----------------------------------------------------------------------
 # _classify_stream_error
@@ -136,6 +136,10 @@ class _FakeStreamCtx:
     def __exit__(self, *_):
         return False
 
+    def json(self):
+        import json
+        return json.loads(self._body)
+
     def read(self):
         return self._body
 
@@ -216,7 +220,7 @@ class TestRequestCodexRetryLoop:
             return _FakeStreamCtx(502, body=b'{"error":"bad gateway"}')
 
         with patch("httpx.stream", side_effect=side_effect), patch("time.sleep"):
-            with pytest.raises(RuntimeError, match="502.*after 3 attempts"):
+            with pytest.raises(RuntimeError, match=r"502.*after 3 attempts"):
                 request_codex("u", {}, {}, timeout=1, max_retries=3, wait_seconds=1)
         assert calls["n"] == 3
 
@@ -315,7 +319,8 @@ class TestRequestCodexRetryLoop:
                 )
 
         assert calls["n"] == 3
-        assert sleeps == [1, 2]
+        assert len(sleeps) == 2
+        assert 0.75 <= sleeps[0] <= 1 and 1.5 <= sleeps[1] <= 2
 
     def test_truncated_http_200_stream_retries(self):
         calls = {"n": 0}

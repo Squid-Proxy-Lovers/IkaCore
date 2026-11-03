@@ -1,22 +1,38 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from ..model_metadata import is_anthropic_haiku_model, supports_anthropic_parallel_tool_use
+from ..history_replay import is_user_entry, plan_history_replay
+from ..model_metadata import (
+    is_anthropic_haiku_model,
+    requires_anthropic_adaptive_thinking,
+    supports_anthropic_adaptive_thinking,
+    supports_anthropic_parallel_tool_use,
+    supports_custom_temperature,
+)
+from ..reasoning_replay import replay_items
 from ..tool_schema import build_provider_tool_payload
 
 _PARALLEL_TOOL_PROMPT = "\n\n<use_parallel_tool_calls>\nFor maximum efficiency, whenever you perform multiple independent operations, invoke all relevant tools simultaneously rather than sequentially. Prioritize calling tools in parallel whenever possible. For example, when reading 3 files, run 3 tool calls in parallel to read all 3 files into context at the same time. When running multiple read-only commands like `ls` or `list_dir`, always run all of the commands in parallel. Err on the side of maximizing parallel tool calls rather than running too many tools sequentially.\n</use_parallel_tool_calls>"
 
 
-def _ensure_anthropic_assistant_content(msg: Dict[str, Any]) -> Dict[str, Any]:
-    if msg.get("role") != "assistant":
-        return msg
+def _without_blank_text(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Drop whitespace-only text (the API rejects it); drop the message if nothing is left.
+
+    Covers every source of blank text, including histories and checkpoints written by older
+    versions that padded tool-only turns with ``" "``. Non-text blocks (tool_use, tool_result,
+    images) are never touched.
+    """
     content = msg.get("content")
-    if isinstance(content, list) and content:
-        has_text = any(block.get("type") == "text" for block in content)
-        if not has_text:
-            msg = {**msg, "content": [{"type": "text", "text": " "}] + content}
-    elif isinstance(content, list) and not content:
-        msg = {**msg, "content": [{"type": "text", "text": " "}]}
+    if isinstance(content, str):
+        return msg if content.strip() else None
+    if isinstance(content, list):
+        kept = [
+            block for block in content
+            if not (isinstance(block, dict) and block.get("type") == "text" and not str(block.get("text", "")).strip())
+        ]
+        if not kept:
+            return None
+        return msg if len(kept) == len(content) else {**msg, "content": kept}
     return msg
 
 
@@ -31,7 +47,7 @@ def _default_message_history() -> Dict[str, Any]:
 
 def _message_content(message: Any) -> str:
     if isinstance(message, dict):
-        return message.get("content", str(message))
+        return (message["content"] if "content" in message else str(message))
     return str(message)
 
 
@@ -42,14 +58,15 @@ def _append_anthropic_context(api_messages: List[Dict[str, Any]], message_histor
         api_messages.append({"role": "assistant", "content": message_history["summary"]["message"]})
 
 
-def _append_anthropic_history(api_messages: List[Dict[str, Any]], message_history: Dict[str, Any]) -> None:
-    for msg_id in message_history["messages"]:
-        msg = message_history["messages"][msg_id]
+def _append_anthropic_history(api_messages: List[Dict[str, Any]], entries: List[Dict[str, Any]]) -> None:
+    for msg in entries:
         msg_type = msg.get("type", "assistant")
         raw = msg.get("message", "")
-        if msg_type == "assistant_with_tools":
+        if is_user_entry(msg):
+            api_messages.append({"role": "user", "content": raw if isinstance(raw, str) else str(raw)})
+        elif msg_type == "assistant_with_tools":
             try:
-                api_messages.append(_ensure_anthropic_assistant_content(json.loads(raw)))
+                api_messages.append(json.loads(raw))
             except (json.JSONDecodeError, TypeError):
                 continue
         elif msg_type == "tool":
@@ -58,7 +75,8 @@ def _append_anthropic_history(api_messages: List[Dict[str, Any]], message_histor
             except (json.JSONDecodeError, TypeError):
                 continue
         else:
-            api_messages.append({"role": "assistant", "content": raw if isinstance(raw, str) else str(raw)})
+            blocks = replay_items(msg, "anthropic")
+            api_messages.append({"role": "assistant", "content": blocks if blocks is not None else raw if isinstance(raw, str) else str(raw)})
 
 
 def _append_anthropic_live_messages(api_messages: List[Dict[str, Any]], messages: List[Dict[str, Any]], first_input_content: str) -> None:
@@ -71,7 +89,7 @@ def _append_anthropic_live_messages(api_messages: List[Dict[str, Any]], messages
                 if msg["role"] == "user":
                     api_messages.append({"role": "user", "content": msg["content"]})
                 elif msg["role"] == "assistant":
-                    api_messages.append(_ensure_anthropic_assistant_content({"role": "assistant", "content": msg["content"]}))
+                    api_messages.append({"role": "assistant", "content": msg["content"]})
             elif "content" in msg:
                 api_messages.append({"role": "user", "content": msg["content"]})
             else:
@@ -102,12 +120,12 @@ def _anthropic_tool_choice(model: Any, tool_payload: Any) -> Dict[str, Any]:
     elif len(tool_payload.required_names) == 1:
         tool_choice = {"type": "tool", "name": tool_payload.required_names[0]}
     elif len(tool_payload.required_names) > 1:
-        tool_choice = {"type": "required"}
+        tool_choice = {"type": "any"}
     else:
         tool_choice = {"type": "auto"}
 
     if hasattr(model, 'parallel_tool_calls') and not model.parallel_tool_calls:
-        if supports_anthropic_parallel_tool_use(model.model_id) and tool_choice.get("type") in ["auto", "required"]:
+        if supports_anthropic_parallel_tool_use(model.model_id) and tool_choice.get("type") in ["auto", "any"]:
             tool_choice["disable_parallel_tool_use"] = True
     return tool_choice
 
@@ -115,7 +133,35 @@ def _anthropic_tool_choice(model: Any, tool_payload: Any) -> Dict[str, Any]:
 def _apply_anthropic_tools(payload: Dict[str, Any], model: Any, agent_tools: list[Any]) -> None:
     tool_payload = build_provider_tool_payload("anthropic", agent_tools)
     payload["tools"] = tool_payload.tools
-    payload["tool_choice"] = _anthropic_tool_choice(model, tool_payload)
+    choice = _anthropic_tool_choice(model, tool_payload)
+    if payload.get("thinking", {}).get("type") == "enabled" and choice["type"] not in {"auto", "none"}:
+        choice = dict[str, Any](type="auto")
+        if not getattr(model, "parallel_tool_calls", False) and supports_anthropic_parallel_tool_use(model.model_id):
+            choice["disable_parallel_tool_use"] = True
+    payload["tool_choice"] = choice
+
+
+
+def _apply_thinking_config(payload: Dict[str, Any], model: Any) -> None:
+    budget = getattr(model, "thinking_budget_tokens", None)
+    if budget is None:
+        if getattr(model, "deepthinking", False) and supports_anthropic_adaptive_thinking(model.model_id):
+            payload["thinking"] = {"type": "adaptive"}
+            payload.pop("temperature", None)
+            if getattr(model, "reasoning_effort", None):
+                payload["output_config"] = {"effort": model.reasoning_effort}
+        return
+    if requires_anthropic_adaptive_thinking(model.model_id):
+        raise ValueError(f"{model.model_id} requires adaptive thinking; thinking_budget_tokens is unsupported. "
+                         "Set deepthinking=True to enable adaptive thinking.")
+    if type(budget) is not int or budget < 1024:
+        raise ValueError("Anthropic thinking_budget_tokens must be an integer of at least 1024")
+    if budget >= payload["max_tokens"]:
+        raise ValueError("Anthropic thinking_budget_tokens must be less than max_tokens (after model caps)")
+    payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
+    # Manual thinking is incompatible with temperature/top_k overrides. Neither
+    # top_k nor top_p is exposed by this adapter; omit temperature explicitly.
+    payload.pop("temperature", None)
 
 
 def anthropic_fill_payload(
@@ -126,18 +172,27 @@ def anthropic_fill_payload(
 ) -> Dict[str, Any]:
     message_history = message_history or _default_message_history()
     api_messages: List[Dict[str, Any]] = []
-    _append_anthropic_context(api_messages, message_history)
-    _append_anthropic_history(api_messages, message_history)
+    plan = plan_history_replay(message_history, messages)
+    if plan.first_input_first:
+        _append_anthropic_context(api_messages, message_history)
+        _append_anthropic_history(api_messages, plan.entries)
+    else:
+        _append_anthropic_history(api_messages, plan.entries)
+        if plan.emit_first_input:
+            api_messages.append({"role": "user", "content": message_history["first_input"]["message"]})
     _append_anthropic_live_messages(api_messages, messages, message_history["first_input"]["message"])
+    api_messages = [m for m in (_without_blank_text(m) for m in api_messages) if m is not None]
 
     payload = {
         "model": model.model_id,
         "max_tokens": _anthropic_max_tokens(model),
-        "temperature": model.temperature,
         "system": _anthropic_system_prompt(model, message_history),
         "messages": api_messages,
     }
 
+    if supports_custom_temperature(model.model_id):
+        payload["temperature"] = model.temperature
+    _apply_thinking_config(payload, model)
     agent_tools = model.agent_tools if agent_tools is None else agent_tools
     if agent_tools:
         _apply_anthropic_tools(payload, model, agent_tools)

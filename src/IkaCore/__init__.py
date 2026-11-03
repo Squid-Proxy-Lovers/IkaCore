@@ -1,18 +1,58 @@
 # pyright: strict
 
+import logging
 from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from IkaCore.agents import IkaBaseAgent as IkaBaseAgent
+    from IkaCore.config import AgentConfig as AgentConfig
+    from IkaCore.config import AgentTopology as AgentTopology
+    from IkaCore.config import ExecutionLimits as ExecutionLimits
+    from IkaCore.config import ExecutionPolicy as ExecutionPolicy
+    from IkaCore.config import OutputConfig as OutputConfig
+    from IkaCore.config import PromptConfig as PromptConfig
+    from IkaCore.config import ProviderConfig as ProviderConfig
+    from IkaCore.events import RuntimeEvent as RuntimeEvent
+    from IkaCore.events import RuntimeOutput as RuntimeOutput
+    from IkaCore.events import output_scope as output_scope
+    from IkaCore.results import AgentResult as AgentResult
+    from IkaCore.results import FinalAnswerValidationError as FinalAnswerValidationError
+    from IkaCore.results import ValidationStatus as ValidationStatus
+    from IkaCore.runtime_control import RuntimeControl as RuntimeControl
+    from IkaCore.snapshot_store import SnapshotStore as SnapshotStore
     from IkaCore.stages import IkaStage as IkaStage
     from IkaCore.tools import IkaTools as IkaTools
     from IkaCore.workflow import IkaWorkflow as IkaWorkflow
     from IkaCore.workflow import WorkflowEdge as WorkflowEdge
     from IkaCore.workflow import WorkflowNode as WorkflowNode
     from IkaCore.workflow import WorkflowResult as WorkflowResult
+    from IkaCore.workflow_types import WorkflowError as WorkflowError
+    from IkaCore.workflow_types import WorkflowNodeError as WorkflowNodeError
+    from IkaCore.workflow_types import WorkflowRunResult as WorkflowRunResult
+
+try:
+    __version__ = version("ikacore")
+except PackageNotFoundError:
+    __version__ = "2.0.0"
 
 __all__ = [
+    "RuntimeEvent", "RuntimeOutput", "output_scope",
+    "AgentConfig",
+    "ProviderConfig",
+    "PromptConfig",
+    "ExecutionLimits",
+    "ExecutionPolicy",
+    "AgentTopology",
+    "OutputConfig",
+
+    "AgentResult",
+    "ValidationStatus",
+    "FinalAnswerValidationError",
+    "WorkflowError",
+    "WorkflowNodeError",
+    "__version__",
     "IkaBaseAgent",
     "IkaStage",
     "IkaTools",
@@ -20,9 +60,29 @@ __all__ = [
     "WorkflowEdge",
     "WorkflowNode",
     "WorkflowResult",
+    "WorkflowRunResult",
+    "SnapshotStore",
+    "RuntimeControl",
 ]
 
 _EXPORTS: dict[str, tuple[str, str]] = {
+    "WorkflowRunResult": ("IkaCore.workflow_types", "WorkflowRunResult"),
+    "WorkflowNodeError": ("IkaCore.workflow_types", "WorkflowNodeError"),
+    "WorkflowError": ("IkaCore.workflow_types", "WorkflowError"),
+    "FinalAnswerValidationError": ("IkaCore.results", "FinalAnswerValidationError"),
+    "ValidationStatus": ("IkaCore.results", "ValidationStatus"),
+    "AgentResult": ("IkaCore.results", "AgentResult"),
+    "RuntimeEvent": ("IkaCore.events", "RuntimeEvent"),
+    "RuntimeOutput": ("IkaCore.events", "RuntimeOutput"),
+    "output_scope": ("IkaCore.events", "output_scope"),
+    "AgentConfig": ("IkaCore.config", "AgentConfig"),
+    "ProviderConfig": ("IkaCore.config", "ProviderConfig"),
+    "PromptConfig": ("IkaCore.config", "PromptConfig"),
+    "ExecutionLimits": ("IkaCore.config", "ExecutionLimits"),
+    "ExecutionPolicy": ("IkaCore.config", "ExecutionPolicy"),
+    "AgentTopology": ("IkaCore.config", "AgentTopology"),
+    "OutputConfig": ("IkaCore.config", "OutputConfig"),
+
     "IkaBaseAgent": ("IkaCore.agents", "IkaBaseAgent"),
     "IkaStage": ("IkaCore.stages", "IkaStage"),
     "IkaTools": ("IkaCore.tools", "IkaTools"),
@@ -30,6 +90,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "WorkflowEdge": ("IkaCore.workflow", "WorkflowEdge"),
     "WorkflowNode": ("IkaCore.workflow", "WorkflowNode"),
     "WorkflowResult": ("IkaCore.workflow", "WorkflowResult"),
+    "SnapshotStore": ("IkaCore.snapshot_store", "SnapshotStore"),
+    "RuntimeControl": ("IkaCore.runtime_control", "RuntimeControl"),
 }
 
 
@@ -44,3 +106,6 @@ def __getattr__(name: str) -> Any:
 
 def __dir__() -> list[str]:
     return sorted({*globals(), *_EXPORTS})
+
+
+logging.getLogger("IkaCore").addHandler(logging.NullHandler())

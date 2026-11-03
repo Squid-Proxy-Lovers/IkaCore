@@ -1,4 +1,6 @@
 import importlib
+import importlib.metadata
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -6,7 +8,7 @@ import IkaCore
 import IkaMem
 import IkaModel
 from IkaModel import base
-from IkaModel.base import AgentEndException, BareBoneModel, HumanInputRequired, load_gemini_payload
+from IkaModel.base import AgentEndException, BareBoneModel, HumanInputRequired
 
 
 class DummyCli:
@@ -63,23 +65,15 @@ def test_base_exceptions_default_payloads_and_final_text():
     assert human.payload == {}
 
 
-def test_global_long_term_memory_initializes_once(monkeypatch):
-    class DummyLTMemory:
-        instances = []
-
-        def __init__(self, embedder_config):
-            self.embedder_config = embedder_config
-            DummyLTMemory.instances.append(self)
-
-    monkeypatch.setattr(base, "_GLOBAL_LONG_TERM_MEMORY", None)
-    monkeypatch.setattr(IkaMem, "LTMemory", DummyLTMemory)
-
-    memory = base.init_global_long_term_memory({"provider": "fake"}, search_limit=3)
-    assert memory.embedder_config == {"provider": "fake"}
-    assert memory._search_limit == 3
-    assert memory._filter_func([1, 2, 3, 4]) == [1, 2, 3, 4][:5]
-
-    assert base.init_global_long_term_memory({"provider": "other"}) is memory
+def test_memory_backends_are_explicit_and_not_global(monkeypatch):
+    from IkaMem.agent_tools import MemoryTools
+    backend = MagicMock()
+    first = MemoryTools('first', long_term=backend)
+    second = MemoryTools('second')
+    assert first.operations.long_term_memory is backend
+    assert second.operations.long_term_memory is None
+    assert not hasattr(base, 'get_global_long_term_memory')
+    assert not hasattr(base, 'init_global_long_term_memory')
 
 
 def test_lazy_package_exports_cache_values_and_reject_unknowns():
@@ -96,5 +90,16 @@ def test_lazy_package_exports_cache_values_and_reject_unknowns():
         IkaCore.__getattr__("missing")
 
 
-def test_load_gemini_payload_success_path():
-    assert load_gemini_payload() is importlib.import_module("IkaModel.gemini.google").gemini_fill_payload
+@pytest.mark.parametrize("package", [IkaCore, IkaModel, IkaMem])
+def test_package_version_uses_distribution_metadata_and_source_fallback(package, monkeypatch):
+    assert package.__version__ == importlib.metadata.version("ikacore")
+
+    with monkeypatch.context() as patch:
+        def missing_distribution(name):
+            raise importlib.metadata.PackageNotFoundError(name)
+
+        patch.setattr(importlib.metadata, "version", missing_distribution)
+        importlib.reload(package)
+        assert package.__version__ == "2.0.0"
+    importlib.reload(package)
+    assert package.__version__ == importlib.metadata.version("ikacore")

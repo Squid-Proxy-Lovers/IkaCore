@@ -12,8 +12,8 @@ import httpx
 
 from IkaCore.agent_runtime_payloads import JsonDict
 
+from .. import summarization as _summaries
 from ..base import BareBoneModel
-from ..summarization import run_summarization
 from .chat_request import _request_provider_round
 from .chat_response import (
     UsageInput,
@@ -30,8 +30,7 @@ from .chat_tool_common import (
     _tool_loop_interrupt_response,
     _tool_loop_post_batch_result,
 )
-from .response_interface import execute_tool_calls
-from .tool_execution_sync import ToolExecutorMap
+from .tool_execution_sync import ToolExecutorMap, execute_tool_calls
 from .types import ChatLoopState, ToolRuntimeState
 
 LOG = logging.getLogger(__name__)
@@ -60,7 +59,7 @@ def _sync_repeated_tool_guard(
                 f"Tool '{tool_name}' called {recent_count} times identically. "
                 "Forcing agent termination with summarization."
             )
-            force_answer = run_summarization(
+            force_answer = _summaries.run_summarization(
                 barebone_model,
                 message_history,
                 prompt_kind="force_answer",

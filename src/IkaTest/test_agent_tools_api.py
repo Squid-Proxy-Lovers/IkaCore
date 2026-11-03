@@ -3,31 +3,32 @@ Tests for IkaBaseAgent tool conversion and API schema generation:
 convert IkaTools/subagents to AgentTool, build_tool_executors, and payload tools shape.
 """
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-mock_ika_mem = MagicMock()
-with patch.dict("sys.modules", {"IkaMem": mock_ika_mem}):
-    from IkaCore.agents import IkaBaseAgent
+from IkaCore import AgentTopology, PromptConfig
+from IkaCore.agents import IkaBaseAgent
 from IkaCore.stages import IkaStage
 from IkaCore.tools import IkaTools
+from IkaMem.agent_tools import MemoryTools
 from IkaModel.base import AgentTool, BareBoneModel, ToolArgs
 from IkaModel.chat_helpers_common import build_provider_request
 from IkaModel.openai.openai import openai_fill_payload
+from IkaTest.agent_config_fixtures import agent_kwargs
 
 
 def _minimal_agent(**kwargs):
     defaults = {"name": "TestAgent", "description": "Desc", "prompt": "Do it", "model_id": "gpt-4o", "api_key": "k"}
     defaults.update(kwargs)
-    return IkaBaseAgent(**defaults)
+    return IkaBaseAgent(**agent_kwargs(defaults))
 
 
 class TestConvertToolsToAgentTools:
     def test_ika_tool_to_agent_tool(self):
         ika = IkaTools("fetch", "Fetches data", {"url": {"type": "string", "description": "URL"}}, execute_function=lambda p: "ok")
         a = _minimal_agent()
-        agent_tools = a._convert_tools_to_agent_tools([ika])
+        agent_tools = a.tool_runtime._convert_tools_to_agent_tools([ika])
         assert len(agent_tools) == 1
         t = agent_tools[0]
         assert t.name == "fetch"
@@ -39,20 +40,20 @@ class TestConvertToolsToAgentTools:
     def test_ika_tool_required_param(self):
         ika = IkaTools("run", "Run", {"x": {"type": "string", "description": "X", "required": True}}, execute_function=lambda p: "ok")
         a = _minimal_agent()
-        agent_tools = a._convert_tools_to_agent_tools([ika])
+        agent_tools = a.tool_runtime._convert_tools_to_agent_tools([ika])
         assert agent_tools[0].args.properties.get("__required__") == ["x"]
 
     def test_agent_tool_passthrough(self):
         at = AgentTool("id", "direct", "Direct", ToolArgs(type="input", description="In"))
         a = _minimal_agent()
-        out = a._convert_tools_to_agent_tools([at])
+        out = a.tool_runtime._convert_tools_to_agent_tools([at])
         assert len(out) == 1
         assert out[0] is at
 
     def test_ika_tool_parallel_and_limit_calls(self):
         ika = IkaTools("p", "P", {"x": "string"}, limit_calls=2, parallel=False, execute_function=lambda p: "ok")
         a = _minimal_agent()
-        agent_tools = a._convert_tools_to_agent_tools([ika])
+        agent_tools = a.tool_runtime._convert_tools_to_agent_tools([ika])
         assert agent_tools[0].parallel is False
         assert agent_tools[0].limit_calls == 2
 
@@ -60,8 +61,8 @@ class TestConvertToolsToAgentTools:
 class TestConvertSubagentsToTools:
     def test_subagents_become_agent_tools(self):
         sub = _minimal_agent(name="Worker")
-        a = _minimal_agent(subagents=[sub])
-        tools = a._convert_subagents_to_tools()
+        a = _minimal_agent(topology=AgentTopology(subagents=[sub]))
+        tools = a.tool_runtime._convert_subagents_to_tools()
         assert len(tools) == 1
         assert tools[0].name == "Worker"
         assert tools[0].args.type == "input"
@@ -71,13 +72,13 @@ class TestConvertSubagentsToTools:
         sub1 = _minimal_agent(name="A")
         sub2 = _minimal_agent(name="B")
         a = _minimal_agent()
-        tools = a._convert_subagents_to_tools(subagents=[sub1, sub2])
+        tools = a.tool_runtime._convert_subagents_to_tools(subagents=[sub1, sub2])
         assert len(tools) == 2
         assert {t.name for t in tools} == {"A", "B"}
 
     def test_empty_subagents_returns_empty(self):
         a = _minimal_agent()
-        assert a._convert_subagents_to_tools() == []
+        assert a.tool_runtime._convert_subagents_to_tools() == []
 
 
 class TestBuildToolExecutors:
@@ -104,7 +105,7 @@ class TestBuildToolExecutors:
     def test_agent_end_rejects_empty_json_values(self, value):
         a = _minimal_agent()
         executors = a.build_tool_executors([])
-        with pytest.raises(ValueError, match="empty|invalid"):
+        with pytest.raises(ValueError, match=r"empty|invalid"):
             executors["agent_end"]({"input": value})
 
     def test_stage_end_executor(self):
@@ -117,7 +118,7 @@ class TestBuildToolExecutors:
 
     def test_change_stage_executor(self):
         stage = IkaStage("S", "P", [], allowed_back_to=[0])
-        a = _minimal_agent(Stages=[stage])
+        a = _minimal_agent(stages=[stage])
         executors = a.build_tool_executors(stage.tools, stage=stage)
         assert "change_stage" in executors
         out = executors["change_stage"]({"reason": "Need to redo"})
@@ -127,7 +128,7 @@ class TestBuildToolExecutors:
         hitl_stage = IkaStage("Review", "P", [], hitl=True)
         non_hitl_stage = IkaStage("Draft", "P", [])
         a = _minimal_agent()
-        a._prompt_hitl_question = MagicMock(return_value="user answer")
+        a.chat._prompt_hitl_question = MagicMock(return_value="user answer")
 
         hitl_executors = a.build_tool_executors(
             hitl_stage.tools,
@@ -138,7 +139,7 @@ class TestBuildToolExecutors:
         non_hitl_executors = a.build_tool_executors(non_hitl_stage.tools, stage=non_hitl_stage)
 
         assert hitl_executors["ask_user"]({"question": "Proceed?"}) == "user answer"
-        a._prompt_hitl_question.assert_called_once_with(
+        a.chat._prompt_hitl_question.assert_called_once_with(
             "Review",
             "Proceed?",
             stage_index=2,
@@ -162,18 +163,18 @@ class TestBuildToolExecutors:
     def test_subagent_executor_calls_execution(self):
         sub = _minimal_agent(name="Sub")
         sub.execution = MagicMock(return_value={"final_message": "Sub result", "summary": "Sub result"})
-        a = _minimal_agent(subagents=[sub])
+        a = _minimal_agent(topology=AgentTopology(subagents=[sub]))
         executors = a.build_tool_executors(a.build_simple_tools())
         out = executors["Sub"]({"input": "Do task"})
         assert "Sub result" in out
         sub.execution.assert_called_once()
 
     def test_subagent_executor_keeps_task_separate_from_instructions(self):
-        sub = _minimal_agent(name="Sub", prompt="Sub base", system_prompt="Sub system")
+        sub = _minimal_agent(name="Sub", prompt="Sub base", prompts=PromptConfig(system_prompt="Sub system"))
 
         sub.execution = MagicMock(return_value={"final_message": "Sub result", "summary": "Sub result"})
-        a = _minimal_agent(subagents=[sub])
-        executor = a._build_subagent_executor(sub, parent_hierarchy=["Parent"])
+        a = _minimal_agent(topology=AgentTopology(subagents=[sub]))
+        executor = a.tool_runtime._build_subagent_executor(sub, parent_hierarchy=["Parent"])
         out = executor({"input": "Do task"})
 
         assert "Sub result" in out
@@ -186,7 +187,7 @@ class TestBuildToolExecutors:
         sub_run = sub.clone_for_run()
         sub_run.execution = MagicMock(side_effect=RuntimeError("boom"))
         sub.clone_for_run = MagicMock(return_value=sub_run)
-        a = _minimal_agent(subagents=[sub])
+        a = _minimal_agent(topology=AgentTopology(subagents=[sub]))
 
         executors = a.build_tool_executors([])
 
@@ -198,14 +199,14 @@ class TestBuildToolExecutors:
         sub_run.execution.assert_called_once()
 
     def test_memory_executors_enforce_rate_limit_and_delegate(self):
-        a = _minimal_agent(memory_access={})
-        a.short_term_memory = MagicMock()
-        a.long_term_memory = MagicMock()
-        a._enforce_rate_limit_tool = MagicMock()
-        a._save_to_short_term = MagicMock(return_value="short saved")
-        a._search_short_term = MagicMock(return_value={"matches": ["short"]})
-        a._save_to_long_term = MagicMock(return_value="long saved")
-        a._search_long_term = MagicMock(return_value={"matches": ["long"]})
+        a = MemoryTools("TestAgent")
+        a.operations.short_term_memory = MagicMock()
+        a.operations.long_term_memory = MagicMock()
+        a.before_call = MagicMock()
+        a.operations.save_short_term = MagicMock(return_value="short saved")
+        a.operations.search_short_term = MagicMock(return_value={"matches": ["short"]})
+        a.operations.save_long_term = MagicMock(return_value="long saved")
+        a.operations.search_long_term = MagicMock(return_value={"matches": ["long"]})
         long_term_filter = MagicMock(return_value=True)
         memory_access = {
             "short_term_save": True,
@@ -214,7 +215,7 @@ class TestBuildToolExecutors:
             "long_term_search": True,
         }
 
-        executors = a.build_tool_executors([], memory_access=memory_access, long_term_filter=long_term_filter)
+        executors = {tool.name: tool.execute_function for tool in a.tools(access=memory_access, long_term_filter=long_term_filter)}
 
         assert executors["short_term_save"]({"input": "note"}) == "short saved"
         assert json.loads(executors["short_term_search"]({"query": "needle", "limit": 3, "score_threshold": 0.8})) == {
@@ -223,16 +224,16 @@ class TestBuildToolExecutors:
         assert executors["long_term_save"]({"task": "t", "output": "o"}) == "long saved"
         assert json.loads(executors["long_term_search"]({"query": "archive", "limit": 2})) == {"matches": ["long"]}
 
-        assert a._enforce_rate_limit_tool.call_args_list == [
+        assert a.before_call.call_args_list == [
             (("short_term_save",),),
             (("short_term_search",),),
             (("long_term_save",),),
             (("long_term_search",),),
         ]
-        a._save_to_short_term.assert_called_once_with("note")
-        a._search_short_term.assert_called_once_with("needle", limit=3, score_threshold=0.8)
-        a._save_to_long_term.assert_called_once_with({"task": "t", "output": "o"})
-        a._search_long_term.assert_called_once_with(
+        a.operations.save_short_term.assert_called_once_with("note")
+        a.operations.search_short_term.assert_called_once_with("needle", limit=3, score_threshold=0.8)
+        a.operations.save_long_term.assert_called_once_with({"task": "t", "output": "o"})
+        a.operations.search_long_term.assert_called_once_with(
             "archive",
             limit=2,
             score_threshold=0.6,
@@ -254,7 +255,7 @@ class TestApiPayloadToolSchema:
         model.agent_tools = [agent_end]
         messages = [{"role": "user", "content": "Hi"}]
         history = {"system": {"message": ""}, "first_input": {"message": ""}, "summary": {"message": ""}, "messages": {}}
-        _, headers, payload = build_provider_request("openai", model, messages, history)
+        _, _headers, payload = build_provider_request("openai", model, messages, history)
         assert "tools" in payload
         tools = payload["tools"]
         assert len(tools) == 1
@@ -264,7 +265,7 @@ class TestApiPayloadToolSchema:
         assert params["type"] == "object"
         assert "input" in params["properties"]
         assert "input" in params["required"]
-        assert payload["tool_choice"]["function"]["name"] == "agent_end"
+        assert payload["tool_choice"] == "auto"
 
     def test_subagent_tool_type_input_in_payload(self):
         at = AgentTool("Sub", "Sub", "Subagent", ToolArgs(type="input", description="Task"), required=True)
@@ -280,9 +281,9 @@ class TestApiPayloadToolSchema:
         assert "input" in fn["parameters"]["required"]
 
     def test_memory_tool_schema_is_structured(self):
-        a = _minimal_agent(memory=True, memory_access={"long_term_save": True, "long_term_search": True})
-        a.long_term_memory = MagicMock()
-        tools = a._build_memory_tools(a.memory_access, "long_term")
+        a = MemoryTools("TestAgent")
+        a.operations.long_term_memory = MagicMock()
+        tools = a._build_memory_tools({"long_term_save": True, "long_term_search": True}, "long_term")
         names = {t.name for t in tools}
         assert {"long_term_save", "long_term_search"}.issubset(names)
         save_tool = next(t for t in tools if t.name == "long_term_save")
@@ -291,12 +292,12 @@ class TestApiPayloadToolSchema:
         assert search_tool.args.properties["__required__"] == ["query"]
 
     def test_long_term_save_executor_accepts_structured_payload(self):
-        a = _minimal_agent(memory=True, memory_access={"long_term_save": True})
-        a.long_term_memory = MagicMock()
-        a.long_term_memory.save = MagicMock()
-        result = a._save_to_long_term({"task": "research", "output": "done", "metadata": {"source": "unit-test"}})
+        a = MemoryTools("TestAgent")
+        a.operations.long_term_memory = MagicMock()
+        a.operations.long_term_memory.save = MagicMock()
+        result = a.operations.save_long_term({"task": "research", "output": "done", "metadata": {"source": "unit-test"}})
         assert "saved to long-term memory" in result
-        assert a.long_term_memory.save.called
+        assert a.operations.long_term_memory.save.called
 
     def test_object_properties_in_payload(self):
         at = AgentTool(

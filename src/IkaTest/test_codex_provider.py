@@ -11,12 +11,11 @@ Covers:
 """
 import pytest
 
-from IkaCore.agent_helpers import AgentHelpersMixin
 from IkaModel.codex import CODEX_API_URL, is_codex_url
-from IkaModel.model_metadata import CODEX_KNOWN_MODELS
+from IkaModel.model_metadata import CODEX_KNOWN_MODELS, get_api_url_for_model
 from IkaModel.request_interface import get_provider
 
-geturl = AgentHelpersMixin.geturl
+geturl = get_api_url_for_model
 
 
 def test_current_codex_models_are_registered():

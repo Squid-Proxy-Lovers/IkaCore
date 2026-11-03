@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -8,7 +8,6 @@ from IkaModel import request_interface as ri
 from IkaModel.request_interface import (
     IkaAPIError,
     _error_text_from_response,
-    _rate_limit_wait_time,
     _response_json_preview,
     _response_text_preview,
     api_request_retry,
@@ -50,25 +49,19 @@ def test_response_preview_helpers_handle_json_and_text_bodies():
     assert _error_text_from_response(text_response, 200) == "plain error body"
 
 
-def test_rate_limit_wait_time_uses_retry_after_or_clamped_backoff():
-    assert _rate_limit_wait_time(httpx.Response(429, headers={"retry-after": "12"}), 10, 0) == (12, True)
-    assert _rate_limit_wait_time(httpx.Response(429, headers={"retry-after": "not-int"}), 1, 0) == (30, False)
-    assert _rate_limit_wait_time(httpx.Response(429), 200, 3) == (300, False)
-
-
 def test_retry_delay_helpers_return_or_raise_typed_errors():
-    with patch("IkaModel.request_interface.get_cli_output", return_value=MagicMock()):
+    with patch("IkaModel.retry_policy.random.random", return_value=0):
         wait, err = ri._response_retry_delay_and_error(
             httpx.Response(429, content=b"slow down"),
             wait_seconds=1,
             attempt=0,
             max_retries=2,
         )
-    assert wait == 30
+    assert wait == 1
     assert isinstance(err, ri.IkaRateLimitError)
     assert err.status_code == 429
 
-    with pytest.raises(ri.IkaRateLimitError, match="after 1 attempts"):
+    with pytest.raises(ri.IkaRateLimitError, match="status 429"):
         ri._response_retry_delay_and_error(
             httpx.Response(429, json={"error": "slow down"}),
             wait_seconds=1,
@@ -77,21 +70,21 @@ def test_retry_delay_helpers_return_or_raise_typed_errors():
         )
 
     wait, err = ri._timeout_retry_delay_and_error(timeout=0.5, wait_seconds=2, attempt=0, max_retries=2)
-    assert wait == 2
+    assert 1.5 <= wait <= 2
     assert isinstance(err, ri.IkaTimeoutError)
     with pytest.raises(ri.IkaTimeoutError):
         ri._timeout_retry_delay_and_error(timeout=0.5, wait_seconds=2, attempt=1, max_retries=2)
 
     wait, err = ri._http_retry_delay_and_error(httpx.ConnectError("down"), wait_seconds=3, attempt=0, max_retries=2)
-    assert wait == 3
+    assert 2.25 <= wait <= 3
     assert isinstance(err, ri.IkaHTTPError)
-    with pytest.raises(ri.IkaHTTPError, match="after 2 attempts"):
+    with pytest.raises(ri.IkaHTTPError, match="transport failure"):
         ri._http_retry_delay_and_error(httpx.ConnectError("down"), wait_seconds=3, attempt=1, max_retries=2)
 
-    original = RuntimeError("unexpected")
+    original = OSError("unexpected")
     wait, err = ri._unexpected_retry_delay_and_error(original, wait_seconds=4, attempt=0, max_retries=2)
-    assert (wait, err) == (4, original)
-    with pytest.raises(RuntimeError, match="unexpected"):
+    assert 3 <= wait <= 4 and err is original
+    with pytest.raises(OSError, match="unexpected"):
         ri._unexpected_retry_delay_and_error(original, wait_seconds=4, attempt=1, max_retries=2)
 
 
@@ -113,7 +106,8 @@ def test_sync_api_retry_retries_server_error_then_succeeds():
 
     assert response.json() == {"ok": True}
     assert post.call_count == 2
-    sleep.assert_called_once_with(1)
+    sleep.assert_called_once()
+    assert 0.75 <= sleep.call_args.args[0] <= 1
 
 
 def test_sync_api_retry_raises_typed_error_after_final_server_error():
@@ -121,11 +115,11 @@ def test_sync_api_retry_raises_typed_error_after_final_server_error():
         "IkaModel.request_interface.httpx.post",
         return_value=httpx.Response(500, json={"error": "still bad"}),
     ):
-        with pytest.raises(IkaAPIError, match="after 1 attempts") as exc_info:
+        with pytest.raises(IkaAPIError, match="status 500") as exc_info:
             api_request_retry("https://example.test", {}, {}, max_retries=1)
 
     assert exc_info.value.status_code == 500
-    assert "still bad" in str(exc_info.value)
+    assert "still bad" not in str(exc_info.value)
 
 
 def test_sync_api_retry_dispatches_codex_and_retries_http_errors():
@@ -158,7 +152,8 @@ def test_sync_api_retry_dispatches_codex_and_retries_http_errors():
             response = api_request_retry("https://example.test", {}, {}, max_retries=2, wait_seconds=1)
 
     assert response.json() == {"ok": True}
-    sleep.assert_called_once_with(1)
+    sleep.assert_called_once()
+    assert 0.75 <= sleep.call_args.args[0] <= 1
 
     with patch("IkaModel.request_interface.httpx.post", side_effect=ValueError("bad client")):
         with pytest.raises(ValueError, match="bad client"):
@@ -204,7 +199,7 @@ def test_async_api_retry_dispatches_codex_closes_owned_client_and_raises_last_er
             "https://chatgpt.com/backend-api/codex/responses",
             "http://172.30.0.1:18081/backend-api/codex/responses",
         ):
-            with patch("IkaModel.codex.chat_helpers_codex.request_codex", return_value=codex_response) as request_codex:
+            with patch("IkaModel.codex.async_request.async_request_codex", new_callable=AsyncMock, return_value=codex_response) as request_codex:
                 response = await async_api_request_retry(
                     endpoint,
                     {},
@@ -240,14 +235,14 @@ def test_async_api_retry_dispatches_codex_closes_owned_client_and_raises_last_er
     async def run_owned_client_error():
         with patch("IkaModel.request_interface.httpx.AsyncClient", side_effect=make_client):
             with patch("IkaModel.request_interface.asyncio.sleep", AsyncMock()):
-                with pytest.raises(ri.IkaHTTPError, match="after 1 attempts"):
+                with pytest.raises(ri.IkaHTTPError, match="transport failure"):
                     await async_api_request_retry("https://example.test", {}, {}, max_retries=1, timeout=0.5)
 
     asyncio.run(run_owned_client_error())
     assert created[0].closed is True
 
 
-def test_agent_tools_for_payload_caches_filters_and_compatibility_shims_restore():
+def test_agent_tools_for_payload_caches_filters_without_mutating_model():
     unlimited = type("Tool", (), {"name": "always", "limit_calls": 0})()
     limited = type("Tool", (), {"name": "limited", "limit_calls": 2})()
     model = type("Model", (), {})()
@@ -263,9 +258,4 @@ def test_agent_tools_for_payload_caches_filters_and_compatibility_shims_restore(
     filtered = ri.agent_tools_for_payload(model)
     assert filtered == [unlimited]
     assert ri.model_for_payload(model).agent_tools == [unlimited]
-    assert model.agent_tools == [unlimited, limited]
-
-    ri._apply_tools_filter_for_payload(model)
-    assert model.agent_tools == [unlimited]
-    ri._restore_tools_after_payload(model)
     assert model.agent_tools == [unlimited, limited]

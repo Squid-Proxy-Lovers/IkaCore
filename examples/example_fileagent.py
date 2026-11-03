@@ -1,21 +1,12 @@
 import os
-from pathlib import Path
 
-from IkaCore import IkaBaseAgent, IkaTools
+from IkaCore import ExecutionLimits, IkaBaseAgent, IkaTools, OutputConfig, PromptConfig, ProviderConfig
 
 MODEL_ID = "qwen/qwen3-coder-next"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 def _load_key():
-    script_dir = Path(__file__).resolve().parent
-    keys_file = script_dir / "keys.cfg"
-    if keys_file.exists():
-        with open(keys_file) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("openrouter="):
-                    return line.split("=", 1)[1].strip()
     return os.getenv("OPENROUTER_API_KEY") or os.getenv("API_KEY")
 
 
@@ -39,11 +30,11 @@ Rules:
 def main():
     api_key = _load_key()
     if not api_key:
-        raise ValueError("Set OPENROUTER_API_KEY or API_KEY, or add openrouter=<key> to examples/keys.cfg")
+        raise ValueError("Set OPENROUTER_API_KEY or API_KEY")
     if not api_key.startswith("sk-or-"):
         raise ValueError(
             "OpenRouter key must start with sk-or-. Get a valid key at https://openrouter.ai/keys "
-            "and set it in examples/keys.cfg (openrouter=<key>) or OPENROUTER_API_KEY"
+            "and set OPENROUTER_API_KEY or API_KEY"
         )
     if not MODEL_ID:
         raise ValueError("MODEL_ID is not set")
@@ -86,14 +77,14 @@ def main():
     agent = IkaBaseAgent(
         name="example_system",
         description="A simple example system",
-        api_url=OPENROUTER_URL,
-        system_prompt=SYSTEM_PROMPT,
+        provider=ProviderConfig(api_url=OPENROUTER_URL),
+        prompts=PromptConfig(system_prompt=SYSTEM_PROMPT),
         prompt=PROMPT,
         tools=[get_pwd, read_file, list_files],
         model_id=MODEL_ID,
         api_key=api_key,
-        maxsteps=30,
-        logging_level=3,
+        limits=ExecutionLimits(maxsteps=30),
+        output=OutputConfig(logging_level=3),
     )
     agent.execution()
 

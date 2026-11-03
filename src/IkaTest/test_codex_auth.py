@@ -41,7 +41,7 @@ def _make_jwt(payload: dict) -> str:
 
 def _write_auth_json(home: Path, *, exp_offset_sec: int = 3600,
                      plan: str = "pro", account_id: str = "acc-xyz",
-                     access_token: str = None, refresh_token: str = "rt-stored"):
+                     access_token: str | None = None, refresh_token: str = "rt-stored"):
     home.mkdir(parents=True, exist_ok=True)
     if access_token is None:
         access_token = _make_jwt({
@@ -223,7 +223,7 @@ class TestGetBearer:
             "OPENAI_API_KEY": "",
             "tokens": {},
         }))
-        with pytest.raises(RuntimeError, match="neither tokens.access_token"):
+        with pytest.raises(RuntimeError, match=r"neither tokens\.access_token"):
             codex_auth.get_bearer()
 
 

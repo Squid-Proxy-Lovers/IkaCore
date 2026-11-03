@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Protocol
 
@@ -52,11 +53,47 @@ class WorkflowResult:
     name: str
     final: str
     summary: str
-    history: dict[str, Any]
+    output: dict[str, Any]
+    transcript: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    instance_outputs: dict[int, dict[str, Any]] = field(default_factory=lambda: dict[int, dict[str, Any]]())
+    instance_transcripts: dict[int, dict[str, Any]] = field(default_factory=lambda: dict[int, dict[str, Any]]())
     child_summaries: dict[str, str] = field(default_factory=lambda: {})
 
 
-class _WorkflowValueState(Protocol):
+class WorkflowRunResult(dict[str, WorkflowResult]):
+    """Completed nodes plus workflow status and interruption/resume guidance."""
+
+    def __init__(self, results: dict[str, WorkflowResult], interruptions: dict[str, dict[str, Any]],
+                 snapshot_id: str | None = None, paused: bool = False):
+        super().__init__(results)
+        self.status: str = ("awaiting_user_input" if any(
+            result.get("status") == "awaiting_user_input" for result in interruptions.values()
+        ) else "paused" if interruptions or paused else "completed")
+        self.snapshot_id: str | None = snapshot_id
+        self.interrupt_data: dict[str, Any] = ({
+            "instances": deepcopy(interruptions), "resumable": bool(snapshot_id),
+            "guidance": ("Resume with workflow.resume_from_snapshot(result.snapshot_id, resume_input=...)."
+                         if snapshot_id else "Call workflow.enable_snapshots() before execution to resume interrupted workflows."),
+        } if self.status != "completed" else {})
+
+
+@dataclass(frozen=True)
+class WorkflowNodeError:
+    node_name: str
+    instance_id: int | None
+    error_type: str
+    message: str
+
+
+class WorkflowError(RuntimeError):
+    def __init__(self, errors: list[WorkflowNodeError], partial_results: dict[str, WorkflowResult]):
+        self.errors: tuple[WorkflowNodeError, ...] = tuple(errors)
+        self.partial_results: dict[str, WorkflowResult] = dict(partial_results)
+        super().__init__("; ".join(f"Node {e.node_name!r} instance {e.instance_id}: {e.error_type}: {e.message}"
+                                  for e in errors))
+
+
+class WorkflowStateProtocol(Protocol):
     name: str
     description: str
     nodes: list[WorkflowNode]
@@ -66,22 +103,14 @@ class _WorkflowValueState(Protocol):
     async_executor: Any
     _node_index: dict[str, WorkflowNode]
     _results: dict[str, WorkflowResult]
-    _visiting: set[str]
+    _interruptions: dict[str, dict[str, Any]]
     _node_dependencies: dict[str, set[str]]
     _node_dependents: dict[str, set[str]]
     _edges_by_source: dict[str, list[WorkflowEdge]]
     _next_edges_by_source: dict[str, list[WorkflowEdge]]
     _next_reachable_nodes: set[str]
 
-
-class _WorkflowCoreServices(Protocol):
     def _prepare_context(self, node: WorkflowNode, upstream: list[str]) -> str:
-        ...
-
-    def _apply_stage_wiring(self, node: WorkflowNode) -> None:
-        ...
-
-    def _run_node(self, node_name: str, upstream_contexts: dict[str, list[str]]) -> WorkflowResult:
         ...
 
     def _create_agent_instance(
@@ -95,8 +124,6 @@ class _WorkflowCoreServices(Protocol):
     def _instance_inputs_for_node(self, node: WorkflowNode) -> list[Optional[str]]:
         ...
 
-
-class _WorkflowAsyncSchedulingServices(Protocol):
     def _initial_async_state(
         self,
         initial_context: Optional[str],
@@ -105,7 +132,6 @@ class _WorkflowAsyncSchedulingServices(Protocol):
         set[str],
         set[str],
         set[str],
-        dict[str, list[WorkflowFuture]],
     ]:
         ...
 
@@ -124,29 +150,6 @@ class _WorkflowAsyncSchedulingServices(Protocol):
     ) -> str:
         ...
 
-    def _schedule_async_node(
-        self,
-        node_name: str,
-        upstream_contexts: dict[str, list[str]],
-        initial_context: Optional[str],
-        cli: Any,
-        step: int,
-    ) -> list[WorkflowFuture]:
-        ...
-
-    def _schedule_ready_async_nodes(
-        self,
-        ready_nodes: set[str],
-        upstream_contexts: dict[str, list[str]],
-        initial_context: Optional[str],
-        node_futures: dict[str, list[WorkflowFuture]],
-        cli: Any,
-        completed_count: int,
-    ) -> list[WorkflowFuture]:
-        ...
-
-
-class _WorkflowAsyncResultServices(Protocol):
     def _record_async_success(self, result: dict[str, Any]) -> None:
         ...
 
@@ -160,17 +163,6 @@ class _WorkflowAsyncResultServices(Protocol):
     ) -> None:
         ...
 
-    def _process_async_results(
-        self,
-        current_futures: list[WorkflowFuture],
-        upstream_contexts: dict[str, list[str]],
-        completed_nodes: set[str],
-        ready_nodes: set[str],
-        pending_nodes: set[str],
-        node_futures: dict[str, list[WorkflowFuture]],
-    ) -> None:
-        ...
-
     def _activate_unblocked_pending_nodes(
         self,
         pending_nodes: set[str],
@@ -180,11 +172,5 @@ class _WorkflowAsyncResultServices(Protocol):
         ...
 
 
-class WorkflowStateProtocol(
-    _WorkflowValueState,
-    _WorkflowCoreServices,
-    _WorkflowAsyncSchedulingServices,
-    _WorkflowAsyncResultServices,
-    Protocol,
-):
-    pass
+    def _validate_execution_graph(self) -> None:
+        ...

@@ -7,7 +7,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 FILES_WITHOUT_SYS_PATH_MUTATION = [
     REPO_ROOT / "src" / "IkaCore" / "agents.py",
-    REPO_ROOT / "src" / "IkaCore" / "agent_memory.py",
+    REPO_ROOT / "src" / "IkaMem" / "agent_memory.py",
     REPO_ROOT / "src" / "IkaModel" / "base.py",
     REPO_ROOT / "examples" / "example_fileagent.py",
     REPO_ROOT / "examples" / "example_hitl.py",

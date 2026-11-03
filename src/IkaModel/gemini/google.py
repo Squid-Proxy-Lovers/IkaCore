@@ -1,6 +1,9 @@
 import json
 from typing import Any, Dict, List, Optional
 
+from ..history_replay import is_user_entry, plan_history_replay
+from ..model_metadata import supports_gemini_disabled_thinking
+from ..reasoning_replay import replay_items
 from ..tool_schema import build_provider_tool_payload
 
 
@@ -24,18 +27,20 @@ def _append_gemini_context(contents: List[Dict[str, Any]], message_history: Dict
         contents.append({"role": "model", "parts": [_gemini_text_part(message_history["summary"]["message"])]})
 
 
-def _append_gemini_history(contents: List[Dict[str, Any]], message_history: Dict[str, Any]) -> None:
-    for msg_id in message_history["messages"]:
-        msg = message_history["messages"][msg_id]
+def _append_gemini_history(contents: List[Dict[str, Any]], entries: List[Dict[str, Any]]) -> None:
+    for msg in entries:
         msg_type = msg.get("type", "assistant")
         raw = msg.get("message", "")
-        if msg_type in {"assistant_with_tools", "tool"}:
+        if is_user_entry(msg):
+            contents.append({"role": "user", "parts": [_gemini_text_part(raw)]})
+        elif msg_type in {"assistant_with_tools", "tool"}:
             try:
                 contents.append(json.loads(raw))
             except (json.JSONDecodeError, TypeError):
                 contents.append({"role": "model", "parts": [_gemini_text_part(raw)]})
         else:
-            contents.append({"role": "model", "parts": [_gemini_text_part(raw)]})
+            parts = replay_items(msg, "gemini")
+            contents.append({"role": "model", "parts": parts if parts is not None else [_gemini_text_part(raw)]})
 
 
 def _gemini_parts_text(message: Dict[str, Any]) -> str:
@@ -51,7 +56,7 @@ def _is_duplicate_first_gemini_message(index: int, message: Any, first_input_tex
         return False
     if isinstance(message, dict) and "parts" in message and message.get("role") == "user":
         return _gemini_parts_text(message).strip() == first_input_text.strip()
-    text = message.get("content", str(message)) if isinstance(message, dict) else str(message)
+    text = (message["content"] if "content" in message else str(message)) if isinstance(message, dict) else str(message)
     return isinstance(text, str) and text.strip() == first_input_text.strip()
 
 
@@ -62,7 +67,7 @@ def _append_gemini_live_messages(contents: List[Dict[str, Any]], messages: List[
         if isinstance(message, dict) and "parts" in message and "role" in message:
             contents.append(message)
             continue
-        text = message.get("content", str(message)) if isinstance(message, dict) else str(message)
+        text = (message["content"] if "content" in message else str(message)) if isinstance(message, dict) else str(message)
         contents.append({"role": "user", "parts": [_gemini_text_part(text)]})
 
 
@@ -89,8 +94,14 @@ def gemini_fill_payload(
     contents: List[Dict[str, Any]] = []
 
     system_instruction = message_history["system"]["message"] or model.system_prompt
-    _append_gemini_context(contents, message_history)
-    _append_gemini_history(contents, message_history)
+    plan = plan_history_replay(message_history, messages)
+    if plan.first_input_first:
+        _append_gemini_context(contents, message_history)
+        _append_gemini_history(contents, plan.entries)
+    else:
+        _append_gemini_history(contents, plan.entries)
+        if plan.emit_first_input:
+            contents.append({"role": "user", "parts": [_gemini_text_part(message_history["first_input"]["message"])]})
 
     first_input_text = (message_history.get("first_input") or {}).get("message") or ""
     _append_gemini_live_messages(contents, messages, first_input_text)
@@ -100,11 +111,11 @@ def gemini_fill_payload(
         "generationConfig": {
             "temperature": model.temperature,
             "maxOutputTokens": model.max_tokens if model.max_tokens and model.max_tokens > 0 else 100,
-            "thinkingConfig": {
-                "thinkingBudget": 0,
-            },
         }
     }
+
+    if supports_gemini_disabled_thinking(model.model_id):
+        payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
 
     if system_instruction:
         payload["systemInstruction"] = {"parts": [_gemini_text_part(system_instruction)]}

@@ -146,7 +146,7 @@ class TestOpenRouterRequestBuilder:
             "messages": {}
         }
 
-        api_url, headers, payload = build_openrouter_request(model, messages, history)
+        api_url, headers, _payload = build_openrouter_request(model, messages, history)
 
         assert api_url == "https://openrouter.ai/api/v1/chat/completions"
         assert headers["Authorization"] == "Bearer sk-or-test-123"
@@ -203,7 +203,7 @@ class TestOpenRouterResponseParser:
             "usage": {"total_tokens": 50}
         }
 
-        content, reasoning, tools, tokens = parse_openrouter_response(
+        content, _reasoning, tools, _tokens = parse_openrouter_response(
             response_data, "meta-llama/llama-3.1-70b-instruct"
         )
 
@@ -230,7 +230,7 @@ class TestOpenRouterProviderRouting:
             "messages": {}
         }
 
-        api_url, headers, payload = build_provider_request(
+        _api_url, headers, payload = build_provider_request(
             "openrouter", model, messages, history
         )
 

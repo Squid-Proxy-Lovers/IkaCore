@@ -36,6 +36,7 @@ from .openrouter.chat_helpers_openrouter import (
     build_openrouter_request,
     parse_openrouter_response,
 )
+from .reasoning_replay import capture_response_replay
 
 BuildRequestFn = Callable[[Any, list[JsonDict], JsonDict], tuple[str, dict[str, str], JsonDict]]
 ParseResponseFn = Callable[[JsonDict, str], tuple[str, Optional[str], list[JsonDict], int]]
@@ -145,15 +146,46 @@ def build_provider_request(
     return builder(barebone_model, messages, message_history)
 
 
+def provider_response_interruption(provider: str, data: JsonDict) -> Optional[JsonDict]:
+    """Normalize explicit truncation signals without discarding partial text/usage."""
+    details: JsonDict = {}
+    if data.get("status") == "incomplete":
+        raw_details = data.get("incomplete_details")
+        details = raw_details if isinstance(raw_details, dict) else {}
+        reason = details.get("reason") or "incomplete"
+    elif provider == "anthropic":
+        reason = data.get("stop_reason")
+        if reason not in {"max_tokens", "model_context_window_exceeded"}:
+            return None
+    elif provider == "gemini":
+        candidates = data.get("candidates") or []
+        reason = candidates[0].get("finishReason") if candidates else None
+        if reason != "MAX_TOKENS":
+            return None
+    else:
+        choices = data.get("choices") or []
+        reason = choices[0].get("finish_reason") if choices else None
+        if reason != "length":
+            return None
+    interruption = {"type": "provider_response_truncated", "provider": provider, "reason": reason}
+    if details:
+        interruption["incomplete_details"] = details
+    return interruption
+
+
 def parse_provider_response(
     provider: str,
     data: JsonDict,
-    model_id: str
+    model_id: str,
+    message_history: Optional[JsonDict] = None,
 ) -> tuple[str, Optional[str], list[JsonDict], int]:
     parser = PROVIDER_RESPONSE_PARSERS.get(provider)
     if parser is None:
         return "", None, [], 0
-    return parser(data, model_id)
+    result = parser(data, model_id)
+    if message_history is not None:
+        capture_response_replay(provider, data, message_history)
+    return result
 
 
 def append_provider_tool_messages(

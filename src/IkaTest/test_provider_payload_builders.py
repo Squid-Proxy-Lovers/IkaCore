@@ -178,9 +178,9 @@ def test_anthropic_payload_replays_history_normalizes_assistant_tools_and_contro
 
     assert payload["system"] == "fallback system"
     assert payload["messages"][0] == {"role": "user", "content": "first"}
-    assert payload["messages"][2]["content"][0] == {"type": "text", "text": " "}
+    assert payload["messages"][2]["content"][0]["type"] == "tool_use"
     assert payload["messages"][3]["content"][0]["type"] == "tool_result"
-    assert payload["messages"][4]["content"] == [{"type": "text", "text": " "}]
+    assert len(payload["messages"]) == 4
     assert payload["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
 
 
