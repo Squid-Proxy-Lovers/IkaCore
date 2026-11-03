@@ -1,0 +1,15 @@
+for one- I didn't add the async parts.
+two- idk how I would satisfy what you have in the docstr of memory.py in ikacore:
+```
+the goal of this class is to define 
+what information is needed to be stored in memory
+instead or a hard coded system created by devs 
+we allow for users to define their own memory system
+```
+ngl, Idk how to dynamically define parameters like this. If you are referring to treating 
+it as data then the notion of memory items, with the metadata and data portions, should 
+be able to satisfy that. 
+three- for testing, we would need to get an api_key for mem0, when it comes to interacting 
+with this all, for now I am going to leave this memory.py in `/IkaMem` but whenever you want 
+to incorporate it into the rest of IkaCore you will have to just replace the file there and 
+resolve all of the pathing related to the memory items and classes.
