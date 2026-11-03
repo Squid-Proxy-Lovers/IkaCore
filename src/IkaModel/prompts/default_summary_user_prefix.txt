@@ -1,0 +1,3 @@
+Please summarize the following conversation history. Apply the structure and guidelines from your instructions. Output only the summary, with no preamble or meta-commentary.
+
+Conversation history:

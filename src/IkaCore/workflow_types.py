@@ -1,0 +1,176 @@
+"""Workflow data types and type-only service contracts."""
+
+# pyright: strict
+
+from __future__ import annotations
+
+import concurrent.futures
+from copy import deepcopy
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional, Protocol
+
+from IkaCore.agents import IkaBaseAgent
+
+WorkflowCompressionHook = Callable[[list[str], IkaBaseAgent], str]
+WorkflowFuture = concurrent.futures.Future[dict[str, Any]]
+
+
+@dataclass
+class WorkflowEdge:
+    """Execution edge between workflow nodes."""
+
+    source: str
+    target: str
+    edge_type: str = "next"
+    stage_index: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if self.edge_type not in {"next", "child"}:
+            raise ValueError("edge_type must be next or child")
+
+
+@dataclass
+class WorkflowNode:
+    """Workflow node containing an agent and optional execution fan-out."""
+
+    name: str
+    agent: IkaBaseAgent
+    stage_wiring: Optional[dict[int, dict[str, list[IkaBaseAgent]]]] = None
+    instances: int = 1
+    instance_inputs: Optional[list[str]] = None
+
+    def __post_init__(self) -> None:
+        if self.instances < 1:
+            raise ValueError("WorkflowNode.instances must be at least 1")
+        if self.instance_inputs is not None and len(self.instance_inputs) > self.instances:
+            raise ValueError("WorkflowNode.instance_inputs cannot exceed instances")
+
+
+@dataclass
+class WorkflowResult:
+    """Stored result for a completed workflow node."""
+
+    name: str
+    final: str
+    summary: str
+    output: dict[str, Any]
+    transcript: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    instance_outputs: dict[int, dict[str, Any]] = field(default_factory=lambda: dict[int, dict[str, Any]]())
+    instance_transcripts: dict[int, dict[str, Any]] = field(default_factory=lambda: dict[int, dict[str, Any]]())
+    child_summaries: dict[str, str] = field(default_factory=lambda: {})
+
+
+class WorkflowRunResult(dict[str, WorkflowResult]):
+    """Completed nodes plus workflow status and interruption/resume guidance."""
+
+    def __init__(self, results: dict[str, WorkflowResult], interruptions: dict[str, dict[str, Any]],
+                 snapshot_id: str | None = None, paused: bool = False):
+        super().__init__(results)
+        self.status: str = ("awaiting_user_input" if any(
+            result.get("status") == "awaiting_user_input" for result in interruptions.values()
+        ) else "paused" if interruptions or paused else "completed")
+        self.snapshot_id: str | None = snapshot_id
+        self.interrupt_data: dict[str, Any] = ({
+            "instances": deepcopy(interruptions), "resumable": bool(snapshot_id),
+            "guidance": ("Resume with workflow.resume_from_snapshot(result.snapshot_id, resume_input=...)."
+                         if snapshot_id else "Call workflow.enable_snapshots() before execution to resume interrupted workflows."),
+        } if self.status != "completed" else {})
+
+
+@dataclass(frozen=True)
+class WorkflowNodeError:
+    node_name: str
+    instance_id: int | None
+    error_type: str
+    message: str
+
+
+class WorkflowError(RuntimeError):
+    def __init__(self, errors: list[WorkflowNodeError], partial_results: dict[str, WorkflowResult]):
+        self.errors: tuple[WorkflowNodeError, ...] = tuple(errors)
+        self.partial_results: dict[str, WorkflowResult] = dict(partial_results)
+        super().__init__("; ".join(f"Node {e.node_name!r} instance {e.instance_id}: {e.error_type}: {e.message}"
+                                  for e in errors))
+
+
+class WorkflowStateProtocol(Protocol):
+    name: str
+    description: str
+    nodes: list[WorkflowNode]
+    edges: list[WorkflowEdge]
+    compress_hook: WorkflowCompressionHook
+    start_node: str
+    async_executor: Any
+    _node_index: dict[str, WorkflowNode]
+    _results: dict[str, WorkflowResult]
+    _interruptions: dict[str, dict[str, Any]]
+    _node_dependencies: dict[str, set[str]]
+    _node_dependents: dict[str, set[str]]
+    _edges_by_source: dict[str, list[WorkflowEdge]]
+    _next_edges_by_source: dict[str, list[WorkflowEdge]]
+    _next_reachable_nodes: set[str]
+
+    def _prepare_context(self, node: WorkflowNode, upstream: list[str]) -> str:
+        ...
+
+    def _create_agent_instance(
+        self,
+        agent: IkaBaseAgent,
+        instance_id: int,
+        instance_input: Optional[str] = None,
+    ) -> IkaBaseAgent:
+        ...
+
+    def _instance_inputs_for_node(self, node: WorkflowNode) -> list[Optional[str]]:
+        ...
+
+    def _initial_async_state(
+        self,
+        initial_context: Optional[str],
+    ) -> tuple[
+        dict[str, list[str]],
+        set[str],
+        set[str],
+        set[str],
+    ]:
+        ...
+
+    def _start_async_cli(self, cli: Any) -> None:
+        ...
+
+    def _finish_async_cli(self, cli: Any) -> None:
+        ...
+
+    def _async_context_for_node(
+        self,
+        node: WorkflowNode,
+        node_name: str,
+        upstream_contexts: dict[str, list[str]],
+        initial_context: Optional[str],
+    ) -> str:
+        ...
+
+    def _record_async_success(self, result: dict[str, Any]) -> None:
+        ...
+
+    def _activate_async_dependents(
+        self,
+        result: dict[str, Any],
+        upstream_contexts: dict[str, list[str]],
+        completed_nodes: set[str],
+        ready_nodes: set[str],
+        pending_nodes: set[str],
+    ) -> None:
+        ...
+
+    def _activate_unblocked_pending_nodes(
+        self,
+        pending_nodes: set[str],
+        completed_nodes: set[str],
+        ready_nodes: set[str],
+    ) -> None:
+        ...
+
+
+    def _validate_execution_graph(self) -> None:
+        ...

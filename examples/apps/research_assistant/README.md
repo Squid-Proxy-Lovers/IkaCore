@@ -1,0 +1,16 @@
+# Staged synthetic research
+
+Searches two synthetic web documents, fetches evidence, extends a one-step discovery stage, then validates its own staged final answer with a typed `AgentResult` citation check. `ExecutionPolicy.bounded(..., fail_closed=True)` rejects exhausted checks; bounded correction uses the transcript without repeating research tools.
+
+From the repository root, after following [wheel setup](../README.md):
+
+```bash
+python -m examples.apps.research_assistant.main --offline
+python -m examples.apps.research_assistant.main --live --use-local-login --model gpt-5.6-sol
+```
+
+Both tools execute and the final recommendation cites [A] and [B] and recommends a pilot. Offline mode also asserts an extension summary request occurred. Live extension count is not exposed by AgentRunState and is reported as null.
+
+Offline mode runs real agent/tool/workflow/snapshot code against scripted provider-native HTTP response envelopes. It blocks accidental HTTP transport access and needs no credentials. Live mode opts in to the local Codex CLI login (or CODEX_BEARER); prompts and files are synthetic. Request scopes allow one attempt and expire after 90 seconds; per-request agent timeouts are at most 45 seconds. Each subprocess session owns its own scope. The apps print only check results, never model answers or credentials.
+
+See [live outcomes](../../../docs/v2/validation/archive/apps-live-results.md) and [usage guide](../../../docs/USAGE.md).

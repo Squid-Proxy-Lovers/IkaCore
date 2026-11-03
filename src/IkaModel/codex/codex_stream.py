@@ -1,0 +1,262 @@
+"""Codex Server-Sent Events parsing and terminal-state validation."""
+
+# pyright: strict
+
+from __future__ import annotations
+
+import json
+import logging
+from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass, field
+from typing import Optional, cast
+
+import httpx
+
+from IkaCore.agent_runtime_payloads import JsonDict, json_dict, string_value
+
+from ..request_control import check_request_controls
+
+LOG = logging.getLogger(__name__)
+
+_RETRYABLE_STREAM_ERROR_IDENTIFIERS = frozenset({
+    "engine_error",
+    "internal_error",
+    "model_overloaded",
+    "overloaded_error",
+    "rate_limit_error",
+    "rate_limit_exceeded",
+    "server_error",
+    "server_is_overloaded",
+})
+
+
+class CodexRetryableStreamError(RuntimeError):
+    """A transient stream failure that the request loop may retry."""
+
+
+def _empty_json_dict() -> JsonDict:
+    return {}
+
+
+def _empty_json_list() -> list[tuple[Optional[int], JsonDict]]:
+    return []
+
+
+def _empty_string_list() -> list[str]:
+    return []
+
+
+@dataclass
+class _StreamState:
+    envelope: JsonDict = field(default_factory=_empty_json_dict)
+    collected_items: list[tuple[Optional[int], JsonDict]] = field(
+        default_factory=_empty_json_list
+    )
+    output_text_chunks: list[str] = field(
+        default_factory=_empty_string_list
+    )
+    completed: bool = False
+
+
+def _normalized_stream_error_identifier(value: object) -> str:
+    return string_value(value).strip().casefold()
+
+
+def classify_stream_error(err_obj: object) -> bool:
+    """Return whether an error has an exact transient type or code."""
+    if not isinstance(err_obj, dict):
+        return False
+    error_data = cast(JsonDict, err_obj)
+    return any(
+        _normalized_stream_error_identifier(error_data.get(field_name))
+        in _RETRYABLE_STREAM_ERROR_IDENTIFIERS
+        for field_name in ("type", "code")
+    )
+
+
+class _SSEDecoder:
+    def __init__(self) -> None:
+        self.event: Optional[str] = None
+        self.data: list[str] = []
+
+    def feed(self, line: str) -> Optional[tuple[Optional[str], object]]:
+        check_request_controls()
+        if not line:
+            event, data = self.event, "\n".join(self.data)
+            self.event, self.data = None, []
+            if data and data != "[DONE]":
+                try:
+                    return event, json.loads(data)
+                except json.JSONDecodeError:
+                    LOG.debug("Skipping unparseable SSE data event")
+            return None
+        field, _, value = line.partition(":")
+        if value.startswith(" "):
+            value = value[1:]
+        if field == "event":
+            self.event = value
+        elif field == "data":
+            self.data.append(value)
+        return None
+
+
+def iter_sse(response: httpx.Response) -> Iterator[tuple[Optional[str], object]]:
+    decoder = _SSEDecoder()
+    for line in response.iter_lines():
+        event = decoder.feed(line)
+        if event is not None:
+            yield event
+
+
+async def _async_iter_sse(response: httpx.Response) -> AsyncIterator[tuple[Optional[str], object]]:
+    decoder = _SSEDecoder()
+    async for line in response.aiter_lines():
+        event = decoder.feed(line)
+        if event is not None:
+            yield event
+
+
+def _stream_failure_object(obj_data: JsonDict) -> object:
+    """Return the most specific error object from an SSE failure envelope."""
+    top_level = obj_data.get("error")
+    if top_level:
+        return top_level
+    nested = json_dict(obj_data.get("response")).get("error")
+    if nested:
+        return nested
+    return obj_data
+
+
+def _raise_stream_failure(event_type: str, obj_data: JsonDict) -> None:
+    """Raise a typed stream failure without classifying message prose."""
+    error = _stream_failure_object(obj_data)
+    if classify_stream_error(error):
+        raise CodexRetryableStreamError(
+            f"codex stream transient failure ({event_type}): {error}"
+        )
+    raise RuntimeError(f"codex response failed ({event_type}): {error}")
+
+
+def _event_type(event_name: Optional[str], obj_data: JsonDict) -> str:
+    return (
+        string_value(obj_data.get("type")).strip()
+        or string_value(event_name).strip()
+    )
+
+
+def _incomplete_details(obj_data: JsonDict) -> object:
+    return (
+        json_dict(obj_data.get("response")).get("incomplete_details")
+        or obj_data.get("incomplete_details")
+        or _stream_failure_object(obj_data)
+    )
+
+
+def _completed_response(obj_data: JsonDict) -> JsonDict:
+    response = json_dict(obj_data.get("response"))
+    if not response:
+        return {}
+    status = string_value(response.get("status")).strip().casefold()
+    if status in {"failed", "error", "cancelled"}:
+        _raise_stream_failure("response.completed", obj_data)
+    if status == "incomplete":
+        details = response.get("incomplete_details") or response.get("error")
+        raise RuntimeError(
+            f"codex response completed with incomplete status: {details}"
+        )
+    if status and status != "completed":
+        raise CodexRetryableStreamError(
+            "codex response.completed carried non-terminal "
+            f"status {status!r}"
+        )
+    return response
+
+
+def _apply_stream_event(
+    state: _StreamState,
+    event_name: Optional[str],
+    obj_data: JsonDict,
+) -> None:
+    event_type = _event_type(event_name, obj_data)
+    if event_type in {"error", "response.error", "response.failed"}:
+        _raise_stream_failure(event_type, obj_data)
+    if event_type == "response.incomplete":
+        raise RuntimeError(
+            f"codex response incomplete: {_incomplete_details(obj_data)}"
+        )
+    if event_type in {"response.created", "response.in_progress"}:
+        response = json_dict(obj_data.get("response"))
+        if response:
+            state.envelope = response
+    elif event_type == "response.completed":
+        response = _completed_response(obj_data)
+        if response:
+            state.envelope = response
+            state.completed = True
+    elif event_type == "response.output_item.done":
+        item = json_dict(obj_data.get("item"))
+        if item:
+            index = obj_data.get("output_index")
+            state.collected_items.append((index if type(index) is int else None, item))
+    elif event_type == "response.output_text.delta":
+        delta = obj_data.get("delta")
+        if isinstance(delta, str):
+            state.output_text_chunks.append(delta)
+
+
+
+def _merge_completed_items(state: _StreamState) -> list[JsonDict]:
+    # A completed envelope may contain items for which no done event was emitted.
+    # Keep those, and prefer completed done-event data at its original output index.
+    raw = state.envelope.get("output")
+    output = cast(list[JsonDict], raw) if isinstance(raw, list) else []
+    items = dict(enumerate(output))
+    for index, item in state.collected_items:
+        if index is None:
+            index = next((i for i, existing in items.items()
+                          if item.get("id") and existing.get("id") == item["id"]), len(items))
+        items[index] = item
+    return [items[index] for index in sorted(items)]
+
+
+def _finalize_stream(state: _StreamState) -> JsonDict:
+    if not state.completed:
+        envelope_detail = (
+            " after a response envelope" if state.envelope else ""
+        )
+        raise CodexRetryableStreamError(
+            "codex HTTP-200 stream ended before response.completed"
+            f"{envelope_detail}"
+        )
+    if state.collected_items:
+        state.envelope["output"] = _merge_completed_items(state)
+    elif state.output_text_chunks and not state.envelope.get("output"):
+        state.envelope["output"] = [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": "".join(state.output_text_chunks),
+            }],
+        }]
+    return state.envelope
+
+
+def collect_stream(response: httpx.Response) -> JsonDict:
+    """Collect one complete Codex SSE response or raise a terminal error."""
+    state = _StreamState()
+    for event_name, obj in iter_sse(response):
+        obj_data = json_dict(obj)
+        if obj_data:
+            _apply_stream_event(state, event_name, obj_data)
+    return _finalize_stream(state)
+
+
+async def async_collect_stream(response: httpx.Response) -> JsonDict:
+    """Collect incrementally on the caller's event loop using the same SSE state machine."""
+    state = _StreamState()
+    async for event_name, obj in _async_iter_sse(response):
+        obj_data = json_dict(obj)
+        if obj_data:
+            _apply_stream_event(state, event_name, obj_data)
+    return _finalize_stream(state)

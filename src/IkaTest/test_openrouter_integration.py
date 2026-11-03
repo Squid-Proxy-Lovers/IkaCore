@@ -1,0 +1,238 @@
+"""Tests for OpenRouter API integration."""
+
+from IkaModel.base import AgentTool, BareBoneModel, ToolArgs
+from IkaModel.chat_helpers_common import build_provider_request
+from IkaModel.openrouter.chat_helpers_openrouter import build_openrouter_request, parse_openrouter_response
+from IkaModel.openrouter.openrouter import openrouter_fill_payload
+from IkaModel.request_interface import get_provider
+
+
+class TestOpenRouterProviderDetection:
+    """Test OpenRouter model identification."""
+
+    def test_detects_llama_model(self):
+        assert get_provider("meta-llama/llama-3.1-70b-instruct") == "openrouter"
+
+    def test_detects_qwen_model(self):
+        assert get_provider("qwen/qwen-2.5-72b-instruct") == "openrouter"
+
+    def test_does_not_detect_direct_openai(self):
+        assert get_provider("gpt-4o") == "openai_responses"
+
+    def test_claude_detected_as_anthropic(self):
+        # Slash-delimited model ids are treated as OpenRouter routes.
+        assert get_provider("anthropic/claude-3.5-sonnet") == "openrouter"
+
+
+class TestOpenRouterPayloadBuilder:
+    """Test payload construction."""
+
+    def test_basic_payload_structure(self):
+        model = BareBoneModel(
+            model_id="meta-llama/llama-3.1-70b-instruct",
+            api_key="test-key",
+            api_url="https://openrouter.ai/api/v1/chat/completions",
+            suppress_init_output=True
+        )
+        messages = [{"role": "user", "content": "Hello"}]
+        payload = openrouter_fill_payload(model, messages, None)
+
+        assert payload["model"] == "meta-llama/llama-3.1-70b-instruct"
+        assert "messages" in payload
+        assert payload["messages"][0]["content"] == "Hello"
+
+    def test_payload_with_tools(self):
+        agent_end = AgentTool(
+            "agent_end", "agent_end", "End with answer",
+            ToolArgs(type="input", description="Final answer"),
+            required=True
+        )
+        model = BareBoneModel(
+            model_id="meta-llama/llama-3.1-70b-instruct",
+            api_key="test-key",
+            api_url="https://openrouter.ai/api/v1/chat/completions",
+            suppress_init_output=True
+        )
+        model.agent_tools = [agent_end]
+        payload = openrouter_fill_payload(model, [{"role": "user", "content": "Test"}], None)
+
+        assert "tools" in payload
+        assert len(payload["tools"]) == 1
+        assert payload["tools"][0]["function"]["name"] == "agent_end"
+
+    def test_optional_openrouter_extensions_are_preserved(self):
+        model = BareBoneModel(
+            model_id="meta-llama/llama-3.1-70b-instruct",
+            api_key="test-key",
+            api_url="https://openrouter.ai/api/v1/chat/completions",
+            suppress_init_output=True,
+        )
+
+        payload = openrouter_fill_payload(
+            model,
+            [{"role": "user", "content": "Hello"}],
+            plugins=[{"id": "web"}],
+            response_format={"type": "json_object"},
+        )
+
+        assert payload["plugins"] == [{"id": "web"}]
+        assert payload["response_format"] == {"type": "json_object"}
+
+    def test_non_openai_routes_downgrade_forced_tool_choice_to_auto(self):
+        agent_end = AgentTool(
+            "agent_end", "agent_end", "End with answer",
+            ToolArgs(type="input", description="Final answer"),
+            required=True,
+        )
+        model = BareBoneModel(
+            model_id="meta-llama/llama-3.1-70b-instruct",
+            api_key="test-key",
+            api_url="https://openrouter.ai/api/v1/chat/completions",
+            suppress_init_output=True,
+        )
+        model.agent_tools = [agent_end]
+
+        payload = openrouter_fill_payload(model, [{"role": "user", "content": "Test"}], None)
+
+        assert payload["tool_choice"] == "auto"
+
+    def test_reasoning_routes_exclude_reasoning_when_tools_are_present(self):
+        tool = AgentTool(
+            "search", "search", "Search",
+            ToolArgs(type="object", description="query", properties={"query": {"type": "string"}}),
+        )
+        model = BareBoneModel(
+            model_id="qwen/qwen3.6-plus",
+            api_key="test-key",
+            api_url="https://openrouter.ai/api/v1/chat/completions",
+            suppress_init_output=True,
+        )
+        model.agent_tools = [tool]
+
+        payload = openrouter_fill_payload(model, [{"role": "user", "content": "Test"}], None)
+
+        assert payload["reasoning"] == {"exclude": True}
+
+    def test_token_key_is_normalized_to_openrouter_model_limit(self):
+        model = BareBoneModel(
+            model_id="openai/o4-mini",
+            api_key="test-key",
+            api_url="https://openrouter.ai/api/v1/chat/completions",
+            max_tokens=50000,
+            suppress_init_output=True,
+        )
+
+        payload = openrouter_fill_payload(model, [{"role": "user", "content": "Hello"}], None)
+
+        assert payload["max_completion_tokens"] == 50000
+        assert "max_tokens" not in payload
+
+
+class TestOpenRouterRequestBuilder:
+    """Test request construction."""
+
+    def test_basic_request_headers(self):
+        model = BareBoneModel(
+            model_id="meta-llama/llama-3.1-70b-instruct",
+            api_key="sk-or-test-123",
+            api_url="https://openrouter.ai/api/v1/chat/completions",
+            suppress_init_output=True
+        )
+        messages = [{"role": "user", "content": "Test"}]
+        history = {
+            "system": {"message": ""},
+            "first_input": {"message": ""},
+            "summary": {"message": ""},
+            "messages": {}
+        }
+
+        api_url, headers, _payload = build_openrouter_request(model, messages, history)
+
+        assert api_url == "https://openrouter.ai/api/v1/chat/completions"
+        assert headers["Authorization"] == "Bearer sk-or-test-123"
+        assert headers["Content-Type"] == "application/json"
+
+
+class TestOpenRouterResponseParser:
+    """Test response parsing."""
+
+    def test_parse_basic_response(self):
+        response_data = {
+            "id": "gen-abc123",
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "Hello! How can I help?"
+                }
+            }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15
+            }
+        }
+
+        content, reasoning, tools, tokens = parse_openrouter_response(
+            response_data, "meta-llama/llama-3.1-70b-instruct"
+        )
+
+        assert content == "Hello! How can I help?"
+        assert reasoning is None
+        assert tools == []
+        assert tokens == 15
+
+    def test_parse_response_with_tool_calls(self):
+        response_data = {
+            "id": "gen-abc123",
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_xyz",
+                        "type": "function",
+                        "function": {
+                            "name": "agent_end",
+                            "arguments": '{"input": "Final answer"}'
+                        }
+                    }]
+                }
+            }],
+            "usage": {"total_tokens": 50}
+        }
+
+        content, _reasoning, tools, _tokens = parse_openrouter_response(
+            response_data, "meta-llama/llama-3.1-70b-instruct"
+        )
+
+        assert content == ""
+        assert len(tools) == 1
+        assert tools[0]["function"]["name"] == "agent_end"
+
+
+class TestOpenRouterProviderRouting:
+    """Test provider routing integration."""
+
+    def test_build_provider_request_routes_correctly(self):
+        model = BareBoneModel(
+            model_id="meta-llama/llama-3.1-70b-instruct",
+            api_key="test-key",
+            api_url="https://openrouter.ai/api/v1/chat/completions",
+            suppress_init_output=True
+        )
+        messages = [{"role": "user", "content": "Test"}]
+        history = {
+            "system": {"message": ""},
+            "first_input": {"message": ""},
+            "summary": {"message": ""},
+            "messages": {}
+        }
+
+        _api_url, headers, payload = build_provider_request(
+            "openrouter", model, messages, history
+        )
+
+        assert "Authorization" in headers
+        assert "model" in payload
